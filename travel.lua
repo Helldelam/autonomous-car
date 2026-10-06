@@ -175,10 +175,10 @@ local function release_charger_slot(car_data)
 	end
 end
 
--- Runs first for every car, every tick. Below config.critical_fuel_ratio the
--- car drops its trip and its queued tasks and heads for a charger; if none is
--- reachable it stays put and looks again every config.short_delay. Returns
--- true when it took over the car for this tick.
+-- Runs for every car, every tick, right after travel.handle_empty. Below
+-- config.critical_fuel_ratio the car drops its trip and its queued tasks and
+-- heads for a charger; if none is reachable it stays put and looks again every
+-- config.short_delay. Returns true when it took over the car for this tick.
 function travel.handle_critical_fuel(car, tick)
 	local car_data = storage.car_data[car.unit_number]
 	if car_data.charging.active or heading_to_charger(car_data) then
@@ -234,13 +234,10 @@ end
 --                  needs a maneuver (see movement.start_maneuver)
 -- The progress window is suspended during a maneuver, where the car moves little
 -- on purpose, and within arrival distance, where it is about to stop; it starts
--- again afterwards.
+-- again afterwards. The car must be on a leg (see update_car in control.lua).
 function travel.stuck_reason(car, tick)
 	local car_data = storage.car_data[car.unit_number]
 	local moving = car_data.moving
-	if not moving.departure_tick then
-		return nil -- the leg was cancelled earlier in this tick
-	end
 
 	local max_duration = moving.departure_distance / config.stuck_min_speed + config.long_delay
 	if tick - moving.departure_tick > max_duration then
@@ -336,9 +333,11 @@ end
 -- Runs before everything else for every car, every tick. A car with a completely
 -- empty battery cannot move: it drops its trip and its queued tasks, alerts the
 -- player, and does nothing but check whether its battery is back above
--- config.critical_fuel_ratio (usually because the player picked the car up and
--- put it down again, which resets it). The car then resumes its batch through
--- the waiting loop. Returns true when it took over the car for this tick.
+-- config.critical_fuel_ratio, in which case it resumes its batch through the
+-- waiting loop. Nothing in the mod refills an empty car: the player's way out
+-- is to pick the car up and place it again, which makes a new car (see on_built
+-- in control.lua) instead of waking this one. Returns true when it took over
+-- the car for this tick.
 function travel.handle_empty(car, tick)
 	local car_data = storage.car_data[car.unit_number]
 	local empty = car_data.empty

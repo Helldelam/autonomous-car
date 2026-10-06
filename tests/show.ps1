@@ -5,8 +5,9 @@ Reads a trace produced by tests/run.ps1.
 .DESCRIPTION
 Temporary development aid, to be removed with the tests/ folder.
 
-Without -Car: the events of the scenario, the summary lines and the list of
-cars. With -Car: one line each time the state of that car changes.
+Without -Car: the events of the scenario, the summary lines (and the GATE-TEST
+lines of gate-manual) and the list of cars. With -Car: one line each time the
+state of that car changes.
 
 .EXAMPLE
 tests\show.ps1 construction
@@ -30,7 +31,7 @@ $lines = Get-Content $Trace
 $carLine = '^(\d+) (\d+) (\S+) (\S+) \S+ (\S+) (\S+) ([01]+) a\d+ d\d+ f\S+ t(\d+) g(-?\d+) i(-?\d+) k(\S+) dst(\S+) \[(.*)\]$'
 
 if ($Car -lt 0) {
-	$lines | Where-Object { $_ -match "^(SETUP|EVENT|SELECT|SUMMARY) " }
+	$lines | Where-Object { $_ -match "^(SETUP|EVENT|SELECT|SUMMARY|GATE-TEST) " }
 	$cars = @{}
 	foreach ($line in $lines) {
 		if ($line -match $carLine) {

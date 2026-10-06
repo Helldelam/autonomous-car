@@ -60,7 +60,8 @@ local function new_car_data(tick)
 		empty = {active = false}, -- battery completely empty, see travel.handle_empty
 		waiting = {active = true, since = tick - config.idle_delay}, -- already elapsed: a new car looks for work at once
 
-		-- Driving flags, owned by movement.lua.
+		-- Driving flags, set by movement.lua. travel.lua only cancels a maneuver
+		-- (new leg, stuck, empty battery) and resets its counters when a leg begins.
 		-- Maneuver mode, a sub-mode of moving. `reason`: rear_turn, blocked or no_progress.
 		-- `arcs` counts the arcs of the current maneuver, `attempts` the failed maneuvers in a row,
 		-- and `ended_tick` is when the last one ended (or the leg began).
@@ -294,7 +295,7 @@ local function on_next_task(event)
 	local car_data = storage.car_data[car.unit_number]
 	local moving = car_data.moving
 
-	car_data.stuck_retry_count = 0 -- the leg was completed
+	car_data.stuck_retry_count = 0 -- the step was completed: nothing to retry
 	if _utils.deque.length(car_data.tasks) == 0 then
 		-- Arrived with nothing queued (a step back): the leg is over.
 		moving.active = false

@@ -11,10 +11,10 @@ Factorio gets its own configuration and write folder there, so nothing is
 written to the real Factorio folder and the game may stay open.
 
 For each scenario it reports the exit code, any script error, the events of
-the scenario and the last summary line, then the module functions that no
-scenario of the run called. The full traces stay in the output folder: see
-tests/show.ps1. The script exits with the number of scenarios that ended in a
-script error.
+the scenario and the last summary line (for gate-manual, the last position of
+each subject), then the module functions that no scenario of the run called.
+The full traces stay in the output folder: see tests/show.ps1. The script
+exits with the number of scenarios that ended in a script error.
 
 .EXAMPLE
 tests\run.ps1
@@ -120,6 +120,9 @@ function Write-Report([string]$name, $result) {
 	}
 
 	$lines | Where-Object { $_ -match "^(SETUP|EVENT|SELECT) " } | ForEach-Object { Write-Host "  $_" }
+	# gate-manual has no tracked car: its result is the last position of each subject.
+	$lines | Where-Object { $_ -match "^GATE-TEST " } | Group-Object { ($_ -split " ")[2] } |
+		ForEach-Object { Write-Host "  $($_.Group[-1])" }
 	$summary = $lines | Where-Object { $_ -match "^SUMMARY " } | Select-Object -Last 1
 	if ($summary) { Write-Host "  $summary" }
 }

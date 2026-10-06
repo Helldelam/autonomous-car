@@ -59,7 +59,8 @@ end
 --   rear_turn    the target is behind a slow car
 --   blocked      the car stopped dead short of its destination
 --   no_progress  the car barely moved over config.medium_delay (see travel.stuck_reason)
--- The attempts count is left alone: it is only reset by a maneuver that succeeds.
+-- The attempts count is left alone: it is reset by a maneuver that succeeds and
+-- at the start of each leg (see travel.begin_leg).
 function movement.start_maneuver(car, tick, reason)
 	local car_data = storage.car_data[car.unit_number]
 	local maneuver = car_data.maneuver
@@ -78,14 +79,14 @@ function movement.start_maneuver(car, tick, reason)
 	car_data.emergency_brake.since = tick
 end
 
--- Picks the driving mode of a moving car for this tick. Must run before
--- movement.drive, which reads the flags set here:
+-- Picks the driving mode of a moving car for this tick, and sets its flags:
 --   high_speed       cruising in an open area
 --   emergency_brake  full stop, at the destination or before an obstacle
 --   precision_mode   slow driving with a finer look-ahead
--- It may start a maneuver, which then replaces drive (see update_car in
--- control.lua). It then sets car.friction_modifier, the lever that controls
--- cruising speed.
+-- Must run before movement.drive, which reads emergency_brake and
+-- precision_mode in the same tick. It may start a maneuver, which then
+-- replaces drive (see update_car in control.lua). It ends by setting
+-- car.friction_modifier, the lever that controls cruising speed, from the mode.
 function movement.update_mode(car, tick)
 	local car_data = storage.car_data[car.unit_number]
 	if car_data.maneuver.active then
@@ -339,7 +340,7 @@ local function maneuver_done(car, car_data)
 	return util.distance(car.position, maneuver.origin) >= config.maneuver_min_travel
 end
 
--- Drives a car that is in a maneuver. Every config.maneuver_arc_ticks it checks
+-- Drives a car that is in a maneuver. Every config.maneuver_arc_duration it checks
 -- whether the maneuver is done, then picks the roomiest of the six headings and
 -- steers along it, forwards or backwards, at the slow speed that
 -- update_mode's friction gives. The steering is only ever set through
@@ -353,7 +354,7 @@ function movement.maneuver(car, tick)
 	local car_data = storage.car_data[car.unit_number]
 	local maneuver = car_data.maneuver
 
-	if maneuver.arc_since and tick - maneuver.arc_since < config.maneuver_arc_ticks then
+	if maneuver.arc_since and tick - maneuver.arc_since < config.maneuver_arc_duration then
 		return false -- the arc goes on
 	end
 

@@ -9,7 +9,7 @@
 --
 -- Output, in script-output/:
 --   trace.txt     one line per car every 10 ticks, plus SETUP, EVENT, SELECT
---                 and SUMMARY lines
+--                 and SUMMARY lines, and the GATE-TEST lines of gate-manual
 --   coverage.txt  how many times each module function was called
 --
 -- Car line:
@@ -473,8 +473,9 @@ scenarios["empty-battery"] = {
 }
 
 -- A wall with a gate on the straight way between a supply chest and a ghost: the
--- car can only build the ghost if it gets through the gate, which opens for
--- vehicles of its force.
+-- car can only build the ghost if it gets through the gate. When this scenario
+-- was written it did not: the gate stays shut for the car (see gate-manual),
+-- which follows the wall without ever heading for the gate.
 scenarios["gate"] = {
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)

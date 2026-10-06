@@ -9,7 +9,7 @@ local config = {}
 -- Each tick a moving car scores three headings - straight, slightly right and
 -- slightly left - from sample points ahead of it, and steers to the cheapest.
 
-config.lookahead_angle = 1 / 12 -- angle between the straight heading and each side heading
+config.lookahead_angle = 1 / 12 -- angle between the straight heading and each side heading; a maneuver uses it for its side headings too
 config.lookahead_side_offset = 0.5 -- the straight heading is sampled along two lines, this far on each side of the car
 config.lookahead_start = 1.5 -- distance of the first sample point
 config.lookahead_length = 4 -- distance covered by the sample points beyond the first one
@@ -19,7 +19,7 @@ config.density_lookahead_steps = 5 -- density is measured in discs 0 to N ahead 
 config.arrival_distance = 6 -- a car this close to its destination has arrived and can act on it
 config.rear_turn_min_angle = 0.33 -- a target further than this off the heading is behind the car, which starts a maneuver to turn around
 config.rear_turn_max_speed = 0.2 -- that maneuver only starts below this speed
-config.emergency_brake_lookahead = 3 -- an obstacle this far straight ahead triggers emergency braking
+config.emergency_brake_lookahead = 3 -- an obstacle this far straight ahead triggers emergency braking, and keeps a maneuver from ending
 
 -- ============================================================
 -- Maneuver mode (see movement.lua)
@@ -31,10 +31,10 @@ config.emergency_brake_lookahead = 3 -- an obstacle this far straight ahead trig
 
 config.maneuver_duration = 300 -- (5s) longest a single maneuver may last; past it the maneuver counts as failed
 config.max_maneuver_attempts = 3 -- failed maneuvers in a row before the car is declared stuck
-config.maneuver_arc_ticks = 6 -- the car keeps one heading this long before the room around it is measured again
+config.maneuver_arc_duration = 6 -- the car keeps one heading this long before the room around it is measured again
 config.maneuver_probe_start = 1.5 -- distance of the first probe point: far enough that the car does not detect itself
 config.maneuver_probe_length = 4 -- distance covered by the probe points beyond the first one
-config.maneuver_exit_density = 0.08 -- the maneuver ends below this obstacle density (and below dense_area_threshold, for hysteresis)
+config.maneuver_exit_density = 0.08 -- a maneuver cannot end while the obstacle density around the car is above this
 config.maneuver_exit_angle = 0.2 -- a maneuver started because the target was behind the car ends once it is this close to the heading
 config.maneuver_min_travel = 2 -- a maneuver started by an obstacle or a lack of progress ends only once the car has moved this far
 
@@ -102,7 +102,8 @@ config.fuel_per_tile = 1500 -- rough cost of driving one tile, only used to deci
 	-- This is not the game's consumption model: calibrate it in game.
 config.fuel_safety_margin = 1.4 -- multiplier on that estimate, to cover detours and estimation error
 config.max_charge_detours = 5 -- consecutive charging detours before the destination is reported unreachable
-config.critical_fuel_ratio = 0.1 -- below this fraction of a full tank a car drops everything to recharge; also the charge of a new car
+config.critical_fuel_ratio = 0.1 -- below this fraction of a full tank a car drops everything to recharge.
+	-- Also the charge of a new car, and the level an empty car must be back to before it resumes (see travel.handle_empty).
 config.pre_park_fuel_ratio = 0.9 -- an idle car below this fraction tops up before it parks
 config.max_charger_users = 4 -- cars that can use the same charger at once
 
@@ -111,7 +112,7 @@ config.max_charger_users = 4 -- cars that can use the same charger at once
 -- ============================================================
 
 config.stuck_min_speed = 0.1 -- lowest average speed expected over a leg; bounds how long the leg may last
-config.stuck_min_progress = 1 -- least distance a car must cover over one medium_delay
+config.stuck_min_progress = 1 -- least distance a car must cover over one medium_delay; below it the car starts a maneuver
 config.max_stuck_retries = 3 -- times a car retries a stuck leg before it gives up its task (a leg to a charger is retried without limit)
 
 -- ============================================================
