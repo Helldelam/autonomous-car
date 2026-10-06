@@ -10,6 +10,7 @@ Mod Factorio 2.0 (Lua 5.2) « Autonomous Car » : une voiture autonome qui const
 - Changements petits et chirurgicaux. Réutiliser les helpers et l'API Factorio existants ; pas de second système d'état.
 - Le code fonctionne globalement en jeu : une incohérence vue à la lecture n'est pas un bug tant qu'elle n'est pas confirmée en jeu, par un scénario de test ou par le propriétaire.
 - Ne lancer les tests que sur demande du propriétaire.
+- Git : `main` ne contient que des versions validées par le propriétaire. Tout travail se fait sur une branche à part (la créer avant la première modification si on est sur `main`). Ne jamais pousser ni fusionner dans `main` sans demande explicite du propriétaire ; proposer de committer, pousser ou fusionner quand cela semble utile (fin d'un changement cohérent, version prête à valider), puis attendre sa réponse.
 - Tenir à jour la liste « Problèmes connus » en bas de ce fichier : ajouter tout problème découvert, retirer ceux qui sont corrigés.
 - Code, commentaires et messages en jeu en anglais ; ce fichier en français.
 
