@@ -5,12 +5,12 @@
 local supply_chest = table.deepcopy(data.raw["container"]["steel-chest"])
 supply_chest.name = "autonomous_car_chest"
 supply_chest.minable.result = "autonomous_car_chest"
-supply_chest.subgroup = "autocar"
+supply_chest.subgroup = "autonomous_car"
 
 local supply_chest_item = table.deepcopy(data.raw.item["steel-chest"])
 supply_chest_item.name = "autonomous_car_chest"
 supply_chest_item.place_result = "autonomous_car_chest"
-supply_chest_item.subgroup = "autocar"
+supply_chest_item.subgroup = "autonomous_car"
 supply_chest_item.stack_size = 10
 
 local supply_chest_recipe = {

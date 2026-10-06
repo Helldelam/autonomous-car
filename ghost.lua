@@ -601,7 +601,7 @@ end
 
 -- Called every tick while the car is stopped at its site: tries one ghost every
 -- config.build_interval ticks, so the batch goes up one entity at a time.
-function ghost_control.build_tick(car, tick)
+function ghost_control.building_tick(car, tick)
 	local car_data = storage.car_data[car.unit_number]
 	if tick < car_data.building.next_attempt_tick then
 		return
@@ -680,8 +680,8 @@ function ghost_control.finish(car)
 	end
 end
 
--- The car gave up its task for good (see travel.update_stuck). Its batch is
--- abandoned completely: the ghosts are neither queued nor assigned again, so the
+-- The car abandons its task after its final stuck wait (see travel.stuck_tick).
+-- Its batch is abandoned completely: the ghosts are neither queued nor assigned again, so the
 -- player has to select them again if the car can reach them now. The car then
 -- heads back to base through the usual end of a batch: it deposits its items,
 -- then waits, which sends it to charge if needed and to a garage.

@@ -9,7 +9,7 @@ local config = {}
 -- Each tick a moving car scores three headings - straight, slightly right and
 -- slightly left - from sample points ahead of it, and steers to the cheapest.
 
-config.lookahead_angle = 1 / 12 -- angle between the straight heading and each side heading; a maneuver uses it for its side headings too
+config.lookahead_angle = 1 / 12 -- angle between the straight heading and each side heading; a maneuver uses it for its left and right arcs too
 config.lookahead_side_offset = 0.5 -- the straight heading is sampled along two lines, this far on each side of the car
 config.lookahead_start = 1.5 -- distance of the first sample point
 config.lookahead_length = 4 -- distance covered by the sample points beyond the first one
@@ -26,12 +26,12 @@ config.emergency_brake_lookahead = 3 -- an obstacle this far straight ahead trig
 -- ============================================================
 -- Slow driving, forwards or backwards, to get out of a dense area or to turn
 -- (almost) on the spot before setting off. It does not head for the destination:
--- it measures the free room along six headings (forward and backward, each
--- straight, left and right) every few ticks and steers the car along the roomiest.
+-- every few ticks it measures the free room along six arcs (forward or backward,
+-- each straight, left or right) and follows the roomiest.
 
 config.maneuver_duration = 300 -- (5s) longest a single maneuver may last; past it the maneuver counts as failed
 config.max_maneuver_attempts = 3 -- failed maneuvers in a row before the car is declared stuck
-config.maneuver_arc_duration = 6 -- the car keeps one heading this long before the room around it is measured again
+config.maneuver_arc_duration = 6 -- the car follows one arc this long before the room around it is measured again
 config.maneuver_probe_start = 1.5 -- distance of the first probe point: far enough that the car does not detect itself
 config.maneuver_probe_length = 4 -- distance covered by the probe points beyond the first one
 config.maneuver_exit_density = 0.08 -- a maneuver cannot end while the obstacle density around the car is above this
@@ -67,7 +67,7 @@ config.precision_lookahead_length = 2 -- replaces lookahead_length
 config.short_delay = 60 -- (1s)
 	-- travel.handle_critical_fuel: pause between two charger searches when none is reachable
 	-- movement.update_mode: cooldown before emergency braking can trigger again after a stop
-	-- movement.drive: a car that stands still this long after a leg began or a maneuver ended has hit an obstacle
+	-- movement.drive_tick: a car that stands still this long after a leg began or a maneuver ended has hit an obstacle
 config.medium_delay = 180 -- (3s)
 	-- ghost_control.attempt_one_ghost: cooldown of a ghost that failed to revive
 	-- travel.stuck_reason: window over which progress is measured
@@ -75,11 +75,14 @@ config.idle_delay = 300 -- (5s) long on purpose during development, so idle wait
 	-- control.lua: wait before an idle car looks for a new task or a garage
 config.long_delay = 600 -- (10s)
 	-- control.lua: period of the fallback scan of pending clusters
-	-- travel.update_stuck: wait before a stuck car tries its leg again
+	-- travel.stuck_tick: wait before a stuck car tries its leg again
 	-- travel.stuck_reason: margin added to the expected duration of a leg
 
-config.abandon_delay = 3600 -- (60s) a car that keeps failing the same goal for this long abandons its task (see travel.mark_unreachable)
-config.give_up_delay = 1800 -- (30s) a car stuck for good waits this long for the player before it abandons its task (see travel.update_stuck)
+-- The two ways a car abandons its task, each with its own delay:
+config.unreachable_abandon_delay = 3600 -- (60s) a car that has found no way to recharge for this long abandons its task:
+	-- its batch goes back to the pending pool (see travel.mark_unreachable)
+config.stuck_abandon_delay = 1800 -- (30s) a car that is out of stuck retries waits this long for the player, then abandons its task:
+	-- its ghosts are released and must be selected again (see travel.stuck_tick, ghost_control.abandon)
 
 -- ============================================================
 -- Construction (see ghost.lua)
@@ -113,7 +116,7 @@ config.max_charger_users = 4 -- cars that can use the same charger at once
 
 config.stuck_min_speed = 0.1 -- lowest average speed expected over a leg; bounds how long the leg may last
 config.stuck_min_progress = 1 -- least distance a car must cover over one medium_delay; below it the car starts a maneuver
-config.max_stuck_retries = 3 -- times a car retries a stuck leg before it gives up its task (a leg to a charger is retried without limit)
+config.max_stuck_retries = 3 -- times a car retries a stuck leg before it abandons its task (a leg to a charger is retried without limit)
 
 -- ============================================================
 -- Garage (see park.lua)

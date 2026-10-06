@@ -2,25 +2,25 @@
 data:extend{
 	{
 		type = "fuel-category",
-		name = "electric_cars"
+		name = "autonomous_car_fuel"
 	},
 	{
 		type = "item-subgroup",
-		name = "autocar",
+		name = "autonomous_car",
 		group = "logistics",
 		order = "fa" -- next to transport
 	},
 	-- Hidden fuel item that stands for the car's battery (see the fuel helpers in _utils.lua).
 	{
 		type = "item",
-		name = "electric_cars_fuel",
+		name = "autonomous_car_fuel",
 		hidden = true,
-		fuel_category = "electric_cars",
+		fuel_category = "autonomous_car_fuel",
 		fuel_value = "6MJ",
 		stack_size = 50,
-		icon = "__autonomous-car__/graphics/fuel/coin.png",
-		subgroup = "autocar",
-		order = "zz[coin]",
+		icon = "__autonomous-car__/graphics/fuel/icon.png",
+		subgroup = "autonomous_car",
+		order = "zz[fuel]",
 	},
 	-- Raised when a car finishes its current step (see _utils.raise_next_task).
 	{

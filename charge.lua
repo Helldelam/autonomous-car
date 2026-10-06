@@ -38,7 +38,7 @@ end
 -- Called every tick while the car is charging: moves energy from the charger
 -- buffer to the car's tank, then frees the charger slot and starts the car's
 -- next task once the tank is full.
-function charger_control.charge(car, charger)
+function charger_control.charging_tick(car, charger)
 	local car_data = storage.car_data[car.unit_number]
 
 	if not (charger and charger.valid) then

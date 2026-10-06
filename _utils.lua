@@ -8,7 +8,7 @@ local _utils = {}
 -- one hidden fuel item: burner.remaining_burning_fuel is the charge, and the
 -- fuel value of that item is the tank capacity.
 
-local FUEL_ITEM = "electric_cars_fuel"
+local FUEL_ITEM = "autonomous_car_fuel"
 
 -- Puts the fuel item in the car's burner. Without it the burner ignores any
 -- write to remaining_burning_fuel.

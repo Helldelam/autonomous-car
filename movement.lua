@@ -3,8 +3,8 @@ local config = require("config")
 local _utils = require("_utils")
 
 -- Driving. Each tick, for a moving car, movement.update_mode picks the driving
--- mode, then movement.drive sets the acceleration and the steering, or
--- movement.maneuver does while a maneuver is under way.
+-- mode, then movement.drive_tick sets the acceleration and the steering, or
+-- movement.maneuver_tick does while a maneuver is under way.
 local movement = {}
 
 local pi, sin, cos = math.pi, math.sin, math.cos
@@ -17,8 +17,9 @@ local BRAKING_TICKS = 30 -- the car brakes once its destination is less than thi
 -- car the other way round than steering left going forwards. If it does, set this.
 local REVERSE_STEERING_INVERTED = false
 
--- The six headings of a maneuver: forward or backward, steering left (-1),
--- straight (0) or right (1).
+-- The six arcs of a maneuver: forward or backward, steering left (-1),
+-- straight (0) or right (1). The car follows one arc for
+-- config.maneuver_arc_duration, then picks the next.
 local ARCS = {
 	{reverse = false, turn = 0}, {reverse = false, turn = -1}, {reverse = false, turn = 1},
 	{reverse = true, turn = 0}, {reverse = true, turn = -1}, {reverse = true, turn = 1},
@@ -31,7 +32,7 @@ end
 
 -- Angle from the heading of the car to `target`, in turns, within [-0.5, 0.5):
 -- positive when the target is on the right.
-local function maneuver_angle(car, target)
+local function target_angle(car, target)
 	local dx, dy = target.x - car.position.x, target.y - car.position.y
 	local target_orientation = (math.atan2(dx, -dy) / (2 * pi)) % 1
 	return ((target_orientation - car.orientation + 0.5) % 1) - 0.5
@@ -55,7 +56,7 @@ local function sample_cost(car, x, y, target, distance)
 	return util.distance({x, y}, target) / distance + 3 * blocked
 end
 
--- Starts a maneuver (see movement.maneuver). `reason` tells when it may end:
+-- Starts a maneuver (see movement.maneuver_tick). `reason` tells when it may end:
 --   rear_turn    the target is behind a slow car
 --   blocked      the car stopped dead short of its destination
 --   no_progress  the car barely moved over config.medium_delay (see travel.stuck_reason)
@@ -73,7 +74,7 @@ function movement.start_maneuver(car, tick, reason)
 	maneuver.turn = 0
 	maneuver.origin = car.position
 
-	-- Emergency braking belongs to drive: it must not hold the car back, and
+	-- Emergency braking belongs to drive_tick: it must not hold the car back, and
 	-- its cooldown starts now.
 	car_data.emergency_brake.active = false
 	car_data.emergency_brake.since = tick
@@ -83,10 +84,11 @@ end
 --   high_speed       cruising in an open area
 --   emergency_brake  full stop, at the destination or before an obstacle
 --   precision_mode   slow driving with a finer look-ahead
--- Must run before movement.drive, which reads emergency_brake and
--- precision_mode in the same tick. It may start a maneuver, which then
--- replaces drive (see update_car in control.lua). It ends by setting
--- car.friction_modifier, the lever that controls cruising speed, from the mode.
+-- Must run before movement.drive_tick, which reads emergency_brake and
+-- precision_mode in the same tick. It may start a maneuver, in which case
+-- maneuver_tick runs instead of drive_tick (see update_car in control.lua). It
+-- ends by setting car.friction_modifier, the lever that controls cruising
+-- speed, from the mode.
 function movement.update_mode(car, tick)
 	local car_data = storage.car_data[car.unit_number]
 	if car_data.maneuver.active then
@@ -128,7 +130,7 @@ function movement.update_mode(car, tick)
 		emergency_brake.since = tick
 	end
 
-	local angle = maneuver_angle(car, target)
+	local angle = target_angle(car, target)
 
 	-- The target is behind a slow car: turn around with a maneuver. Not near the
 	-- destination, where the car stops instead.
@@ -156,7 +158,7 @@ end
 
 -- Sets the acceleration and the steering of a moving car for this tick, and
 -- raises the next-task event once it has stopped at its destination.
-function movement.drive(car, tick)
+function movement.drive_tick(car, tick)
 	local car_data = storage.car_data[car.unit_number]
 	local target = car_data.moving.destination.position
 	local distance = util.distance(car.position, target)
@@ -278,9 +280,9 @@ local function free_room(car, x, y, orientation)
 	return steps + 1
 end
 
--- Picks the heading of the next arc: the one with the most free room. On a tie
--- the arc that steers toward a target behind the car comes first, then the
--- current arc (so the car does not flip between two equal headings), then the
+-- Picks the next arc: the one with the most free room along its heading. On a
+-- tie the arc that steers toward a target behind the car comes first, then the
+-- current arc (so the car does not flip between two equal arcs), then the
 -- listing order of ARCS (forward and straight first). `side` is the side of the
 -- target: -1 left, 1 right, 0 when the maneuver does not turn toward it.
 local function choose_arc(car, maneuver, side)
@@ -294,9 +296,9 @@ local function choose_arc(car, maneuver, side)
 		if arc.reverse and REVERSE_STEERING_INVERTED then
 			turn = -turn
 		end
-		local line = orientation + (arc.reverse and 0.5 or 0) + turn * config.lookahead_angle
+		local heading = orientation + (arc.reverse and 0.5 or 0) + turn * config.lookahead_angle
 
-		local rank = free_room(car, x, y, line) * 100 - index
+		local rank = free_room(car, x, y, heading) * 100 - index
 		if arc.turn ~= 0 and arc.turn == side then
 			rank = rank + 20
 		end
@@ -317,7 +319,7 @@ local function maneuver_done(car, car_data)
 	local x, y = car.position.x, car.position.y
 
 	if util.distance(car.position, target) < config.arrival_distance then
-		return true -- drive lets the car arrive
+		return true -- drive_tick lets the car arrive
 	end
 	if maneuver.arcs == 0 then
 		return false -- at least one arc: the situation is not judged from where the car stood still
@@ -335,22 +337,22 @@ local function maneuver_done(car, car_data)
 	end
 
 	if maneuver.reason == "rear_turn" then
-		return math.abs(maneuver_angle(car, target)) < config.maneuver_exit_angle
+		return math.abs(target_angle(car, target)) < config.maneuver_exit_angle
 	end
 	return util.distance(car.position, maneuver.origin) >= config.maneuver_min_travel
 end
 
--- Drives a car that is in a maneuver. Every config.maneuver_arc_duration it checks
--- whether the maneuver is done, then picks the roomiest of the six headings and
--- steers along it, forwards or backwards, at the slow speed that
--- update_mode's friction gives. The steering is only ever set through
--- riding_state, never the orientation. It does not aim for the destination: that
--- is drive's job, once the maneuver ends.
+-- Drives a car that is in a maneuver. Every config.maneuver_arc_duration it
+-- checks whether the maneuver is done, then picks the roomiest of the six arcs
+-- and follows it, forwards or backwards, at the slow speed that update_mode's
+-- friction gives. The steering is only ever set through riding_state, never
+-- the orientation. It does not aim for the destination: that is drive_tick's
+-- job, once the maneuver ends.
 --
 -- A maneuver that lasts longer than config.maneuver_duration has failed: a new
 -- one starts, until config.max_maneuver_attempts. Returns true when the last
--- attempt failed, which makes the car stuck (see travel.handle_stuck).
-function movement.maneuver(car, tick)
+-- attempt failed, which makes the car stuck (see travel.start_stuck).
+function movement.maneuver_tick(car, tick)
 	local car_data = storage.car_data[car.unit_number]
 	local maneuver = car_data.maneuver
 
@@ -380,7 +382,7 @@ function movement.maneuver(car, tick)
 
 	local side = 0
 	if maneuver.reason == "rear_turn" then
-		side = maneuver_angle(car, car_data.moving.destination.position) >= 0 and 1 or -1
+		side = target_angle(car, car_data.moving.destination.position) >= 0 and 1 or -1
 	end
 	local arc = choose_arc(car, maneuver, side)
 	maneuver.arc_since = tick

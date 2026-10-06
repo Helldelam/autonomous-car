@@ -37,7 +37,7 @@ end)
 
 local KIND_BY_NAME = {
 	autonomous_car = "car",
-	autonomouscar_charging_station = "charger",
+	autonomous_car_charger = "charger",
 	autonomous_car_garage = "garage",
 	autonomous_car_chest = "chest",
 }
@@ -55,7 +55,7 @@ local function new_car_data(tick)
 		charging = {active = false, charger = nil},
 		parking = {active = false, garage = nil},
 		building = {active = false, next_attempt_tick = 0}, -- only active once the car has stopped at its site
-		-- Waiting for the player after a failed leg, see travel.handle_stuck. `final`: the car will not retry but give up its task.
+		-- Waiting for the player after a failed leg, see travel.start_stuck. `final`: the car will not retry but abandon its task.
 		stuck = {active = false, since = 0, final = false, destination = nil},
 		empty = {active = false}, -- battery completely empty, see travel.handle_empty
 		waiting = {active = true, since = tick - config.idle_delay}, -- already elapsed: a new car looks for work at once
@@ -102,7 +102,7 @@ local function on_built(event)
 		end
 		storage.cars[id] = entity
 		storage.car_data[id] = new_car_data(event.tick)
-	elseif entity.name == "autonomouscar_charging_station" then
+	elseif entity.name == "autonomous_car_charger" then
 		storage.chargers[id] = entity
 		storage.charger_data[id] = {users = 0} -- cars charging here or on their way
 	elseif entity.name == "autonomous_car_garage" then
@@ -214,22 +214,22 @@ local function update_car(car, car_data, tick)
 	if car_data.moving.active then
 		local destination = car_data.moving.destination
 		if destination and destination.valid then
-			-- update_mode sets the flags that drive reads in the same tick, and may
+			-- update_mode sets the flags that drive_tick reads in the same tick, and may
 			-- start a maneuver: keep this order.
 			movement.update_mode(car, tick)
 			if car_data.maneuver.active then
-				if movement.maneuver(car, tick) then
-					travel.handle_stuck(car, tick) -- the last maneuver failed
+				if movement.maneuver_tick(car, tick) then
+					travel.start_stuck(car, tick) -- the last maneuver failed
 				end
 			else
-				movement.drive(car, tick)
+				movement.drive_tick(car, tick)
 			end
 
 			-- Drive may have ended the leg (arrival): only a leg under way is checked.
 			if car_data.moving.active then
 				local reason = travel.stuck_reason(car, tick)
 				if reason == "timeout" then
-					travel.handle_stuck(car, tick)
+					travel.start_stuck(car, tick)
 				elseif reason == "no_progress" then
 					movement.start_maneuver(car, tick, reason)
 				end
@@ -239,13 +239,13 @@ local function update_car(car, car_data, tick)
 			travel.reset_to_waiting(car)
 		end
 	elseif car_data.charging.active then
-		charger_control.charge(car, car_data.charging.charger)
+		charger_control.charging_tick(car, car_data.charging.charger)
 	elseif car_data.parking.active then
-		garage_control.park(car, car_data.parking.garage)
+		garage_control.parking_tick(car, car_data.parking.garage)
 	elseif car_data.building.active then
-		ghost_control.build_tick(car, tick)
+		ghost_control.building_tick(car, tick)
 	elseif car_data.stuck.active then
-		if travel.update_stuck(car, tick) then
+		if travel.stuck_tick(car, tick) then
 			ghost_control.abandon(car)
 		end
 	elseif car_data.waiting.active then

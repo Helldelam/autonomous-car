@@ -8,7 +8,7 @@ local garage_control = {}
 
 -- Called every tick while the car is at its garage: mines the car into the
 -- garage inventory. The trunk must be empty first.
-function garage_control.park(car, garage)
+function garage_control.parking_tick(car, garage)
 	local car_data = storage.car_data[car.unit_number]
 
 	if not (garage and garage.valid) then

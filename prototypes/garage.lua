@@ -5,8 +5,8 @@ local garage = table.deepcopy(data.raw["container"]["steel-chest"])
 garage.name = "autonomous_car_garage"
 garage.minable.result = "autonomous_car_garage"
 garage.minable.mining_time = 1
-garage.subgroup = "autocar"
-garage.icon = "__autonomous-car__/graphics/garage/icon_garage.png"
+garage.subgroup = "autonomous_car"
+garage.icon = "__autonomous-car__/graphics/garage/icon.png"
 garage.max_health = 3500
 garage.dying_explosion = "steel-chest-explosion"
 -- TODO: use graphics/garage/remnants as the corpse.
@@ -54,8 +54,8 @@ garage.picture =
 local garage_item = table.deepcopy(data.raw.item["steel-chest"])
 garage_item.name = "autonomous_car_garage"
 garage_item.place_result = "autonomous_car_garage"
-garage_item.icon = "__autonomous-car__/graphics/garage/icon_garage.png"
-garage_item.subgroup = "autocar"
+garage_item.icon = "__autonomous-car__/graphics/garage/icon.png"
+garage_item.subgroup = "autonomous_car"
 garage_item.stack_size = 4
 
 local garage_recipe = {

@@ -25,9 +25,10 @@ tests\run.ps1 construction, blocked-ghost -Ticks 8000
 
 .EXAMPLE
 tests\run.ps1 -Reference ..\autonomous-car-before
-Also runs another copy of the mod (a folder or a zip, using the same names as
-this harness) and tells whether both produce the same traces. Use it to check
-that a refactoring did not change any behaviour.
+Also runs another copy of the mod (a folder or a zip) and tells whether both
+produce the same traces. Use it to check that a refactoring did not change any
+behaviour. The other copy runs with its own tests/harness.lua when it has one,
+so the two versions may use different names.
 #>
 param(
 	[Parameter(Position = 0)]
@@ -49,7 +50,6 @@ if (-not (Test-Path $Factorio)) {
 }
 
 $modName = (Get-Content (Join-Path $modFolder "info.json") -Raw | ConvertFrom-Json).name
-$harness = [IO.File]::ReadAllText((Join-Path $PSScriptRoot "harness.lua"))
 $writeFolder = Join-Path $Output "write"
 $scriptOutput = Join-Path $writeFolder "script-output"
 $configFile = Join-Path $Output "config.ini"
@@ -72,7 +72,15 @@ function Install-Mod([string]$variant, [string]$source) {
 	}
 	$modList = '{"mods":[{"name":"base","enabled":true},{"name":"' + $modName + '","enabled":true}]}'
 	[IO.File]::WriteAllText((Join-Path $modsFolder "mod-list.json"), $modList)
-	return @{ Mods = $modsFolder; Control = (Join-Path $target "control.lua"); Source = (Join-Path $source "control.lua") }
+	# A version that has its own harness runs with it: names may differ from one version to the other.
+	$harnessFile = Join-Path $source "tests\harness.lua"
+	if (-not (Test-Path $harnessFile)) { $harnessFile = Join-Path $PSScriptRoot "harness.lua" }
+	return @{
+		Mods = $modsFolder
+		Control = (Join-Path $target "control.lua")
+		Source = (Join-Path $source "control.lua")
+		Harness = [IO.File]::ReadAllText($harnessFile)
+	}
 }
 
 function Start-Factorio([string]$modsFolder, [string[]]$arguments, [string]$stdoutFile) {
@@ -84,7 +92,7 @@ function Start-Factorio([string]$modsFolder, [string[]]$arguments, [string]$stdo
 # Runs one scenario on one version of the mod and collects its output files.
 function Invoke-Scenario($mod, [string]$variant, [string]$name) {
 	$control = [IO.File]::ReadAllText($mod.Source)
-	[IO.File]::WriteAllText($mod.Control, $control + "`nlocal SCENARIO = `"$name`"`n" + $harness)
+	[IO.File]::WriteAllText($mod.Control, $control + "`nlocal SCENARIO = `"$name`"`n" + $mod.Harness)
 
 	foreach ($file in "trace.txt", "coverage.txt") {
 		$stale = Join-Path $scriptOutput $file

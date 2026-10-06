@@ -50,7 +50,7 @@ local function make(surface, name, x, y)
 	local entity = surface.create_entity{name = name, position = {x, y}, force = "player", raise_built = true}
 	if not entity then
 		out("SETUP could not create " .. name .. " at " .. x .. "," .. y)
-	elseif name == "autonomouscar_charging_station" then
+	elseif name == "autonomous_car_charger" then
 		table.insert(T.chargers, entity)
 	end
 	return entity
@@ -116,14 +116,14 @@ scenarios["basics"] = {
 		local s = new_surface({{10000, 0}, {11000, 0}, {11000, 1000}, {12000, 0}}, 6)
 
 		-- Open ground: three cars that charge, then park.
-		make(s, "autonomouscar_charging_station", 10000, 0)
+		make(s, "autonomous_car_charger", 10000, 0)
 		make(s, "autonomous_car_garage", 10040, 0)
 		make_car(s, 9920, 20, 0)
 		make_car(s, 9950, -60, 0.25)
 		make_car(s, 10020, 70, 0.6)
 
 		-- A wall and trees between two cars and their charger.
-		make(s, "autonomouscar_charging_station", 11000, 0)
+		make(s, "autonomous_car_charger", 11000, 0)
 		make(s, "autonomous_car_garage", 11040, 0)
 		for y = -20, 20 do
 			s.create_entity{name = "stone-wall", position = {10970.5, y + 0.5}, force = "player"}
@@ -143,8 +143,8 @@ scenarios["basics"] = {
 		make_car(s, 11000, 1000, 0.3, 0.01)
 
 		-- Chargers and a garage that get destroyed while the car needs them.
-		T.charger1 = make(s, "autonomouscar_charging_station", 12000, 0)
-		T.charger2 = make(s, "autonomouscar_charging_station", 12060, 0)
+		T.charger1 = make(s, "autonomous_car_charger", 12000, 0)
+		T.charger2 = make(s, "autonomous_car_charger", 12060, 0)
 		T.garage1 = make(s, "autonomous_car_garage", 12030, 20)
 		make_car(s, 11950, 0, 0.75)
 
@@ -163,7 +163,7 @@ scenarios["basics"] = {
 			end
 			return make(nauvis, name, position.x, position.y)
 		end
-		make_on_nauvis("autonomouscar_charging_station", 10, 10)
+		make_on_nauvis("autonomous_car_charger", 10, 10)
 		make_on_nauvis("autonomous_car_garage", -30, 20)
 		for _, spot in pairs{{90, 60, 0.4}, {-100, -70, 0.8}, {60, -110, 0.1}} do
 			local car = make_on_nauvis("autonomous_car", spot[1], spot[2])
@@ -182,10 +182,10 @@ scenarios["basics"] = {
 			out("EVENT charger2 died")
 		end
 		if t == 2500 then
-			make(T.surface, "autonomouscar_charging_station", 12010, -10)
+			make(T.surface, "autonomous_car_charger", 12010, -10)
 		end
 		if t == 3000 then
-			make(T.surface, "autonomouscar_charging_station", 11005, 1008)
+			make(T.surface, "autonomous_car_charger", 11005, 1008)
 		end
 		if t == 3500 and T.garage1.valid then
 			T.garage1.die()
@@ -203,8 +203,8 @@ scenarios["basics"] = {
 scenarios["construction"] = {
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
-		make(s, "autonomouscar_charging_station", 0, 0)
-		make(s, "autonomouscar_charging_station", -10, 20)
+		make(s, "autonomous_car_charger", 0, 0)
+		make(s, "autonomous_car_charger", -10, 20)
 		make(s, "autonomous_car_garage", 20, -10)
 		T.chest = make(s, "autonomous_car_chest", 0.5, 30.5)
 		fill(T.chest, {["wooden-chest"] = 60, ["stone-furnace"] = 20})
@@ -265,7 +265,7 @@ scenarios["construction"] = {
 scenarios["failures"] = {
 	setup = function()
 		local s = new_surface({{0, 0}, {3000, 3000}, {3500, 3000}}, 10)
-		make(s, "autonomouscar_charging_station", 0, 0)
+		make(s, "autonomous_car_charger", 0, 0)
 		make(s, "autonomous_car_garage", 20, -10)
 		T.chest = make(s, "autonomous_car_chest", 0.5, 30.5)
 		fill(T.chest, {["wooden-chest"] = 20})
@@ -274,14 +274,14 @@ scenarios["failures"] = {
 			make_ghost(s, "wooden-chest", -60.5 - 2 * i, 100.5)
 		end
 
-		make(s, "autonomouscar_charging_station", -150, 0)
+		make(s, "autonomous_car_charger", -150, 0)
 		T.car2 = make_car(s, -100, 60, 0.3)
 
-		make(s, "autonomouscar_charging_station", 190, -180)
+		make(s, "autonomous_car_charger", 190, -180)
 		T.garage3 = make(s, "autonomous_car_garage", 200, -200)
 		T.car3 = make_car(s, 180, -150, 0.6)
 
-		make(s, "autonomouscar_charging_station", -190, -180)
+		make(s, "autonomous_car_charger", -190, -180)
 		T.garage4 = make(s, "autonomous_car_garage", -200, -200)
 		T.car4 = make_car(s, -180, -150, 0.9)
 
@@ -338,7 +338,7 @@ scenarios["failures"] = {
 scenarios["blocked-ghost"] = {
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
-		make(s, "autonomouscar_charging_station", 0, 0)
+		make(s, "autonomous_car_charger", 0, 0)
 		T.chest = make(s, "autonomous_car_chest", 0.5, 30.5)
 		fill(T.chest, {["wooden-chest"] = 20})
 		make_car(s, -20, -20, 0)
@@ -361,7 +361,7 @@ scenarios["blocked-ghost"] = {
 scenarios["garage-exit"] = {
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
-		make(s, "autonomouscar_charging_station", 0, 0)
+		make(s, "autonomous_car_charger", 0, 0)
 		make(s, "autonomous_car_garage", 30, 0)
 		T.chest = make(s, "autonomous_car_chest", 0.5, 30.5)
 		fill(T.chest, {["wooden-chest"] = 20})
@@ -382,7 +382,7 @@ scenarios["garage-exit"] = {
 scenarios["stale-task"] = {
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
-		make(s, "autonomouscar_charging_station", -150, 0)
+		make(s, "autonomous_car_charger", -150, 0)
 		make(s, "autonomous_car_garage", -160, 0)
 		T.chest = make(s, "autonomous_car_chest", 0.5, 30.5)
 		fill(T.chest, {["wooden-chest"] = 20})
@@ -421,7 +421,7 @@ end
 scenarios["sealed"] = {
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
-		make(s, "autonomouscar_charging_station", 0, 0)
+		make(s, "autonomous_car_charger", 0, 0)
 		T.chest = make(s, "autonomous_car_chest", 70.5, 0.5)
 		fill(T.chest, {["wooden-chest"] = 20})
 
@@ -454,7 +454,7 @@ scenarios["sealed"] = {
 scenarios["empty-battery"] = {
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
-		make(s, "autonomouscar_charging_station", 0, 0)
+		make(s, "autonomous_car_charger", 0, 0)
 		make(s, "autonomous_car_garage", 20, -10)
 		T.chest = make(s, "autonomous_car_chest", 0.5, 30.5)
 		fill(T.chest, {["wooden-chest"] = 20})
@@ -479,7 +479,7 @@ scenarios["empty-battery"] = {
 scenarios["gate"] = {
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
-		make(s, "autonomouscar_charging_station", 0, 0)
+		make(s, "autonomous_car_charger", 0, 0)
 		make(s, "autonomous_car_garage", 20, -10)
 		T.chest = make(s, "autonomous_car_chest", 0.5, 30.5)
 		fill(T.chest, {["wooden-chest"] = 20})

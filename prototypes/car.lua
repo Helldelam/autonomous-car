@@ -1,5 +1,5 @@
 -- Autonomous car: a small car with the look of the base game car, a trunk and
--- no fuel slot. Its burner only accepts the hidden "electric_cars" fuel, which
+-- no fuel slot. Its burner only accepts the hidden "autonomous_car_fuel" fuel, which
 -- the scripts use as a battery.
 local config = require("config")
 local colors = require("colors")
@@ -48,7 +48,7 @@ local car = {
     energy_source =
     {
       type = "burner",
-      fuel_categories = {"electric_cars"},
+      fuel_categories = {"autonomous_car_fuel"},
       effectivity = 1,
       fuel_inventory_size = 0,
       smoke =
@@ -298,7 +298,7 @@ local item = {
     type = "item-with-tags",
     name = "autonomous_car",
     icon = "__autonomous-car__/graphics/car/icon.png",
-    subgroup = "autocar",
+    subgroup = "autonomous_car",
     order = "a[robot]-c[autonomous_car]",
     inventory_move_sound = item_sounds.robotic_inventory_move,
     pick_sound = item_sounds.robotic_inventory_pickup,
