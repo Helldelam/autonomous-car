@@ -1,0 +1,185 @@
+<#
+.SYNOPSIS
+Runs the test scenarios of tests/harness.lua in Factorio, without opening the game.
+
+.DESCRIPTION
+Temporary development aid, to be removed with the tests/ folder.
+
+The script copies the mod to a temporary folder, appends tests/harness.lua to
+the copy of control.lua, and runs each scenario in Factorio's benchmark mode.
+Factorio gets its own configuration and write folder there, so nothing is
+written to the real Factorio folder and the game may stay open.
+
+For each scenario it reports the exit code, any script error, the events of
+the scenario and the last summary line, then the module functions that no
+scenario of the run called. The full traces stay in the output folder: see
+tests/show.ps1. The script exits with the number of scenarios that ended in a
+script error.
+
+.EXAMPLE
+tests\run.ps1
+Runs every scenario.
+
+.EXAMPLE
+tests\run.ps1 construction, blocked-ghost -Ticks 8000
+
+.EXAMPLE
+tests\run.ps1 -Reference ..\autonomous-car-before
+Also runs another copy of the mod (a folder or a zip, using the same names as
+this harness) and tells whether both produce the same traces. Use it to check
+that a refactoring did not change any behaviour.
+#>
+param(
+	[Parameter(Position = 0)]
+	[ValidateSet("all", "basics", "construction", "failures", "blocked-ghost", "garage-exit", "stale-task", "sealed", "empty-battery", "gate", "gate-manual")]
+	[string[]]$Scenario = @("all"),
+	[int]$Ticks = 22000,
+	[string]$Reference,
+	[string]$Factorio = "C:\Program Files (x86)\Steam\steamapps\common\Factorio\bin\x64\factorio.exe",
+	[string]$Output = (Join-Path $env:TEMP "autonomous-car-tests")
+)
+
+$ErrorActionPreference = "Stop"
+$modFolder = Split-Path $PSScriptRoot -Parent
+if ($Scenario -contains "all") {
+	$Scenario = @("basics", "construction", "failures", "blocked-ghost", "garage-exit", "stale-task", "sealed", "empty-battery", "gate", "gate-manual")
+}
+if (-not (Test-Path $Factorio)) {
+	throw "Factorio not found at '$Factorio'. Pass its path with -Factorio."
+}
+
+$modName = (Get-Content (Join-Path $modFolder "info.json") -Raw | ConvertFrom-Json).name
+$harness = [IO.File]::ReadAllText((Join-Path $PSScriptRoot "harness.lua"))
+$writeFolder = Join-Path $Output "write"
+$scriptOutput = Join-Path $writeFolder "script-output"
+$configFile = Join-Path $Output "config.ini"
+$mapFile = Join-Path $writeFolder "test-map.zip"
+New-Item -ItemType Directory -Force $writeFolder | Out-Null
+[IO.File]::WriteAllText($configFile, "; version=12`n[path]`nread-data=__PATH__executable__/../../data`nwrite-data=$($writeFolder -replace '\\', '/')`n")
+
+# Copies one version of the mod (a folder or a zip) to its own mod directory.
+function Install-Mod([string]$variant, [string]$source) {
+	if ($source -like "*.zip") {
+		$unzipped = Join-Path $Output "unzipped-$variant"
+		Expand-Archive $source $unzipped -Force
+		$source = $unzipped
+	}
+	$modsFolder = Join-Path $Output "mods-$variant"
+	$target = Join-Path $modsFolder $modName
+	robocopy $source $target /MIR /XD tests .backup .github .vscode .git /NFL /NDL /NJH /NJS /NP | Out-Null
+	if ($LASTEXITCODE -ge 8) {
+		throw "Could not copy '$source' to '$target' (robocopy exit code $LASTEXITCODE)."
+	}
+	$modList = '{"mods":[{"name":"base","enabled":true},{"name":"' + $modName + '","enabled":true}]}'
+	[IO.File]::WriteAllText((Join-Path $modsFolder "mod-list.json"), $modList)
+	return @{ Mods = $modsFolder; Control = (Join-Path $target "control.lua"); Source = (Join-Path $source "control.lua") }
+}
+
+function Start-Factorio([string]$modsFolder, [string[]]$arguments, [string]$stdoutFile) {
+	$all = @("--config", "`"$configFile`"", "--mod-directory", "`"$modsFolder`"") + $arguments
+	$process = Start-Process $Factorio -ArgumentList $all -Wait -PassThru -RedirectStandardOutput $stdoutFile
+	return $process.ExitCode
+}
+
+# Runs one scenario on one version of the mod and collects its output files.
+function Invoke-Scenario($mod, [string]$variant, [string]$name) {
+	$control = [IO.File]::ReadAllText($mod.Source)
+	[IO.File]::WriteAllText($mod.Control, $control + "`nlocal SCENARIO = `"$name`"`n" + $harness)
+
+	foreach ($file in "trace.txt", "coverage.txt") {
+		$stale = Join-Path $scriptOutput $file
+		if (Test-Path $stale) { Move-Item $stale "$stale.stale" -Force }
+	}
+	$suffix = if ($variant -eq "current") { $name } else { "$name-$variant" }
+	$result = @{
+		Trace = Join-Path $Output "trace-$suffix.txt"
+		Coverage = Join-Path $Output "coverage-$suffix.txt"
+		Stdout = Join-Path $Output "stdout-$suffix.txt"
+	}
+	$result.ExitCode = Start-Factorio $mod.Mods @("--benchmark", "`"$mapFile`"", "--benchmark-ticks", $Ticks, "--disable-audio") $result.Stdout
+	foreach ($file in "trace", "coverage") {
+		$produced = Join-Path $scriptOutput "$file.txt"
+		$kept = $result[$file.Substring(0, 1).ToUpper() + $file.Substring(1)]
+		if (Test-Path $produced) { Move-Item $produced $kept -Force } elseif (Test-Path $kept) { Move-Item $kept "$kept.stale" -Force }
+	}
+	return $result
+}
+
+function Write-Report([string]$name, $result) {
+	$lines = @()
+	if (Test-Path $result.Trace) { $lines = @(Get-Content $result.Trace) }
+	$status = if ($result.ExitCode -eq 0) { "ok" } else { "FAILED (exit code $($result.ExitCode))" }
+	Write-Host ""
+	Write-Host "== $name : $status, $($lines.Count) trace lines =="
+
+	$stdout = @(Get-Content $result.Stdout)
+	$errorAt = ($stdout | Select-String -Pattern "Error while running|Error while loading|Failed to load mod" | Select-Object -First 1)
+	if ($errorAt) {
+		$first = $errorAt.LineNumber - 1
+		$stdout[$first..([Math]::Min($first + 6, $stdout.Count - 1))] | ForEach-Object { Write-Host "  $_" }
+	}
+
+	$lines | Where-Object { $_ -match "^(SETUP|EVENT|SELECT) " } | ForEach-Object { Write-Host "  $_" }
+	$summary = $lines | Where-Object { $_ -match "^SUMMARY " } | Select-Object -Last 1
+	if ($summary) { Write-Host "  $summary" }
+}
+
+# Adds the call counts of one scenario to the totals of the whole run.
+function Add-Coverage($totals, [string]$coverageFile) {
+	if (-not (Test-Path $coverageFile)) { return }
+	foreach ($line in Get-Content $coverageFile) {
+		$name, $count = $line -split "\s+"
+		if ($name) { $totals[$name] = [int]$totals[$name] + [int]$count }
+	}
+}
+
+function Compare-Traces([string]$current, [string]$reference) {
+	$a = @(Get-Content $current)
+	$b = @(Get-Content $reference)
+	for ($i = 0; $i -lt [Math]::Max($a.Count, $b.Count); $i++) {
+		if ($a[$i] -ne $b[$i]) {
+			Write-Host "  DIFFERENT from the reference, first at line $($i + 1):"
+			Write-Host "    current:   $($a[$i])"
+			Write-Host "    reference: $($b[$i])"
+			return
+		}
+	}
+	Write-Host "  identical to the reference ($($a.Count) lines)"
+}
+
+$current = Install-Mod "current" $modFolder
+$referenceMod = $null
+if ($Reference) {
+	$referenceMod = Install-Mod "reference" (Resolve-Path $Reference).Path
+}
+
+# A fixed seed keeps the natural terrain of the "basics" scenario the same from one run to the next.
+$created = Start-Factorio $current.Mods @("--create", "`"$mapFile`"", "--map-gen-seed", "1") (Join-Path $Output "stdout-create.txt")
+if ($created -ne 0) {
+	Get-Content (Join-Path $Output "stdout-create.txt") | Select-Object -Last 15 | ForEach-Object { Write-Host $_ }
+	throw "Factorio could not load the mod and create the test map (exit code $created)."
+}
+
+$failed = 0
+$callCounts = @{}
+foreach ($name in $Scenario) {
+	$result = Invoke-Scenario $current "current" $name
+	Write-Report $name $result
+	Add-Coverage $callCounts $result.Coverage
+	if ($result.ExitCode -ne 0) { $failed++ }
+	if ($referenceMod) {
+		$referenceResult = Invoke-Scenario $referenceMod "reference" $name
+		if ((Test-Path $result.Trace) -and (Test-Path $referenceResult.Trace)) {
+			Compare-Traces $result.Trace $referenceResult.Trace
+		} else {
+			Write-Host "  no trace to compare (reference exit code $($referenceResult.ExitCode))"
+		}
+	}
+}
+# register_release_handler only runs while control.lua loads, before the counters exist.
+$neverCalled = @($callCounts.Keys | Where-Object { $callCounts[$_] -eq 0 -and $_ -ne "_utils.register_release_handler" } | Sort-Object)
+Write-Host ""
+Write-Host "Module functions never called in this run ($($neverCalled.Count)): $($neverCalled -join ', ')"
+Write-Host "$($Scenario.Count - $failed) of $($Scenario.Count) scenario(s) ran without a script error."
+Write-Host "Traces and Factorio output: $Output"
+exit $failed

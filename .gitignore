@@ -1,0 +1,6 @@
+.backup/
+.vscode/
+.claude/
+Thumbs.db
+desktop.ini
+.DS_Store

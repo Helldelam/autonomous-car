@@ -1,0 +1,22 @@
+{
+  "Lua.runtime.version": "Lua 5.2",
+  "Lua.diagnostics.globals": [
+    "game",
+    "script",
+    "storage",
+    "defines",
+    "prototypes",
+    "remote",
+    "rendering",
+    "settings",
+    "global",
+    "log",
+    "commands",
+    "table_size",
+    "util",
+    "require"
+  ],
+  "Lua.diagnostics.disable": [
+    "undefined-global"
+  ]
+}

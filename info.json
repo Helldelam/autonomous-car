@@ -1,0 +1,9 @@
+{
+  "name": "autonomous-car",
+  "version": "0.1.3",
+  "title": "Autonomous Car",
+  "author": "Helldelam",
+  "factorio_version": "2.0",
+  "dependencies": ["base >= 2.0"],
+  "description": "This mod add a litle car that can construct like construction robot"
+}
