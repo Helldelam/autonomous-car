@@ -5,7 +5,9 @@
 -- tests/run.ps1 appends this file to a temporary copy of control.lua, after a
 -- line that defines SCENARIO, and runs the result in Factorio's benchmark
 -- mode. The mod itself never loads it. Being part of the control.lua chunk, it
--- can use that file's locals: on_area_selected, names and the modules.
+-- can use that file's locals: on_area_selected, names and the modules (which
+-- a Lua language server reading this file alone would report as undefined).
+---@diagnostic disable: undefined-global
 --
 -- Output, in script-output/:
 --   trace.txt     one line per car every 10 ticks, plus SETUP, EVENT, SELECT
@@ -17,7 +19,8 @@
 --   f<friction> t<queued tasks> g<ghosts left> i<item types missing>
 --   k<charge detours>,<stuck retries> dst<destination x,y> [alerts raised]
 -- FLAGS has one digit per name of FLAG_NAMES, in that order. g and i are -1
--- when the car has no batch. tests/show.ps1 decodes these lines.
+-- when the car has no batch. tests/show.ps1 decodes these lines, and reads
+-- FLAG_NAMES from the line below.
 
 local FLAG_NAMES = {"moving", "charging", "parking", "building", "stuck", "waiting", "empty", "maneuver", "emergency_brake", "high_speed", "precision_mode"}
 local BUILT_NAMES = {"wooden-chest", "stone-furnace", "small-electric-pole", "steel-chest", "car"}
@@ -102,8 +105,12 @@ end
 -- ============================================================
 -- Scenarios
 -- ============================================================
--- Each scenario has a `setup` function and an optional `events(t)` function,
--- called every tick with the number of ticks since the setup.
+-- Each scenario has a `setup` function, an optional `events(t)` function,
+-- called every tick with the number of ticks since the setup, and an optional
+-- `ticks`, the time it runs when it needs less than the default of run.ps1.
+-- This file is the only list of scenarios: run.ps1 reads their names and
+-- their `ticks` from the lines below. Keep the form scenarios["name"] = {,
+-- with `ticks = N,` as the next line.
 
 -- Driving, charging and parking, on open ground, around obstacles and on
 -- natural terrain. Also: a destination destroyed on the way, and a critically
@@ -503,8 +510,9 @@ scenarios["gate"] = {
 -- Does a gate open for an autonomous car at all? An untracked car (the mod does
 -- not drive it) is driven straight at a gate by the scenario itself, once with
 -- the gate on a wall and once without any gate, for comparison. Lines GATE-TEST
--- give its x position every 10 ticks: the wall is at x = 20.5.
+-- give its x position every 10 ticks, for 400 ticks: the wall is at x = 20.5.
 scenarios["gate-manual"] = {
+	ticks = 600,
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
 		T.test_cars = {}

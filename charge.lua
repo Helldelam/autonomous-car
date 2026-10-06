@@ -52,7 +52,7 @@ end
 
 function charger_control.alert_no_charger(car)
 	_utils.alert_once(storage.car_data[car.unit_number].alerts, "no_charger", car.force, car,
-		"An autonomous car needs to recharge but no reachable charging station is available.",
+		"An autonomous car needs to recharge but no reachable charger is available.",
 		config.names.car)
 end
 

@@ -13,7 +13,8 @@ local config = {}
 
 -- Prototype names. car, charger, garage and chest each name an entity, its
 -- item and its recipe. They are stored in saved games: renaming one removes
--- it from every existing save.
+-- it from every existing save. The names shown in game are in locale/, one
+-- file per language: a new or renamed prototype needs its line in each.
 config.names = {
 	car = "autonomous_car",
 	charger = "autonomous_car_charger",

@@ -10,6 +10,10 @@ the copy of control.lua, and runs each scenario in Factorio's benchmark mode.
 Factorio gets its own configuration and write folder there, so nothing is
 written to the real Factorio folder and the game may stay open.
 
+The scenarios are those of tests/harness.lua, in the order of that file. Each
+runs for 22000 ticks, or for the `ticks` it declares there; -Ticks sets the
+same duration for all of them.
+
 For each scenario it reports the exit code, any script error, the events of
 the scenario and the last summary line (for gate-manual, the last position of
 each subject), then the module functions that no scenario of the run called.
@@ -22,6 +26,7 @@ Runs every scenario.
 
 .EXAMPLE
 tests\run.ps1 construction, blocked-ghost -Ticks 8000
+Runs two scenarios, for 8000 ticks each.
 
 .EXAMPLE
 tests\run.ps1 -Reference ..\autonomous-car-before
@@ -32,9 +37,8 @@ so the two versions may use different names.
 #>
 param(
 	[Parameter(Position = 0)]
-	[ValidateSet("all", "basics", "construction", "failures", "blocked-ghost", "garage-exit", "stale-task", "sealed", "empty-battery", "gate", "gate-manual")]
 	[string[]]$Scenario = @("all"),
-	[int]$Ticks = 22000,
+	[int]$Ticks,
 	[string]$Reference,
 	[string]$Factorio = "C:\Program Files (x86)\Steam\steamapps\common\Factorio\bin\x64\factorio.exe",
 	[string]$Output = (Join-Path $env:TEMP "autonomous-car-tests")
@@ -42,8 +46,21 @@ param(
 
 $ErrorActionPreference = "Stop"
 $modFolder = Split-Path $PSScriptRoot -Parent
+
+# harness.lua is the only list of scenarios: a line scenarios["name"] = {,
+# followed by a line `ticks = N,` when the scenario needs less than the default.
+$defaultTicks = 22000
+$scenarioTicks = [ordered]@{}
+$harnessText = [IO.File]::ReadAllText((Join-Path $PSScriptRoot "harness.lua"))
+foreach ($match in [regex]::Matches($harnessText, '(?m)^scenarios\["([^"]+)"\] = \{(?:\s*ticks = (\d+),)?')) {
+	$scenarioTicks[$match.Groups[1].Value] = if ($match.Groups[2].Success) { [int]$match.Groups[2].Value } else { $defaultTicks }
+}
 if ($Scenario -contains "all") {
-	$Scenario = @("basics", "construction", "failures", "blocked-ghost", "garage-exit", "stale-task", "sealed", "empty-battery", "gate", "gate-manual")
+	$Scenario = @($scenarioTicks.Keys)
+}
+$unknown = @($Scenario | Where-Object { -not $scenarioTicks.Contains($_) })
+if ($unknown.Count -gt 0) {
+	throw "Unknown scenario: $($unknown -join ', '). Scenarios of harness.lua: $(@($scenarioTicks.Keys) -join ', ')."
 }
 if (-not (Test-Path $Factorio)) {
 	throw "Factorio not found at '$Factorio'. Pass its path with -Factorio."
@@ -66,7 +83,7 @@ function Install-Mod([string]$variant, [string]$source) {
 	}
 	$modsFolder = Join-Path $Output "mods-$variant"
 	$target = Join-Path $modsFolder $modName
-	robocopy $source $target /MIR /XD tests .backup .github .vscode .git /NFL /NDL /NJH /NJS /NP | Out-Null
+	robocopy $source $target /MIR /XD tests .backup .github .git /NFL /NDL /NJH /NJS /NP | Out-Null
 	if ($LASTEXITCODE -ge 8) {
 		throw "Could not copy '$source' to '$target' (robocopy exit code $LASTEXITCODE)."
 	}
@@ -90,7 +107,7 @@ function Start-Factorio([string]$modsFolder, [string[]]$arguments, [string]$stdo
 }
 
 # Runs one scenario on one version of the mod and collects its output files.
-function Invoke-Scenario($mod, [string]$variant, [string]$name) {
+function Invoke-Scenario($mod, [string]$variant, [string]$name, [int]$duration) {
 	$control = [IO.File]::ReadAllText($mod.Source)
 	[IO.File]::WriteAllText($mod.Control, $control + "`nlocal SCENARIO = `"$name`"`n" + $mod.Harness)
 
@@ -104,7 +121,7 @@ function Invoke-Scenario($mod, [string]$variant, [string]$name) {
 		Coverage = Join-Path $Output "coverage-$suffix.txt"
 		Stdout = Join-Path $Output "stdout-$suffix.txt"
 	}
-	$result.ExitCode = Start-Factorio $mod.Mods @("--benchmark", "`"$mapFile`"", "--benchmark-ticks", $Ticks, "--disable-audio") $result.Stdout
+	$result.ExitCode = Start-Factorio $mod.Mods @("--benchmark", "`"$mapFile`"", "--benchmark-ticks", $duration, "--disable-audio") $result.Stdout
 	foreach ($file in "trace", "coverage") {
 		$produced = Join-Path $scriptOutput "$file.txt"
 		$kept = $result[$file.Substring(0, 1).ToUpper() + $file.Substring(1)]
@@ -174,12 +191,13 @@ if ($created -ne 0) {
 $failed = 0
 $callCounts = @{}
 foreach ($name in $Scenario) {
-	$result = Invoke-Scenario $current "current" $name
+	$duration = if ($PSBoundParameters.ContainsKey("Ticks")) { $Ticks } else { $scenarioTicks[$name] }
+	$result = Invoke-Scenario $current "current" $name $duration
 	Write-Report $name $result
 	Add-Coverage $callCounts $result.Coverage
 	if ($result.ExitCode -ne 0) { $failed++ }
 	if ($referenceMod) {
-		$referenceResult = Invoke-Scenario $referenceMod "reference" $name
+		$referenceResult = Invoke-Scenario $referenceMod "reference" $name $duration
 		if ((Test-Path $result.Trace) -and (Test-Path $referenceResult.Trace)) {
 			Compare-Traces $result.Trace $referenceResult.Trace
 		} else {

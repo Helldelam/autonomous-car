@@ -1,22 +1,29 @@
 {
-  "Lua.runtime.version": "Lua 5.2",
-  "Lua.diagnostics.globals": [
+  "runtime.version": "Lua 5.2",
+  "diagnostics.globals": [
     "game",
     "script",
     "storage",
     "defines",
     "prototypes",
+    "helpers",
     "remote",
-    "rendering",
-    "settings",
-    "global",
-    "log",
     "commands",
+    "settings",
+    "rendering",
+    "rcon",
+    "serpent",
+    "log",
+    "localised_print",
     "table_size",
+    "data",
+    "mods",
     "util",
-    "require"
+    "crash_trigger",
+    "car_reflection",
+    "volume_multiplier"
   ],
-  "Lua.diagnostics.disable": [
-    "undefined-global"
+  "diagnostics.disable": [
+    "undefined-field"
   ]
 }

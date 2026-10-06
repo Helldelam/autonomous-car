@@ -4,24 +4,31 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Mod Factorio 2.0 (Lua 5.2) « Autonomous Car » : une voiture autonome qui construit des ghosts hors réseau de robots, se recharge et se gare seule. Ce fichier est la seule documentation du projet.
 
+**Version en construction : rien, à ce stade, n'est définitivement validé**, ni le comportement en jeu, ni le contenu de `main`. Tout peut encore être repris, y compris ce que ce fichier décrit comme fonctionnant.
+
 ## Règles de travail
 
 - Comprendre la cause d'un bug au niveau du tick avant de corriger ; pas de correctif de symptôme.
 - Changements petits et chirurgicaux. Réutiliser les helpers et l'API Factorio existants ; pas de second système d'état.
 - Le code fonctionne globalement en jeu : une incohérence vue à la lecture n'est pas un bug tant qu'elle n'est pas confirmée en jeu, par un scénario de test ou par le propriétaire.
 - Ne lancer les tests que sur demande du propriétaire.
-- Git : `main` ne contient que des versions validées par le propriétaire. Tout travail se fait sur une branche à part (la créer avant la première modification si on est sur `main`). Ne jamais pousser ni fusionner dans `main` sans demande explicite du propriétaire ; proposer de committer, pousser ou fusionner quand cela semble utile (fin d'un changement cohérent, version prête à valider), puis attendre sa réponse.
+- Git : `main` est la version de référence choisie par le propriétaire, pas une version validée (voir plus haut). Tout travail se fait sur une branche à part (la créer avant la première modification si on est sur `main`). Ne jamais pousser ni fusionner dans `main` sans demande explicite du propriétaire ; proposer de committer, pousser ou fusionner quand cela semble utile (fin d'un changement cohérent, version prête à valider), puis attendre sa réponse.
 - Tenir à jour la liste « Problèmes connus » en bas de ce fichier : ajouter tout problème découvert ; un problème corrigé passe dans « Corrigés, à valider » et n'est retiré qu'après validation du propriétaire.
 - Une idée ou une tâche à garder pour plus tard se note à deux endroits : une ligne dans « À faire » (plus bas) et un commentaire `-- TODO` à l'endroit du code concerné. Retirer les deux quand c'est fait.
-- Code, commentaires et messages en jeu en anglais ; ce fichier en français.
+- Code, commentaires et messages du script (alertes, `print`) en anglais ; ce fichier en français. Les noms et descriptions des prototypes sont dans `locale/`, en anglais et en français : toute ligne ajoutée ou modifiée l'est dans les deux fichiers.
 
 ## Commandes
 
-Pas de build ni de linter, pas d'interpréteur Lua. Dépôt git privé (branche `main`) ; `.backup/` (état d'avant le dernier grand renommage) est ignoré par git.
+Pas de build, pas d'interpréteur Lua. Dépôt git privé (branche `main`) ; `.backup/` (état d'avant le dernier grand renommage) est ignoré par git.
 
 - Le mod est chargé depuis ce dossier, dont le nom doit rester `<name>_<version>` de `info.json`.
 - Changement runtime : recharger la sauvegarde. Changement de prototype (`data.lua`, `prototypes/`, valeur de `config.lua` lue par un prototype) : redémarrer Factorio.
 - Erreurs : `%APPDATA%\Factorio\factorio-current.log`.
+- Vérification statique, sans lancer Factorio (quelques secondes) : erreurs de syntaxe et noms globaux mal orthographiés, par le serveur de langage Lua de l'extension VS Code `sumneko.lua`, que `.luarc.json` configure. Un global de Factorio absent de sa liste `diagnostics.globals` s'y ajoute.
+
+```powershell
+& (Get-Item "$env:USERPROFILE\.vscode\extensions\sumneko.lua-*\server\bin\lua-language-server.exe")[-1] --check . --checklevel=Warning --logpath="$env:TEMP\lua-check" --metapath="$env:TEMP\lua-check"
+```
 
 Scénarios de test (dossier `tests/`, temporaire : à retirer avant publication, le mod n'en charge rien) :
 
@@ -32,7 +39,7 @@ tests\run.ps1 -Reference <dossier ou zip>      # compare les traces avec une aut
 tests\show.ps1 construction -Car 132           # changements d'état d'une voiture dans une trace
 ```
 
-`run.ps1` lance Factorio sans fenêtre ni joueur sur une copie du mod dans `%TEMP%\autonomous-car-tests` ; rien n'est écrit dans le dossier Factorio et le jeu peut rester ouvert. Il affiche pour chaque scénario l'erreur de script éventuelle, les événements et le dernier résumé. `-Reference` sert à vérifier qu'un refactoring ne change aucun comportement : Factorio est déterministe, deux versions équivalentes donnent des traces identiques. La version de référence tourne avec son propre `tests/harness.lua` quand elle en a un, ce qui permet de comparer deux versions dont les noms diffèrent. Les scénarios sont décrits dans `tests/harness.lua`, qui est greffé à la fin de `control.lua` et utilise ses locales (`on_area_selected`, `names`, les modules) : renommer l'une d'elles impose de le mettre à jour.
+`run.ps1` lance Factorio sans fenêtre ni joueur sur une copie du mod dans `%TEMP%\autonomous-car-tests` ; rien n'est écrit dans le dossier Factorio et le jeu peut rester ouvert. Il affiche pour chaque scénario l'erreur de script éventuelle, les événements et le dernier résumé. `-Reference` sert à vérifier qu'un refactoring ne change aucun comportement : Factorio est déterministe, deux versions équivalentes donnent des traces identiques. La version de référence tourne avec son propre `tests/harness.lua` quand elle en a un, ce qui permet de comparer deux versions dont les noms diffèrent. Les scénarios sont décrits dans `tests/harness.lua`, qui en est la seule liste : `run.ps1` y lit leurs noms et leur durée (22 000 ticks, ou le champ `ticks` du scénario), `show.ps1` y lit les noms des drapeaux. Ce fichier est greffé à la fin de `control.lua` et utilise ses locales (`on_area_selected`, `names`, les modules) : renommer l'une d'elles impose de le mettre à jour.
 
 ## Architecture
 
@@ -49,7 +56,10 @@ tests\show.ps1 construction -Car 132           # changements d'état d'une voitu
 | `charge.lua` | `charger_control` | chargeurs |
 | `park.lua` | `garage_control` | garages |
 | `_utils.lua` | `_utils` | carburant, recherche de l'entité la plus proche, deque, alertes, libération d'entités, événement de fin d'étape |
-| `config.lua`, `colors.lua` | | noms et tailles communs aux prototypes et aux scripts, puis réglages |
+| `config.lua` | | noms et tailles communs aux prototypes et aux scripts, puis réglages |
+| `colors.lua` | | couleur que le script donne à chaque voiture posée (un prototype de voiture n'a pas de couleur) |
+| `data.lua`, `prototypes/` | | prototypes, un fichier par entité |
+| `locale/en`, `locale/fr` | | noms et descriptions affichés en jeu |
 
 ### État
 
@@ -106,7 +116,8 @@ La voiture brûle un carburant caché, sans slot : la charge est `burner.remaini
 - `emergency_brake` ne s'applique que dans `drive_tick`, jamais en manœuvre.
 - Pas de migration : le mod n'est pas publié, les nouveaux champs de `car_data` (`maneuver`, `empty`, `stuck.*`) imposent une nouvelle sauvegarde.
 - Le script ne règle jamais l'orientation de la voiture, seulement `riding_state`. Hypothèse non vérifiée en jeu : le braquage n'est pas inversé en marche arrière (`REVERSE_STEERING_INVERTED` dans `movement.lua`).
-- Ce que les prototypes et les scripts doivent partager est défini une seule fois dans `config.lua` : les noms (`config.names`), la taille de la voiture (`config.car_size`, dont dérivent les sondes de manœuvre), les tailles d'inventaire. Ne jamais réécrire l'une de ces valeurs en dur ailleurs. Les noms sont enregistrés dans les sauvegardes : ne pas les changer sans accord.
+- Ce que les prototypes et les scripts doivent partager est défini une seule fois dans `config.lua` : les noms (`config.names`), la taille de la voiture (`config.car_size`, dont dérivent les sondes de manœuvre), les tailles d'inventaire. Ne jamais réécrire l'une de ces valeurs en dur ailleurs. Les noms sont enregistrés dans les sauvegardes : ne pas les changer sans accord. Ils servent aussi de clés dans `locale/` : un prototype ajouté ou renommé y a sa ligne dans chaque langue.
+- Un prototype copié du jeu (`table.deepcopy`) garde tous les champs de l'original : `icons` l'emporte sur `icon`, `hidden` reste vrai (cas du chargeur, copié de l'interface d'énergie). Les vérifier à chaque copie.
 - `config.lua` se termine par des vérifications (`assert`) des relations entre constantes dont le code dépend ; en ajouter une quand une nouvelle constante doit rester cohérente avec une autre.
 
 ## Conventions de nommage
@@ -150,7 +161,7 @@ Idées et tâches retenues par le propriétaire, pas encore commencées. Chacune
 
 - **Recharger une voiture vide.** Ajouter un ou plusieurs moyens ; aujourd'hui il faut la ramasser et la reposer. (`travel.handle_empty`)
 - **Réessai sans limite vers un chargeur.** Ne le garder que lorsque la voiture est sur le retour (recharge juste avant le garage, ou après un abandon complet) ; ailleurs, limiter les essais comme pour les autres trajets. Tant que ce réessai est sans limite, `release_charger_slot` dans `stuck_tick` ne libère jamais rien. (`travel.start_stuck`)
-- **Graphismes provisoires.** Coffre d'approvisionnement, icône du sélecteur de ghosts, restes du garage. (`prototypes/`)
+- **Graphismes provisoires.** Coffre d'approvisionnement, icône du sélecteur de ghosts, restes du garage et du chargeur (leurs images sont déjà dans `graphics/*/remnants`, pas encore utilisées). (`prototypes/`)
 
 ## Problèmes connus
 
@@ -172,3 +183,5 @@ Observés dans les scénarios de test.
 - **Voiture bloquée à la sortie du garage.** `release_car` la pose contre le garage ; quand sa cible était derrière elle, elle reculait dans le garage. Le mode manœuvre le résout dans les scénarios `garage-exit` et `construction`, qui construisent maintenant tous leurs ghosts : reste à valider en jeu.
 - **`stuck_retry_count` jamais atteint.** Il est maintenant remis à zéro à l'arrivée et non dans `begin_leg`, donc `max_stuck_retries` peut se déclencher : à valider en test (le scénario `sealed` passe par ce compteur).
 - **`moving` restait actif après un `step_back`.** `on_next_task` le désactive quand la file est vide, et le scénario `blocked-ghost` construit maintenant son ghost : à valider en jeu.
+- **Noms affichés en jeu.** Sans dossier `locale/`, entités, objets, raccourci et touche n'avaient pas de nom. `locale/en` et `locale/fr` les définissent maintenant, avec leurs descriptions. Factorio résout tous ces noms dans les deux langues (`--dump-prototype-locale`) : reste à les voir en jeu.
+- **Icônes du chargeur et de la voiture.** Le chargeur et son objet, copiés de l'interface d'énergie du jeu, en gardaient l'icône (`icons` l'emporte sur `icon`) et l'objet restait caché (`hidden`) ; l'entité voiture utilisait l'icône du jeu. Tous utilisent maintenant l'icône du mod et l'objet chargeur n'est plus caché : à valider en jeu.

@@ -23,7 +23,9 @@ param(
 	[int]$To = [int]::MaxValue
 )
 
-$flagNames = "moving", "charging", "parking", "building", "stuck", "waiting", "empty", "maneuver", "emergency_brake", "high_speed", "precision_mode"
+# The flag names, in the order of the trace, come from FLAG_NAMES in harness.lua.
+$flagLine = [regex]::Match([IO.File]::ReadAllText((Join-Path $PSScriptRoot "harness.lua")), '(?m)^local FLAG_NAMES = \{(.*)\}').Groups[1].Value
+$flagNames = @([regex]::Matches($flagLine, '"([^"]+)"') | ForEach-Object { $_.Groups[1].Value })
 if (-not (Test-Path $Trace)) {
 	$Trace = Join-Path (Join-Path $env:TEMP "autonomous-car-tests") "trace-$Trace.txt"
 }
