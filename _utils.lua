@@ -1,4 +1,8 @@
--- Shared helpers: car fuel, deque, alerts, entity cleanup and the next-task event.
+local util = require("util")
+local config = require("config")
+
+-- Shared helpers: car fuel, closest-entity search, deque, alerts, entity
+-- cleanup and the next-task event.
 local _utils = {}
 
 -- ============================================================
@@ -6,22 +10,21 @@ local _utils = {}
 -- ============================================================
 -- The car is electric in spirit. Its burner has no fuel slot and always burns
 -- one hidden fuel item: burner.remaining_burning_fuel is the charge, and the
--- fuel value of that item is the tank capacity.
-
-local FUEL_ITEM = "electric_cars_fuel"
+-- fuel value of that item is the tank capacity. The charge is read and written
+-- through these helpers only.
 
 -- Puts the fuel item in the car's burner. Without it the burner ignores any
 -- write to remaining_burning_fuel.
 function _utils.set_fuel_item(car)
-	car.burner.currently_burning = FUEL_ITEM
+	car.burner.currently_burning = config.names.fuel
 end
 
 -- Tank capacity. A burner that ran dry loses its fuel item, so this also puts
--- it back: call it before writing the charge.
+-- it back.
 function _utils.fuel_capacity(car)
 	local burner = car.burner
 	if not burner.currently_burning then
-		burner.currently_burning = FUEL_ITEM
+		burner.currently_burning = config.names.fuel
 	end
 	return burner.currently_burning.name.fuel_value
 end
@@ -29,6 +32,45 @@ end
 -- Charge left in the tank.
 function _utils.remaining_fuel(car)
 	return car.burner.remaining_burning_fuel
+end
+
+-- Charge left, as a fraction of the tank capacity.
+function _utils.fuel_ratio(car)
+	local capacity = _utils.fuel_capacity(car) -- read first: it puts the fuel item back
+	return _utils.remaining_fuel(car) / capacity
+end
+
+-- Sets the charge of the tank.
+function _utils.set_fuel(car, fuel)
+	_utils.fuel_capacity(car) -- puts the fuel item back if needed: without it the write is ignored
+	car.burner.remaining_burning_fuel = fuel
+end
+
+-- ============================================================
+-- Closest entity
+-- ============================================================
+
+-- Closest valid entity of `entities` ([id] = entity) to `position`, or nil.
+-- `accept(entity, id)`, if given, tells whether an entity may be chosen. A
+-- stale entity is released as `kind` (see "Entity cleanup") when a kind is
+-- given, and just skipped otherwise. Of two entities at the same distance, the
+-- first one in the table wins.
+function _utils.closest(entities, position, accept, kind)
+	local best, best_distance
+	for id, entity in pairs(entities) do
+		if entity.valid then
+			if not accept or accept(entity, id) then
+				local distance = util.distance(position, entity.position)
+				if not best or distance < best_distance then
+					best = entity
+					best_distance = distance
+				end
+			end
+		elseif kind then
+			_utils.release_entity(kind, id)
+		end
+	end
+	return best
 end
 
 -- ============================================================
@@ -71,9 +113,11 @@ end
 -- ============================================================
 -- Alerts
 -- ============================================================
+-- `item` is the name of the item whose icon marks the alert on the map.
 
 -- Prints `message` to a force and pins it on `target` as a map alert.
-function _utils.alert(force, target, message, icon)
+function _utils.alert(force, target, message, item)
+	local icon = {type = "item", name = item}
 	force.print(message)
 	for _, player in pairs(force.players) do
 		player.add_custom_alert(target, icon, message, true)
@@ -82,12 +126,12 @@ end
 
 -- Same, but only once: `flags[key]` remembers that the alert was raised, until
 -- alert_reset clears it. Keeps a retry loop from repeating the same alert.
-function _utils.alert_once(flags, key, force, target, message, icon)
+function _utils.alert_once(flags, key, force, target, message, item)
 	if flags[key] then
 		return
 	end
 	flags[key] = true
-	_utils.alert(force, target, message, icon)
+	_utils.alert(force, target, message, item)
 end
 
 function _utils.alert_reset(flags, key)
@@ -119,7 +163,7 @@ end
 -- fully charged) and should start its next task. This is an event rather than
 -- a call because control.lua sits above every other module.
 function _utils.raise_next_task(car)
-	script.raise_event(prototypes.custom_event.autonomous_car_next_task, {entity = car})
+	script.raise_event(prototypes.custom_event[config.names.next_task_event], {entity = car})
 end
 
 return _utils

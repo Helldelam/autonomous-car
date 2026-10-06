@@ -13,32 +13,17 @@ end
 -- Closest charger to `target_position` (the car itself by default) that has a
 -- free slot and that the car has enough fuel to reach. Returns nil if there is none.
 function charger_control.find_charger(car, target_position)
-	target_position = target_position or car.position
 	local remaining_fuel = _utils.remaining_fuel(car)
-	local best, best_distance
-
-	for id, charger in pairs(storage.chargers) do
-		if charger.valid then
-			if storage.charger_data[id].users < config.max_charger_users
-				and remaining_fuel >= charger_control.fuel_needed(car, charger.position) then
-				local distance = util.distance(target_position, charger.position)
-				if not best or distance < best_distance then
-					best = charger
-					best_distance = distance
-				end
-			end
-		else
-			_utils.release_entity("charger", id)
-		end
-	end
-
-	return best
+	return _utils.closest(storage.chargers, target_position or car.position, function(charger, id)
+		return storage.charger_data[id].users < config.max_charger_users
+			and remaining_fuel >= charger_control.fuel_needed(car, charger.position)
+	end, "charger")
 end
 
 -- Called every tick while the car is charging: moves energy from the charger
 -- buffer to the car's tank, then frees the charger slot and starts the car's
 -- next task once the tank is full.
-function charger_control.charge(car, charger)
+function charger_control.charging_tick(car, charger)
 	local car_data = storage.car_data[car.unit_number]
 
 	if not (charger and charger.valid) then
@@ -50,14 +35,13 @@ function charger_control.charge(car, charger)
 		return
 	end
 
-	local capacity = _utils.fuel_capacity(car)
-	local transfer = capacity / config.full_charge_duration
+	local transfer = _utils.fuel_capacity(car) / config.full_charge_duration
 	if charger.energy > transfer then
-		car.burner.remaining_burning_fuel = _utils.remaining_fuel(car) + transfer
+		_utils.set_fuel(car, _utils.remaining_fuel(car) + transfer)
 		charger.energy = charger.energy - transfer
 	end
 
-	if _utils.remaining_fuel(car) / capacity >= 1 then
+	if _utils.fuel_ratio(car) >= 1 then
 		local charger_data = storage.charger_data[charger.unit_number]
 		charger_data.users = charger_data.users - 1
 		car_data.charging.active = false
@@ -68,8 +52,8 @@ end
 
 function charger_control.alert_no_charger(car)
 	_utils.alert_once(storage.car_data[car.unit_number].alerts, "no_charger", car.force, car,
-		"An autonomous car needs to recharge but no reachable charging station is available.",
-		{type = "item", name = "autonomous_car"})
+		"An autonomous car needs to recharge but no reachable charger is available.",
+		config.names.car)
 end
 
 return charger_control

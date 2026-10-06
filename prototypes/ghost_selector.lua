@@ -2,10 +2,12 @@
 -- (see on_area_selected in control.lua), with its shortcut and its key binding.
 -- TODO: custom icon; it borrows the deconstruction planner's for now.
 
+local names = require("config").names
+
 data:extend{
 	{
 		type = "selection-tool",
-		name = "autonomous_car_ghost_selector",
+		name = names.ghost_selector,
 		icon = "__base__/graphics/icons/deconstruction-planner.png",
 		icon_size = 64,
 		-- Same flags as the deconstruction planner: the item only ever exists in
@@ -29,20 +31,20 @@ data:extend{
 	},
 	{
 		type = "shortcut",
-		name = "autonomous-car-ghost-selector-shortcut",
+		name = names.ghost_selector_shortcut,
 		order = "z[autonomous-car]",
 		action = "spawn-item",
-		item_to_spawn = "autonomous_car_ghost_selector",
+		item_to_spawn = names.ghost_selector,
 		icon = "__base__/graphics/icons/deconstruction-planner.png",
 		icon_size = 64,
-		associated_control_input = "autonomous-car-ghost-selector-input",
+		associated_control_input = names.ghost_selector_input,
 		small_icon = "__base__/graphics/icons/deconstruction-planner.png",
 	},
 	{
 		type = "custom-input",
-		name = "autonomous-car-ghost-selector-input",
+		name = names.ghost_selector_input,
 		key_sequence = "ALT + G",
 		action = "spawn-item",
-		item_to_spawn = "autonomous_car_ghost_selector",
+		item_to_spawn = names.ghost_selector,
 	}
 }

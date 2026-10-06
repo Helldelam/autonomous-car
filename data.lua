@@ -1,31 +1,34 @@
 -- Prototypes shared by the whole mod. Each entity has its own file in prototypes/.
+-- Every prototype name comes from config.names, which the scripts read too.
+local names = require("config").names
+
 data:extend{
 	{
 		type = "fuel-category",
-		name = "electric_cars"
+		name = names.fuel
 	},
 	{
 		type = "item-subgroup",
-		name = "autocar",
+		name = names.subgroup,
 		group = "logistics",
 		order = "fa" -- next to transport
 	},
 	-- Hidden fuel item that stands for the car's battery (see the fuel helpers in _utils.lua).
 	{
 		type = "item",
-		name = "electric_cars_fuel",
+		name = names.fuel,
 		hidden = true,
-		fuel_category = "electric_cars",
+		fuel_category = names.fuel,
 		fuel_value = "6MJ",
 		stack_size = 50,
-		icon = "__autonomous-car__/graphics/fuel/coin.png",
-		subgroup = "autocar",
-		order = "zz[coin]",
+		icon = "__autonomous-car__/graphics/fuel/icon.png",
+		subgroup = names.subgroup,
+		order = "zz[fuel]",
 	},
 	-- Raised when a car finishes its current step (see _utils.raise_next_task).
 	{
 		type = "custom-event",
-		name = "autonomous_car_next_task",
+		name = names.next_task_event,
 	}
 }
 

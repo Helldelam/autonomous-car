@@ -5,8 +5,9 @@ Reads a trace produced by tests/run.ps1.
 .DESCRIPTION
 Temporary development aid, to be removed with the tests/ folder.
 
-Without -Car: the events of the scenario, the summary lines and the list of
-cars. With -Car: one line each time the state of that car changes.
+Without -Car: the events of the scenario, the summary lines (and the GATE-TEST
+lines of gate-manual) and the list of cars. With -Car: one line each time the
+state of that car changes.
 
 .EXAMPLE
 tests\show.ps1 construction
@@ -22,7 +23,9 @@ param(
 	[int]$To = [int]::MaxValue
 )
 
-$flagNames = "moving", "charging", "parking", "building", "stuck", "waiting", "empty", "maneuver", "emergency_brake", "high_speed", "precision_mode"
+# The flag names, in the order of the trace, come from FLAG_NAMES in harness.lua.
+$flagLine = [regex]::Match([IO.File]::ReadAllText((Join-Path $PSScriptRoot "harness.lua")), '(?m)^local FLAG_NAMES = \{(.*)\}').Groups[1].Value
+$flagNames = @([regex]::Matches($flagLine, '"([^"]+)"') | ForEach-Object { $_.Groups[1].Value })
 if (-not (Test-Path $Trace)) {
 	$Trace = Join-Path (Join-Path $env:TEMP "autonomous-car-tests") "trace-$Trace.txt"
 }
@@ -30,7 +33,7 @@ $lines = Get-Content $Trace
 $carLine = '^(\d+) (\d+) (\S+) (\S+) \S+ (\S+) (\S+) ([01]+) a\d+ d\d+ f\S+ t(\d+) g(-?\d+) i(-?\d+) k(\S+) dst(\S+) \[(.*)\]$'
 
 if ($Car -lt 0) {
-	$lines | Where-Object { $_ -match "^(SETUP|EVENT|SELECT|SUMMARY) " }
+	$lines | Where-Object { $_ -match "^(SETUP|EVENT|SELECT|SUMMARY|GATE-TEST) " }
 	$cars = @{}
 	foreach ($line in $lines) {
 		if ($line -match $carLine) {

@@ -5,11 +5,13 @@
 -- tests/run.ps1 appends this file to a temporary copy of control.lua, after a
 -- line that defines SCENARIO, and runs the result in Factorio's benchmark
 -- mode. The mod itself never loads it. Being part of the control.lua chunk, it
--- can use that file's locals: on_area_selected and the modules.
+-- can use that file's locals: on_area_selected, names and the modules (which
+-- a Lua language server reading this file alone would report as undefined).
+---@diagnostic disable: undefined-global
 --
 -- Output, in script-output/:
 --   trace.txt     one line per car every 10 ticks, plus SETUP, EVENT, SELECT
---                 and SUMMARY lines
+--                 and SUMMARY lines, and the GATE-TEST lines of gate-manual
 --   coverage.txt  how many times each module function was called
 --
 -- Car line:
@@ -17,7 +19,8 @@
 --   f<friction> t<queued tasks> g<ghosts left> i<item types missing>
 --   k<charge detours>,<stuck retries> dst<destination x,y> [alerts raised]
 -- FLAGS has one digit per name of FLAG_NAMES, in that order. g and i are -1
--- when the car has no batch. tests/show.ps1 decodes these lines.
+-- when the car has no batch. tests/show.ps1 decodes these lines, and reads
+-- FLAG_NAMES from the line below.
 
 local FLAG_NAMES = {"moving", "charging", "parking", "building", "stuck", "waiting", "empty", "maneuver", "emergency_brake", "high_speed", "precision_mode"}
 local BUILT_NAMES = {"wooden-chest", "stone-furnace", "small-electric-pole", "steel-chest", "car"}
@@ -50,7 +53,7 @@ local function make(surface, name, x, y)
 	local entity = surface.create_entity{name = name, position = {x, y}, force = "player", raise_built = true}
 	if not entity then
 		out("SETUP could not create " .. name .. " at " .. x .. "," .. y)
-	elseif name == "autonomouscar_charging_station" then
+	elseif name == names.charger then
 		table.insert(T.chargers, entity)
 	end
 	return entity
@@ -58,10 +61,10 @@ end
 
 -- `fuel_ratio` overrides the charge a new car starts with.
 local function make_car(surface, x, y, orientation, fuel_ratio)
-	local car = make(surface, "autonomous_car", x, y)
+	local car = make(surface, names.car, x, y)
 	car.orientation = orientation
 	if fuel_ratio then
-		car.burner.remaining_burning_fuel = _utils.fuel_capacity(car) * fuel_ratio
+		_utils.set_fuel(car, _utils.fuel_capacity(car) * fuel_ratio)
 	end
 	return car
 end
@@ -88,7 +91,7 @@ end
 local function select_ghosts(x1, y1, x2, y2)
 	local ghosts = T.surface.find_entities_filtered{type = "entity-ghost", area = {{x1, y1}, {x2, y2}}}
 	out("SELECT " .. game.tick .. " " .. #ghosts .. " ghosts")
-	on_area_selected{item = "autonomous_car_ghost_selector", player_index = 1, entities = ghosts, tick = game.tick}
+	on_area_selected{item = names.ghost_selector, player_index = 1, entities = ghosts, tick = game.tick}
 end
 
 local function heading_to(car, target)
@@ -102,8 +105,12 @@ end
 -- ============================================================
 -- Scenarios
 -- ============================================================
--- Each scenario has a `setup` function and an optional `events(t)` function,
--- called every tick with the number of ticks since the setup.
+-- Each scenario has a `setup` function, an optional `events(t)` function,
+-- called every tick with the number of ticks since the setup, and an optional
+-- `ticks`, the time it runs when it needs less than the default of run.ps1.
+-- This file is the only list of scenarios: run.ps1 reads their names and
+-- their `ticks` from the lines below. Keep the form scenarios["name"] = {,
+-- with `ticks = N,` as the next line.
 
 -- Driving, charging and parking, on open ground, around obstacles and on
 -- natural terrain. Also: a destination destroyed on the way, and a critically
@@ -116,15 +123,15 @@ scenarios["basics"] = {
 		local s = new_surface({{10000, 0}, {11000, 0}, {11000, 1000}, {12000, 0}}, 6)
 
 		-- Open ground: three cars that charge, then park.
-		make(s, "autonomouscar_charging_station", 10000, 0)
-		make(s, "autonomous_car_garage", 10040, 0)
+		make(s, names.charger, 10000, 0)
+		make(s, names.garage, 10040, 0)
 		make_car(s, 9920, 20, 0)
 		make_car(s, 9950, -60, 0.25)
 		make_car(s, 10020, 70, 0.6)
 
 		-- A wall and trees between two cars and their charger.
-		make(s, "autonomouscar_charging_station", 11000, 0)
-		make(s, "autonomous_car_garage", 11040, 0)
+		make(s, names.charger, 11000, 0)
+		make(s, names.garage, 11040, 0)
 		for y = -20, 20 do
 			s.create_entity{name = "stone-wall", position = {10970.5, y + 0.5}, force = "player"}
 		end
@@ -139,13 +146,13 @@ scenarios["basics"] = {
 		make_car(s, 10940, 30, 0.9)
 
 		-- A critically low car: no charger in reach until one is built at t = 3000.
-		make(s, "autonomous_car_garage", 11010, 1000)
+		make(s, names.garage, 11010, 1000)
 		make_car(s, 11000, 1000, 0.3, 0.01)
 
 		-- Chargers and a garage that get destroyed while the car needs them.
-		T.charger1 = make(s, "autonomouscar_charging_station", 12000, 0)
-		T.charger2 = make(s, "autonomouscar_charging_station", 12060, 0)
-		T.garage1 = make(s, "autonomous_car_garage", 12030, 20)
+		T.charger1 = make(s, names.charger, 12000, 0)
+		T.charger2 = make(s, names.charger, 12060, 0)
+		T.garage1 = make(s, names.garage, 12030, 20)
 		make_car(s, 11950, 0, 0.75)
 
 		-- Natural terrain: the starting area of nauvis.
@@ -163,10 +170,10 @@ scenarios["basics"] = {
 			end
 			return make(nauvis, name, position.x, position.y)
 		end
-		make_on_nauvis("autonomouscar_charging_station", 10, 10)
-		make_on_nauvis("autonomous_car_garage", -30, 20)
+		make_on_nauvis(names.charger, 10, 10)
+		make_on_nauvis(names.garage, -30, 20)
 		for _, spot in pairs{{90, 60, 0.4}, {-100, -70, 0.8}, {60, -110, 0.1}} do
-			local car = make_on_nauvis("autonomous_car", spot[1], spot[2])
+			local car = make_on_nauvis(names.car, spot[1], spot[2])
 			if car then
 				car.orientation = spot[3]
 			end
@@ -182,17 +189,17 @@ scenarios["basics"] = {
 			out("EVENT charger2 died")
 		end
 		if t == 2500 then
-			make(T.surface, "autonomouscar_charging_station", 12010, -10)
+			make(T.surface, names.charger, 12010, -10)
 		end
 		if t == 3000 then
-			make(T.surface, "autonomouscar_charging_station", 11005, 1008)
+			make(T.surface, names.charger, 11005, 1008)
 		end
 		if t == 3500 and T.garage1.valid then
 			T.garage1.die()
 			out("EVENT garage1 died")
 		end
 		if t == 6500 then
-			make(T.surface, "autonomous_car_garage", 12020, 30)
+			make(T.surface, names.garage, 12020, 30)
 		end
 	end,
 }
@@ -203,13 +210,13 @@ scenarios["basics"] = {
 scenarios["construction"] = {
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
-		make(s, "autonomouscar_charging_station", 0, 0)
-		make(s, "autonomouscar_charging_station", -10, 20)
-		make(s, "autonomous_car_garage", 20, -10)
-		T.chest = make(s, "autonomous_car_chest", 0.5, 30.5)
+		make(s, names.charger, 0, 0)
+		make(s, names.charger, -10, 20)
+		make(s, names.garage, 20, -10)
+		T.chest = make(s, names.chest, 0.5, 30.5)
 		fill(T.chest, {["wooden-chest"] = 60, ["stone-furnace"] = 20})
-		fill(make(s, "autonomous_car_chest", 1.5, 30.5), {["small-electric-pole"] = 30, ["wooden-chest"] = 10})
-		fill(make(s, "autonomous_car_chest", -30.5, 40.5), {["car"] = 45})
+		fill(make(s, names.chest, 1.5, 30.5), {["small-electric-pole"] = 30, ["wooden-chest"] = 10})
+		fill(make(s, names.chest, -30.5, 40.5), {["car"] = 45})
 		make_car(s, 10, 10, 0.1)
 		make_car(s, -20, 5, 0.5)
 		make_car(s, 5, -25, 0.8)
@@ -265,27 +272,27 @@ scenarios["construction"] = {
 scenarios["failures"] = {
 	setup = function()
 		local s = new_surface({{0, 0}, {3000, 3000}, {3500, 3000}}, 10)
-		make(s, "autonomouscar_charging_station", 0, 0)
-		make(s, "autonomous_car_garage", 20, -10)
-		T.chest = make(s, "autonomous_car_chest", 0.5, 30.5)
+		make(s, names.charger, 0, 0)
+		make(s, names.garage, 20, -10)
+		T.chest = make(s, names.chest, 0.5, 30.5)
 		fill(T.chest, {["wooden-chest"] = 20})
 		make_car(s, 10, 10, 0.1)
 		for i = 0, 4 do
 			make_ghost(s, "wooden-chest", -60.5 - 2 * i, 100.5)
 		end
 
-		make(s, "autonomouscar_charging_station", -150, 0)
+		make(s, names.charger, -150, 0)
 		T.car2 = make_car(s, -100, 60, 0.3)
 
-		make(s, "autonomouscar_charging_station", 190, -180)
-		T.garage3 = make(s, "autonomous_car_garage", 200, -200)
+		make(s, names.charger, 190, -180)
+		T.garage3 = make(s, names.garage, 200, -200)
 		T.car3 = make_car(s, 180, -150, 0.6)
 
-		make(s, "autonomouscar_charging_station", -190, -180)
-		T.garage4 = make(s, "autonomous_car_garage", -200, -200)
+		make(s, names.charger, -190, -180)
+		T.garage4 = make(s, names.garage, -200, -200)
 		T.car4 = make_car(s, -180, -150, 0.9)
 
-		make(s, "autonomous_car_garage", 3500, 3000)
+		make(s, names.garage, 3500, 3000)
 		make_car(s, 3000, 3000, 0, 0.12)
 	end,
 	events = function(t)
@@ -321,7 +328,7 @@ scenarios["failures"] = {
 			end
 		end
 		if t == 15000 then
-			for _, garage in pairs(T.surface.find_entities_filtered{name = "autonomous_car_garage"}) do
+			for _, garage in pairs(T.surface.find_entities_filtered{name = names.garage}) do
 				garage.die()
 			end
 			out("EVENT all garages died")
@@ -338,8 +345,8 @@ scenarios["failures"] = {
 scenarios["blocked-ghost"] = {
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
-		make(s, "autonomouscar_charging_station", 0, 0)
-		T.chest = make(s, "autonomous_car_chest", 0.5, 30.5)
+		make(s, names.charger, 0, 0)
+		T.chest = make(s, names.chest, 0.5, 30.5)
 		fill(T.chest, {["wooden-chest"] = 20})
 		make_car(s, -20, -20, 0)
 		make_blocked_ghost(s, 80.5, 40.5)
@@ -361,9 +368,9 @@ scenarios["blocked-ghost"] = {
 scenarios["garage-exit"] = {
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
-		make(s, "autonomouscar_charging_station", 0, 0)
-		make(s, "autonomous_car_garage", 30, 0)
-		T.chest = make(s, "autonomous_car_chest", 0.5, 30.5)
+		make(s, names.charger, 0, 0)
+		make(s, names.garage, 30, 0)
+		T.chest = make(s, names.chest, 0.5, 30.5)
 		fill(T.chest, {["wooden-chest"] = 20})
 		make_car(s, -20, -20, 0)
 		make_ghost(s, "wooden-chest", 80.5, 40.5)
@@ -382,9 +389,9 @@ scenarios["garage-exit"] = {
 scenarios["stale-task"] = {
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
-		make(s, "autonomouscar_charging_station", -150, 0)
-		make(s, "autonomous_car_garage", -160, 0)
-		T.chest = make(s, "autonomous_car_chest", 0.5, 30.5)
+		make(s, names.charger, -150, 0)
+		make(s, names.garage, -160, 0)
+		T.chest = make(s, names.chest, 0.5, 30.5)
 		fill(T.chest, {["wooden-chest"] = 20})
 		-- Half a tank: enough not to be critical, too little to park without a top-up.
 		make_car(s, 0, 0, 0.75, 0.5)
@@ -421,8 +428,8 @@ end
 scenarios["sealed"] = {
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
-		make(s, "autonomouscar_charging_station", 0, 0)
-		T.chest = make(s, "autonomous_car_chest", 70.5, 0.5)
+		make(s, names.charger, 0, 0)
+		T.chest = make(s, names.chest, 70.5, 0.5)
 		fill(T.chest, {["wooden-chest"] = 20})
 
 		T.ring_a = wall_ring(s, 50.5, 50.5)
@@ -454,9 +461,9 @@ scenarios["sealed"] = {
 scenarios["empty-battery"] = {
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
-		make(s, "autonomouscar_charging_station", 0, 0)
-		make(s, "autonomous_car_garage", 20, -10)
-		T.chest = make(s, "autonomous_car_chest", 0.5, 30.5)
+		make(s, names.charger, 0, 0)
+		make(s, names.garage, 20, -10)
+		T.chest = make(s, names.chest, 0.5, 30.5)
 		fill(T.chest, {["wooden-chest"] = 20})
 		T.car = make_car(s, 5, 10, 0, 0)
 		make_ghost(s, "wooden-chest", 40.5, 40.5)
@@ -466,21 +473,22 @@ scenarios["empty-battery"] = {
 			select_ghosts(35, 35, 45, 45)
 		end
 		if t == 3000 then
-			T.car.burner.remaining_burning_fuel = _utils.fuel_capacity(T.car) * 0.5
+			_utils.set_fuel(T.car, _utils.fuel_capacity(T.car) * 0.5)
 			out("EVENT battery refilled")
 		end
 	end,
 }
 
 -- A wall with a gate on the straight way between a supply chest and a ghost: the
--- car can only build the ghost if it gets through the gate, which opens for
--- vehicles of its force.
+-- car can only build the ghost if it gets through the gate. When this scenario
+-- was written it did not: the gate stays shut for the car (see gate-manual),
+-- which follows the wall without ever heading for the gate.
 scenarios["gate"] = {
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
-		make(s, "autonomouscar_charging_station", 0, 0)
-		make(s, "autonomous_car_garage", 20, -10)
-		T.chest = make(s, "autonomous_car_chest", 0.5, 30.5)
+		make(s, names.charger, 0, 0)
+		make(s, names.garage, 20, -10)
+		T.chest = make(s, names.chest, 0.5, 30.5)
 		fill(T.chest, {["wooden-chest"] = 20})
 		make_car(s, -20, -20, 0)
 		for y = -60, 140 do
@@ -502,8 +510,9 @@ scenarios["gate"] = {
 -- Does a gate open for an autonomous car at all? An untracked car (the mod does
 -- not drive it) is driven straight at a gate by the scenario itself, once with
 -- the gate on a wall and once without any gate, for comparison. Lines GATE-TEST
--- give its x position every 10 ticks: the wall is at x = 20.5.
+-- give its x position every 10 ticks, for 400 ticks: the wall is at x = 20.5.
 scenarios["gate-manual"] = {
+	ticks = 600,
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
 		T.test_cars = {}
@@ -522,10 +531,10 @@ scenarios["gate-manual"] = {
 			if index == 3 then
 				car = s.create_entity{name = "character", position = {14, y}, force = "player"}
 			else
-				car = s.create_entity{name = "autonomous_car", position = {14, y}, force = "player"}
+				car = s.create_entity{name = names.car, position = {14, y}, force = "player"}
 				car.orientation = 0.25
 				_utils.set_fuel_item(car)
-				car.burner.remaining_burning_fuel = _utils.fuel_capacity(car)
+				_utils.set_fuel(car, _utils.fuel_capacity(car))
 			end
 			T.test_cars[index] = car
 		end
@@ -592,7 +601,7 @@ local function trace_summary(tick)
 	local parked = 0
 	for _, garage in pairs(storage.garages) do
 		if garage.valid then
-			parked = parked + garage.get_inventory(defines.inventory.chest).get_item_count("autonomous_car")
+			parked = parked + garage.get_inventory(defines.inventory.chest).get_item_count(names.car)
 		end
 	end
 	local users = {}
