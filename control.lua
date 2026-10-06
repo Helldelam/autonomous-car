@@ -9,6 +9,8 @@ local charger_control = require("charge")
 local garage_control = require("park")
 local ghost_control = require("ghost")
 
+local names = config.names
+
 -- ============================================================
 -- Entity tracking
 -- ============================================================
@@ -35,11 +37,12 @@ _utils.register_release_handler("chest", function(id)
 	storage.supply_chests[id] = nil
 end)
 
+-- Kind of each tracked entity, as _utils.release_entity names it.
 local KIND_BY_NAME = {
-	autonomous_car = "car",
-	autonomous_car_charger = "charger",
-	autonomous_car_garage = "garage",
-	autonomous_car_chest = "chest",
+	[names.car] = "car",
+	[names.charger] = "charger",
+	[names.garage] = "garage",
+	[names.chest] = "chest",
 }
 
 -- Runtime state of a car, kept in storage.car_data[unit_number].
@@ -91,24 +94,24 @@ local function on_built(event)
 	local entity = event.entity
 	local id = entity.unit_number
 
-	if entity.name == "autonomous_car" then
+	if entity.name == names.car then
 		entity.friction_modifier = config.friction_base
 		entity.color = colors.car
 		entity.riding_state = {acceleration = defines.riding.acceleration.nothing, direction = defines.riding.direction.straight}
 		-- A new car starts with config.critical_fuel_ratio of a full tank.
 		_utils.set_fuel_item(entity)
-		if entity.burner.remaining_burning_fuel == 0 then
-			entity.burner.remaining_burning_fuel = _utils.fuel_capacity(entity) * config.critical_fuel_ratio
+		if _utils.remaining_fuel(entity) == 0 then
+			_utils.set_fuel(entity, _utils.fuel_capacity(entity) * config.critical_fuel_ratio)
 		end
 		storage.cars[id] = entity
 		storage.car_data[id] = new_car_data(event.tick)
-	elseif entity.name == "autonomous_car_charger" then
+	elseif entity.name == names.charger then
 		storage.chargers[id] = entity
 		storage.charger_data[id] = {users = 0} -- cars charging here or on their way
-	elseif entity.name == "autonomous_car_garage" then
+	elseif entity.name == names.garage then
 		storage.garages[id] = entity
 		storage.garage_data[id] = {fuel = {}, alerts = {}} -- fuel[slot] = fuel level of the car parked in that slot
-	elseif entity.name == "autonomous_car_chest" then
+	elseif entity.name == names.chest then
 		storage.supply_chests[id] = entity
 	end
 end
@@ -129,7 +132,7 @@ end
 -- The player dragged the ghost selector over an area: tracks the selected
 -- ghosts, splits them into clusters, and gives each cluster to a car or queues it.
 local function on_area_selected(event)
-	if event.item ~= "autonomous_car_ghost_selector" then
+	if event.item ~= names.ghost_selector then
 		return
 	end
 
@@ -296,10 +299,14 @@ local function on_next_task(event)
 	local moving = car_data.moving
 
 	car_data.stuck_retry_count = 0 -- the step was completed: nothing to retry
+
+	-- The leg, if the step was one, is over: what the car reached goes to its next task.
+	local destination = moving.destination
+	moving.active = false
+	moving.destination = nil
+
 	if _utils.deque.length(car_data.tasks) == 0 then
-		-- Arrived with nothing queued (a step back): the leg is over.
-		moving.active = false
-		moving.destination = nil
+		-- Nothing queued (the car arrived from a step back).
 		if not ghost_control.try_assign_pending(car) then
 			car_data.waiting.active = true
 			car_data.waiting.since = event.tick
@@ -310,23 +317,17 @@ local function on_next_task(event)
 	local task = _utils.deque.pop_front(car_data.tasks)
 	if task.type == "charging" then
 		car_data.charging.active = true
-		car_data.charging.charger = moving.destination
-		moving.destination = nil
-		moving.active = false
+		car_data.charging.charger = destination
 	elseif task.type == "parking" then
 		car_data.parking.active = true
-		car_data.parking.garage = moving.destination
-		moving.destination = nil
-		moving.active = false
+		car_data.parking.garage = destination
 	elseif task.type == "building" then
 		car_data.building.active = true
 		car_data.building.next_attempt_tick = event.tick
-		moving.destination = nil
-		moving.active = false
 	elseif task.type == "collect" then
-		ghost_control.collect_items(car)
+		ghost_control.collect_items(car, destination)
 	elseif task.type == "deposit" then
-		ghost_control.deposit_items(car)
+		ghost_control.deposit_items(car, destination)
 	end
 end
 
@@ -339,5 +340,5 @@ script.on_event(defines.events.on_robot_mined_entity, on_removed)
 script.on_event(defines.events.on_object_destroyed, on_object_destroyed)
 script.on_event(defines.events.on_player_selected_area, on_area_selected)
 script.on_event(defines.events.on_player_alt_selected_area, on_area_selected)
-script.on_event(prototypes.custom_event.autonomous_car_next_task, on_next_task)
+script.on_event(prototypes.custom_event[names.next_task_event], on_next_task)
 script.on_event(defines.events.on_tick, init_storage)

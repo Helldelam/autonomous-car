@@ -14,6 +14,13 @@ local travel = require("travel")
 --   items_needed    [item name] = count still to collect
 --   alerted_items   alert_once flags of the missing-item alerts
 --   failed_attempts [unit_number] = {count, retry_tick} of a ghost that failed to revive
+--
+-- control.lua enters through register_ghost, on_ghost_destroyed, build_clusters,
+-- any_car_exists, find_available_car, assign_cluster, try_assign_pending,
+-- retry_pending_clusters, proceed, collect_items, deposit_items, building_tick
+-- and abandon. The other functions are steps of those: they sit on the table
+-- too, so that they can call one another in any order and be counted by the
+-- test harness.
 local ghost_control = {}
 
 -- ============================================================
@@ -224,7 +231,7 @@ function ghost_control.any_car_exists()
 		return true
 	end
 	for _, garage in pairs(storage.garages) do
-		if garage.valid and garage.get_inventory(defines.inventory.chest).find_item_stack("autonomous_car") then
+		if garage.valid and garage_control.find_parked_car(garage) then
 			return true
 		end
 	end
@@ -240,32 +247,17 @@ function ghost_control.find_available_car(cluster)
 		return nil
 	end
 
-	local best_car, best_distance
-	for id, car in pairs(storage.cars) do
-		if car.valid and storage.car_data[id].waiting.active and not storage.car_data[id].construction then
-			local distance = util.distance(car.position, centroid)
-			if not best_car or distance < best_distance then
-				best_car = car
-				best_distance = distance
-			end
-		end
-	end
-	if best_car then
-		return best_car
+	local car = _utils.closest(storage.cars, centroid, function(_, id)
+		local car_data = storage.car_data[id]
+		return car_data.waiting.active and not car_data.construction
+	end)
+	if car then
+		return car
 	end
 
-	local best_garage
-	for _, garage in pairs(storage.garages) do
-		if garage.valid and garage.get_inventory(defines.inventory.chest).find_item_stack("autonomous_car") then
-			local distance = util.distance(garage.position, centroid)
-			if not best_garage or distance < best_distance then
-				best_garage = garage
-				best_distance = distance
-			end
-		end
-	end
-	if best_garage then
-		return garage_control.release_car(best_garage)
+	local garage = _utils.closest(storage.garages, centroid, garage_control.find_parked_car)
+	if garage then
+		return garage_control.release_car(garage)
 	end
 
 	return nil
@@ -372,38 +364,14 @@ end
 
 -- Closest supply chest whose group holds at least one of the needed items, or nil.
 function ghost_control.find_supply_chest(car, items_needed)
-	local best, best_distance
-	for id, chest in pairs(storage.supply_chests) do
-		if chest.valid then
-			if group_holds_any(ghost_control.chest_group(chest), items_needed) then
-				local distance = util.distance(car.position, chest.position)
-				if not best or distance < best_distance then
-					best = chest
-					best_distance = distance
-				end
-			end
-		else
-			_utils.release_entity("chest", id)
-		end
-	end
-	return best
+	return _utils.closest(storage.supply_chests, car.position, function(chest)
+		return group_holds_any(ghost_control.chest_group(chest), items_needed)
+	end, "chest")
 end
 
 -- Closest supply chest, or nil.
 function ghost_control.find_nearest_chest(car)
-	local best, best_distance
-	for id, chest in pairs(storage.supply_chests) do
-		if chest.valid then
-			local distance = util.distance(car.position, chest.position)
-			if not best or distance < best_distance then
-				best = chest
-				best_distance = distance
-			end
-		else
-			_utils.release_entity("chest", id)
-		end
-	end
-	return best
+	return _utils.closest(storage.supply_chests, car.position, nil, "chest")
 end
 
 -- ============================================================
@@ -414,7 +382,7 @@ local function alert_missing_items(car, construction)
 	for item_name in pairs(construction.items_needed) do
 		_utils.alert_once(construction.alerted_items, item_name, car.force, car,
 			"An autonomous car is missing item '" .. item_name .. "' to complete a construction, waiting for supply.",
-			{type = "item", name = item_name})
+			item_name)
 	end
 end
 
@@ -422,7 +390,7 @@ local function alert_build_failed(car, ghost)
 	_utils.alert(car.force, ghost,
 		"An autonomous car could not build an entity after " .. config.max_revive_attempts
 			.. " attempts and gave up on it; it has been put back in the general queue.",
-		{type = "item", name = "autonomous_car"})
+		config.names.car)
 end
 
 -- Decides the next step of a car's batch: end it if no ghost is left, drive to
@@ -452,12 +420,10 @@ function ghost_control.proceed(car)
 	end
 end
 
--- "collect" task: the car reached a supply chest. Takes what it still needs
--- from the whole group of that chest, then decides the next step.
-function ghost_control.collect_items(car)
-	local car_data = storage.car_data[car.unit_number]
-	local chest = car_data.moving.destination
-	local construction = car_data.construction
+-- "collect" task: the car reached the supply chest `chest`. Takes what it still
+-- needs from the whole group of that chest, then decides the next step.
+function ghost_control.collect_items(car, chest)
+	local construction = storage.car_data[car.unit_number].construction
 
 	if construction and chest and chest.valid then
 		local trunk = car.get_inventory(defines.inventory.car_trunk)
@@ -477,8 +443,6 @@ function ghost_control.collect_items(car)
 		end
 	end
 
-	car_data.moving.active = false
-	car_data.moving.destination = nil
 	ghost_control.proceed(car)
 end
 
@@ -631,12 +595,9 @@ function ghost_control.deposit_leftovers(car)
 	return true
 end
 
--- "deposit" task: the car reached a supply chest. Unloads its trunk into it,
--- then goes idle.
-function ghost_control.deposit_items(car)
-	local car_data = storage.car_data[car.unit_number]
-	local chest = car_data.moving.destination
-
+-- "deposit" task: the car reached the supply chest `chest`. Unloads its trunk
+-- into it, then goes idle.
+function ghost_control.deposit_items(car, chest)
 	if chest and chest.valid then
 		local inventory = chest.get_inventory(defines.inventory.chest)
 		local trunk = car.get_inventory(defines.inventory.car_trunk)
@@ -649,8 +610,6 @@ function ghost_control.deposit_items(car)
 		end
 	end
 
-	car_data.moving.active = false
-	car_data.moving.destination = nil
 	ghost_control.go_idle(car)
 end
 
@@ -691,7 +650,7 @@ function ghost_control.abandon(car)
 
 	_utils.alert(car.force, car,
 		"An autonomous car ABANDONED its task because it stayed stuck: select the ghosts again if the way is clear now.",
-		{type = "item", name = "autonomous_car"})
+		config.names.car)
 
 	if construction then
 		for id in pairs(construction.ghosts) do

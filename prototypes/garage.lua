@@ -1,11 +1,12 @@
 -- Garage: a large chest that stores parked cars as items, one per slot.
 local config = require("config")
+local names = config.names
 
 local garage = table.deepcopy(data.raw["container"]["steel-chest"])
-garage.name = "autonomous_car_garage"
-garage.minable.result = "autonomous_car_garage"
+garage.name = names.garage
+garage.minable.result = names.garage
 garage.minable.mining_time = 1
-garage.subgroup = "autonomous_car"
+garage.subgroup = names.subgroup
 garage.icon = "__autonomous-car__/graphics/garage/icon.png"
 garage.max_health = 3500
 garage.dying_explosion = "steel-chest-explosion"
@@ -52,15 +53,15 @@ garage.picture =
 }
 
 local garage_item = table.deepcopy(data.raw.item["steel-chest"])
-garage_item.name = "autonomous_car_garage"
-garage_item.place_result = "autonomous_car_garage"
+garage_item.name = names.garage
+garage_item.place_result = names.garage
 garage_item.icon = "__autonomous-car__/graphics/garage/icon.png"
-garage_item.subgroup = "autonomous_car"
+garage_item.subgroup = names.subgroup
 garage_item.stack_size = 4
 
 local garage_recipe = {
   type = "recipe",
-  name = "autonomous_car_garage",
+  name = names.garage,
   enabled = true,
   energy_required = 30,
   ingredients = {
@@ -69,7 +70,7 @@ local garage_recipe = {
     {type = "item", name = "iron-stick", amount = 20},
     {type = "item", name = "steel-plate", amount = 40}
   },
-  results = {{type = "item", name = "autonomous_car_garage", amount = 1}}
+  results = {{type = "item", name = names.garage, amount = 1}}
 }
 
 data:extend{garage, garage_item, garage_recipe}

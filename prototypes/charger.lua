@@ -1,12 +1,13 @@
 -- Charging station: an electric energy interface whose buffer the cars draw from.
 local config = require("config")
+local names = config.names
 
 local charger = table.deepcopy(data.raw["electric-energy-interface"]["electric-energy-interface"])
-charger.name = "autonomous_car_charger"
-charger.minable.result = "autonomous_car_charger"
+charger.name = names.charger
+charger.minable.result = names.charger
 charger.hidden = false
 charger.gui_mode = "none"
-charger.subgroup = "autonomous_car"
+charger.subgroup = names.subgroup
 charger.energy_production = "0W"
 charger.energy_source.buffer_capacity = config.charger_buffer_capacity
 charger.energy_source.usage_priority = "secondary-input"
@@ -38,15 +39,15 @@ charger.picture =
 }
 
 local charger_item = table.deepcopy(data.raw.item["electric-energy-interface"])
-charger_item.name = "autonomous_car_charger"
-charger_item.place_result = "autonomous_car_charger"
+charger_item.name = names.charger
+charger_item.place_result = names.charger
 charger_item.icon = "__autonomous-car__/graphics/charger/icon.png"
-charger_item.subgroup = "autonomous_car"
+charger_item.subgroup = names.subgroup
 charger_item.stack_size = 5
 
 local charger_recipe = {
   type = "recipe",
-  name = "autonomous_car_charger",
+  name = names.charger,
   enabled = true,
   energy_required = 8,
   ingredients = {
@@ -54,7 +55,7 @@ local charger_recipe = {
     {type = "item", name = "advanced-circuit", amount = 10},
     {type = "item", name = "steel-plate", amount = 10}
   },
-  results = {{type = "item", name = "autonomous_car_charger", amount = 1}}
+  results = {{type = "item", name = names.charger, amount = 1}}
 }
 
 data:extend{charger, charger_item, charger_recipe}

@@ -32,7 +32,7 @@ tests\run.ps1 -Reference <dossier ou zip>      # compare les traces avec une aut
 tests\show.ps1 construction -Car 132           # changements d'état d'une voiture dans une trace
 ```
 
-`run.ps1` lance Factorio sans fenêtre ni joueur sur une copie du mod dans `%TEMP%\autonomous-car-tests` ; rien n'est écrit dans le dossier Factorio et le jeu peut rester ouvert. Il affiche pour chaque scénario l'erreur de script éventuelle, les événements et le dernier résumé. `-Reference` sert à vérifier qu'un refactoring ne change aucun comportement : Factorio est déterministe, deux versions équivalentes donnent des traces identiques. La version de référence tourne avec son propre `tests/harness.lua` quand elle en a un, ce qui permet de comparer deux versions dont les noms diffèrent. Les scénarios sont décrits dans `tests/harness.lua`, qui est greffé à la fin de `control.lua` et utilise ses locales : renommer l'une d'elles impose de le mettre à jour.
+`run.ps1` lance Factorio sans fenêtre ni joueur sur une copie du mod dans `%TEMP%\autonomous-car-tests` ; rien n'est écrit dans le dossier Factorio et le jeu peut rester ouvert. Il affiche pour chaque scénario l'erreur de script éventuelle, les événements et le dernier résumé. `-Reference` sert à vérifier qu'un refactoring ne change aucun comportement : Factorio est déterministe, deux versions équivalentes donnent des traces identiques. La version de référence tourne avec son propre `tests/harness.lua` quand elle en a un, ce qui permet de comparer deux versions dont les noms diffèrent. Les scénarios sont décrits dans `tests/harness.lua`, qui est greffé à la fin de `control.lua` et utilise ses locales (`on_area_selected`, `names`, les modules) : renommer l'une d'elles impose de le mettre à jour.
 
 ## Architecture
 
@@ -48,8 +48,8 @@ tests\show.ps1 construction -Car 132           # changements d'état d'une voitu
 | `ghost.lua` | `ghost_control` | ghosts, clusters, assignation, construction |
 | `charge.lua` | `charger_control` | chargeurs |
 | `park.lua` | `garage_control` | garages |
-| `_utils.lua` | `_utils` | carburant, deque, alertes, libération d'entités |
-| `config.lua`, `colors.lua` | | constantes, partagées avec les prototypes |
+| `_utils.lua` | `_utils` | carburant, recherche de l'entité la plus proche, deque, alertes, libération d'entités, événement de fin d'étape |
+| `config.lua`, `colors.lua` | | noms et tailles communs aux prototypes et aux scripts, puis réglages |
 
 ### État
 
@@ -83,7 +83,7 @@ La manœuvre (`car_data.maneuver`) est un sous-mode de `moving` : même destinat
 
 `travel.begin_leg(car, destination, next_task)` démarre un trajet et pousse `next_task` en tête de `car_data.tasks`. `travel.set_destination` fait de même après avoir vérifié le carburant, avec un détour par un chargeur si besoin : c'est la variante par défaut.
 
-Une voiture est arrivée quand elle est à l'arrêt à moins de `config.arrival_distance` ; elle peut alors agir sur sa destination. `movement.drive_tick` lève l'événement `autonomous_car_next_task` et `on_next_task` dépile la tâche : `charging`, `parking`, `building`, `collect` ou `deposit`. La fin de charge lève le même événement. Cet événement est synchrone : `on_next_task` s'exécute à l'intérieur de `drive_tick`.
+Une voiture est arrivée quand elle est à l'arrêt à moins de `config.arrival_distance` ; elle peut alors agir sur sa destination. `movement.drive_tick` lève l'événement `autonomous_car_next_task` ; `on_next_task` termine alors le trajet (`moving` désactivé), dépile la tâche et lui passe la destination atteinte : `charging`, `parking`, `building`, `collect` ou `deposit`. La fin de charge lève le même événement. Cet événement est synchrone : `on_next_task` s'exécute à l'intérieur de `drive_tick`.
 
 Un nouveau type d'étape est une tâche de plus dans `on_next_task`, pas un nouvel état.
 
@@ -95,7 +95,7 @@ Sélection du joueur → `on_area_selected` → `register_ghost` (ignore les gho
 
 ### Carburant
 
-La voiture brûle un carburant caché, sans slot : la charge est `burner.remaining_burning_fuel`. Un brûleur vide perd son item de carburant et ignore alors toute écriture de la charge ; `_utils.fuel_capacity` le remet en place, il faut donc l'appeler avant d'écrire. `charger_data.users` est réservé au départ vers le chargeur.
+La voiture brûle un carburant caché, sans slot : la charge est `burner.remaining_burning_fuel`. Un brûleur vide perd son item de carburant et ignore alors toute écriture de la charge : lire et écrire la charge uniquement par `_utils` (`remaining_fuel`, `fuel_ratio`, `set_fuel`), qui remet l'item en place. `charger_data.users` est réservé au départ vers le chargeur.
 
 ## Invariants
 
@@ -106,7 +106,8 @@ La voiture brûle un carburant caché, sans slot : la charge est `burner.remaini
 - `emergency_brake` ne s'applique que dans `drive_tick`, jamais en manœuvre.
 - Pas de migration : le mod n'est pas publié, les nouveaux champs de `car_data` (`maneuver`, `empty`, `stuck.*`) imposent une nouvelle sauvegarde.
 - Le script ne règle jamais l'orientation de la voiture, seulement `riding_state`. Hypothèse non vérifiée en jeu : le braquage n'est pas inversé en marche arrière (`REVERSE_STEERING_INVERTED` dans `movement.lua`).
-- Les noms de prototypes (`autonomous_car`, `autonomous_car_charger`, `autonomous_car_garage`, `autonomous_car_chest`, `autonomous_car_fuel`) sont enregistrés dans les sauvegardes : ne pas les renommer sans accord.
+- Ce que les prototypes et les scripts doivent partager est défini une seule fois dans `config.lua` : les noms (`config.names`), la taille de la voiture (`config.car_size`, dont dérivent les sondes de manœuvre), les tailles d'inventaire. Ne jamais réécrire l'une de ces valeurs en dur ailleurs. Les noms sont enregistrés dans les sauvegardes : ne pas les changer sans accord.
+- `config.lua` se termine par des vérifications (`assert`) des relations entre constantes dont le code dépend ; en ajouter une quand une nouvelle constante doit rester cohérente avec une autre.
 
 ## Conventions de nommage
 
@@ -116,7 +117,8 @@ La voiture brûle un carburant caché, sans slot : la charge est `burner.remaini
 - `<état>_tick` pour la fonction appelée à chaque tick tant que la voiture est dans cet état ou ce mode (`charging_tick`, `parking_tick`, `building_tick`, `stuck_tick`, `maneuver_tick`, `drive_tick`) ; `start_<état>` pour y entrer (`start_stuck`, `start_maneuver`).
 - Abandon : « unreachable » (aucune recharge possible) et « stuck » (trajet bloqué) en sont les deux causes ; `stuck.final` marque la dernière attente d'une voiture bloquée, celle qui finit par l'abandon.
 - Manœuvre : un « arc » est un des six choix de conduite (avant ou arrière × braquage), un « heading » est une direction.
-- Prototypes : `autonomous_car`, puis `autonomous_car_<chose>`, en snake_case.
+- Prototypes : `autonomous_car`, puis `autonomous_car_<chose>`, en snake_case, déclarés dans `config.names`.
+- Constantes de `config.lua` qui vont ensemble : regroupées dans une table (`speed`, `high_speed_density`, `steering_cost`, `maneuver_probe`) plutôt qu'en plusieurs constantes séparées.
 - `config.lua` : `*_delay` attente avant de réessayer, `*_duration` durée d'une action, `*_interval` période. « fuel » est la charge de la voiture, « energy » le tampon du chargeur.
 - Tout nouveau délai réutilise `short_delay`, `medium_delay`, `idle_delay` ou `long_delay` et s'ajoute à la liste d'usages de son commentaire.
 
@@ -124,21 +126,21 @@ La voiture brûle un carburant caché, sans slot : la charge est `burner.remaini
 
 Régler un bloc à la fois, un paramètre à la fois, dans cet ordre, en testant en jeu entre chaque :
 
-1. sécurité : `emergency_brake_lookahead`, `arrival_distance`
+1. sécurité : `emergency_brake_lookahead`, `arrival_distance`, `braking_duration`
 2. manœuvre : `rear_turn_min_angle`, `rear_turn_max_speed`, `maneuver_*`, `friction_maneuver_factor`
-3. densité et précision : `dense_area_threshold`, `precision_*`
-4. friction : `friction_*`
-5. `density_radius` et `lookahead_*` si le problème persiste
+3. densité et précision : `high_speed_density`, `dense_area_threshold`, `precision_*`
+4. vitesse : `friction_*`, `speed.*`
+5. `density_radius`, `lookahead_*` et `steering_cost` si le problème persiste
 
 | Symptôme | Constantes à regarder |
 |---|---|
 | oscille autour de la destination | `arrival_distance`, `emergency_brake_lookahead`, `precision_*`, `dense_area_threshold` |
 | manœuvre à tort, ou trop tôt | `rear_turn_min_angle` (à augmenter), `rear_turn_max_speed`, `short_delay` (déclencheur `blocked`) |
-| manœuvre qui n'aboutit pas | `maneuver_duration`, `maneuver_exit_density`, `maneuver_exit_angle`, `maneuver_min_travel`, `maneuver_probe_*`, `friction_maneuver_factor` |
-| s'arrête trop souvent en trajet | `density_radius`, `lookahead_length`, `dense_area_threshold`, `emergency_brake_lookahead` |
-| trop rapide ou trop lente | `friction_*` |
+| manœuvre qui n'aboutit pas | `maneuver_duration`, `maneuver_exit_density`, `maneuver_exit_angle`, `maneuver_min_travel`, `maneuver_probe.*`, `friction_maneuver_factor` |
+| s'arrête trop souvent en trajet | `density_radius`, `lookahead_length`, `dense_area_threshold`, `emergency_brake_lookahead`, `steering_cost` |
+| trop rapide ou trop lente | `friction_*`, `high_speed_density`, `braking_duration` |
 
-La friction agit sur le symptôme, pas sur la cause : régler d'abord les seuils de décision. La manœuvre doit rester une exception.
+La friction agit sur le symptôme, pas sur la cause : régler d'abord les seuils de décision. Un seuil de densité se choisit en sachant que la voiture se compte elle-même (environ 0,035 dans un disque centré sur elle, 0,024 dans la densité mélangée de `update_mode`). La manœuvre doit rester une exception.
 
 À vérifier en jeu après un réglage : ligne droite sans oscillation, cible derrière sans demi-tour inutile, arrêt propre près d'un obstacle, zone dense sans faux `stuck`, cluster construit sans arrêt inutile, recharge puis parking, plusieurs voitures sans blocage mutuel.
 
@@ -160,13 +162,13 @@ Observés dans les scénarios de test.
 2. **Places de chargeur pas toujours libérées.** `users` est réservé au départ vers le chargeur et rendu en fin de charge, ou quand la batterie tombe à zéro (`release_charger_slot`) ; un trajet vers un chargeur interrompu ou remplacé autrement laisse la place prise. Scénarios `basics` et `stale-task`.
 3. **Garage rempli pendant le trajet.** `garage_control.parking_tick` désactive `parking` sans activer `waiting` : la voiture n'a plus aucun état actif. Scénario `failures`.
 4. **`charge_detour_count` ne compte pas les détours.** `begin_leg` le remet à zéro, donc des détours réussis ne s'accumulent jamais ; il ne monte que lorsqu'aucun chargeur n'est trouvé, et c'est ce cas qui déclenche `mark_unreachable` après `max_charge_detours` essais. Scénario `failures`.
-5. **Surfaces multiples.** Les recherches de chargeur, garage, coffre et voiture comparent des positions sans vérifier la surface : une voiture peut viser une entité d'une autre surface.
+5. **Surfaces multiples.** Les recherches de chargeur, garage, coffre et voiture (`_utils.closest`) comparent des positions sans vérifier la surface : une voiture peut viser une entité d'une autre surface.
 6. **Manœuvre dans un espace très étroit.** Dans une pièce de 5×5 murée, la voiture met jusqu'à ~3 cycles de manœuvre pour retrouver une ouverture d'une tile (le choix de l'arc ne vise pas l'ouverture, seulement l'espace libre). Scénario `sealed`.
 7. **Tâche en file après un `reset_to_waiting`.** Une tâche restée dans `car_data.tasks` laisse `end_wait` sans état actif (branche « tasks still queued »).
 8. **Les portes (`gate`) ne s'ouvrent pas pour la voiture.** Scénario `gate-manual` : un personnage franchit une porte, la voiture conduite droit dessus reste bloquée contre elle comme contre un mur. Une voiture ne peut donc pas passer un mur par une porte, et sa conduite (`sample_cost`, `can_place_entity`) traite une porte fermée comme un mur. Le scénario `gate` le confirme : la voiture longe le mur sans viser la porte.
 
 ### Corrigés, à valider
 
-- **Voiture bloquée à la sortie du garage.** `release_car` la pose contre le garage ; quand sa cible était derrière elle, elle reculait dans le garage. Le mode manœuvre est censé le résoudre : à valider avec les scénarios `garage-exit` et `construction`.
+- **Voiture bloquée à la sortie du garage.** `release_car` la pose contre le garage ; quand sa cible était derrière elle, elle reculait dans le garage. Le mode manœuvre le résout dans les scénarios `garage-exit` et `construction`, qui construisent maintenant tous leurs ghosts : reste à valider en jeu.
 - **`stuck_retry_count` jamais atteint.** Il est maintenant remis à zéro à l'arrivée et non dans `begin_leg`, donc `max_stuck_retries` peut se déclencher : à valider en test (le scénario `sealed` passe par ce compteur).
 - **`moving` restait actif après un `step_back`.** `on_next_task` le désactive quand la file est vide, et le scénario `blocked-ghost` construit maintenant son ghost : à valider en jeu.

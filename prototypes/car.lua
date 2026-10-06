@@ -1,19 +1,25 @@
 -- Autonomous car: a small car with the look of the base game car, a trunk and
--- no fuel slot. Its burner only accepts the hidden "autonomous_car_fuel" fuel, which
--- the scripts use as a battery.
+-- no fuel slot. Its burner only accepts the hidden fuel item (config.names.fuel),
+-- which the scripts use as a battery. Its name, size and trunk come from
+-- config.lua, which the scripts read too.
 local config = require("config")
+local names = config.names
 local colors = require("colors")
 local hit_effects = require("__base__/prototypes/entity/hit-effects")
 local sounds = require("__base__/prototypes/entity/sounds")
 local movement_triggers = require("__base__/prototypes/entity/movement-triggers")
 local item_sounds = require("__base__.prototypes.item_sounds")
 
+-- The car is as wide as config.car_size.width and as long as its length.
+local half_width, half_length = config.car_size.width / 2, config.car_size.length / 2
+local box = {{-half_width, -half_length}, {half_width, half_length}}
+
 local car = {
     type = "car",
-    name = "autonomous_car",
+    name = names.car,
     icon = "__base__/graphics/icons/car.png",
     flags = {"placeable-neutral", "player-creation", "placeable-off-grid", "not-flammable"},
-    minable = {mining_time = 0.2, result = "autonomous_car"},
+    minable = {mining_time = 0.2, result = names.car},
     mined_sound = sounds.deconstruct_medium(0.8),
     max_health = 250,
     is_military_target = true,
@@ -40,15 +46,15 @@ local car = {
         percent = 20
       }
     },
-	collision_box = {{-0.35, -0.5}, {0.35, 0.5}},
-	selection_box = {{-0.35, -0.5}, {0.35, 0.5}},
+	collision_box = box,
+	selection_box = box,
 	damaged_trigger_effect = hit_effects.entity(),
     effectivity = 0.6,
     braking_power = "50kW",
     energy_source =
     {
       type = "burner",
-      fuel_categories = {"autonomous_car_fuel"},
+      fuel_categories = {names.fuel},
       effectivity = 1,
       fuel_inventory_size = 0,
       smoke =
@@ -296,20 +302,20 @@ local car = {
 
 local item = {
     type = "item-with-tags",
-    name = "autonomous_car",
+    name = names.car,
     icon = "__autonomous-car__/graphics/car/icon.png",
-    subgroup = "autonomous_car",
+    subgroup = names.subgroup,
     order = "a[robot]-c[autonomous_car]",
     inventory_move_sound = item_sounds.robotic_inventory_move,
     pick_sound = item_sounds.robotic_inventory_pickup,
     drop_sound = item_sounds.robotic_inventory_move,
-    place_result = "autonomous_car",
+    place_result = names.car,
     stack_size = 8
 }
 
 local recipe = {
   type = "recipe",
-  name = "autonomous_car",
+  name = names.car,
   enabled = true,
   energy_required = 8,
   ingredients = {
@@ -318,7 +324,7 @@ local recipe = {
       {type = "item", name = "advanced-circuit", amount = 5},
       {type = "item", name = "steel-plate", amount = 2}
     },
-  results = {{type = "item", name = "autonomous_car", amount = 1}}
+  results = {{type = "item", name = names.car, amount = 1}}
 }
 
 data:extend{car, item, recipe}

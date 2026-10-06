@@ -10,20 +10,12 @@ local movement = {}
 local pi, sin, cos = math.pi, math.sin, math.cos
 local riding = defines.riding
 
-local STOPPED_SPEED = 0.01 -- below this speed the car counts as stopped
-local BRAKING_TICKS = 30 -- the car brakes once its destination is less than this many ticks away at its current speed
+-- Friction of a car in a maneuver (see config.friction_base).
+local MANEUVER_FRICTION = config.friction_base * config.friction_maneuver_factor
 
--- Assumed, not checked in game yet: whether steering left in reverse turns the
--- car the other way round than steering left going forwards. If it does, set this.
-local REVERSE_STEERING_INVERTED = false
-
--- The six arcs of a maneuver: forward or backward, steering left (-1),
--- straight (0) or right (1). The car follows one arc for
--- config.maneuver_arc_duration, then picks the next.
-local ARCS = {
-	{reverse = false, turn = 0}, {reverse = false, turn = -1}, {reverse = false, turn = 1},
-	{reverse = true, turn = 0}, {reverse = true, turn = -1}, {reverse = true, turn = 1},
-}
+-- ============================================================
+-- Helpers
+-- ============================================================
 
 -- Unit vector of an orientation (0 = north, 0.25 = east, as LuaEntity.orientation).
 local function heading_vector(orientation)
@@ -38,7 +30,9 @@ local function target_angle(car, target)
 	return ((target_orientation - car.orientation + 0.5) % 1) - 0.5
 end
 
--- Obstacle density, in entities per square tile, in a disc of config.density_radius.
+-- Obstacle density, in entities per square tile, in a disc of
+-- config.density_radius. A disc centred on the car counts the car itself (see
+-- "Obstacle density" in config.lua).
 local function obstacle_density(car, x, y)
 	local radius = config.density_radius
 	local count = car.surface.count_entities_filtered{
@@ -50,35 +44,16 @@ local function obstacle_density(car, x, y)
 end
 
 -- Steering cost of a sample point: the distance left from there to the target,
--- relative to the car's own, plus 3 if the car would not fit there.
+-- relative to the car's own, plus config.steering_cost.blocked if the car would
+-- not fit there.
 local function sample_cost(car, x, y, target, distance)
 	local blocked = car.surface.can_place_entity{name = car.name, position = {x, y}} and 0 or 1
-	return util.distance({x, y}, target) / distance + 3 * blocked
+	return util.distance({x, y}, target) / distance + config.steering_cost.blocked * blocked
 end
 
--- Starts a maneuver (see movement.maneuver_tick). `reason` tells when it may end:
---   rear_turn    the target is behind a slow car
---   blocked      the car stopped dead short of its destination
---   no_progress  the car barely moved over config.medium_delay (see travel.stuck_reason)
--- The attempts count is left alone: it is reset by a maneuver that succeeds and
--- at the start of each leg (see travel.begin_leg).
-function movement.start_maneuver(car, tick, reason)
-	local car_data = storage.car_data[car.unit_number]
-	local maneuver = car_data.maneuver
-	maneuver.active = true
-	maneuver.reason = reason
-	maneuver.since = tick
-	maneuver.arc_since = nil
-	maneuver.arcs = 0
-	maneuver.reverse = false
-	maneuver.turn = 0
-	maneuver.origin = car.position
-
-	-- Emergency braking belongs to drive_tick: it must not hold the car back, and
-	-- its cooldown starts now.
-	car_data.emergency_brake.active = false
-	car_data.emergency_brake.since = tick
-end
+-- ============================================================
+-- Driving mode
+-- ============================================================
 
 -- Picks the driving mode of a moving car for this tick, and sets its flags:
 --   high_speed       cruising in an open area
@@ -92,7 +67,7 @@ end
 function movement.update_mode(car, tick)
 	local car_data = storage.car_data[car.unit_number]
 	if car_data.maneuver.active then
-		car.friction_modifier = config.friction_base * config.friction_maneuver_factor
+		car.friction_modifier = MANEUVER_FRICTION
 		return
 	end
 
@@ -102,14 +77,15 @@ function movement.update_mode(car, tick)
 	local x, y = car.position.x, car.position.y
 	local sx, sy = heading_vector(orientation)
 
-	-- Density around the car, blended with the density one disc further ahead.
+	-- Density around the car (weight 2), blended with the density one disc
+	-- further ahead (weight 1).
 	local density = 1 / 3 * (2 * obstacle_density(car, x, y)
 		+ obstacle_density(car, x + sx * 2 * config.density_radius, y + sy * 2 * config.density_radius))
 
 	-- Two thresholds, so the flag does not flicker when the density hovers around one value.
-	if distance < car.speed * BRAKING_TICKS or density > 0.05 then
+	if distance < car.speed * config.braking_duration or density > config.high_speed_density.leave then
 		car_data.high_speed = false
-	elseif density < 0.03 then
+	elseif density < config.high_speed_density.enter then
 		car_data.high_speed = true
 	end
 
@@ -125,7 +101,7 @@ function movement.update_mode(car, tick)
 	if (distance < config.arrival_distance or obstacle_ahead) and not emergency_brake.active and cooldown_over then
 		emergency_brake.active = true
 		emergency_brake.since = tick
-	elseif car.speed < STOPPED_SPEED and emergency_brake.active then
+	elseif car.speed < config.speed.stopped and emergency_brake.active then
 		emergency_brake.active = false
 		emergency_brake.since = tick
 	end
@@ -137,7 +113,7 @@ function movement.update_mode(car, tick)
 	if math.abs(angle) > config.rear_turn_min_angle and car.speed <= config.rear_turn_max_speed
 		and distance >= config.arrival_distance and not emergency_brake.active then
 		movement.start_maneuver(car, tick, "rear_turn")
-		car.friction_modifier = config.friction_base * config.friction_maneuver_factor
+		car.friction_modifier = MANEUVER_FRICTION
 		return
 	end
 
@@ -156,13 +132,17 @@ function movement.update_mode(car, tick)
 	car.friction_modifier = friction
 end
 
+-- ============================================================
+-- Driving
+-- ============================================================
+
 -- Sets the acceleration and the steering of a moving car for this tick, and
 -- raises the next-task event once it has stopped at its destination.
 function movement.drive_tick(car, tick)
 	local car_data = storage.car_data[car.unit_number]
 	local target = car_data.moving.destination.position
 	local distance = util.distance(car.position, target)
-	local arrived = car.speed < STOPPED_SPEED and distance < config.arrival_distance
+	local arrived = car.speed < config.speed.stopped and distance < config.arrival_distance
 
 	if car_data.emergency_brake.active then
 		-- A real stop: a high friction alone slows the car down but does not brake it.
@@ -183,7 +163,8 @@ function movement.drive_tick(car, tick)
 
 	-- Brake when close enough to stop at the destination, or when already slow within arrival distance.
 	local acceleration = riding.acceleration.accelerating
-	if distance < car.speed * BRAKING_TICKS or (car.speed < 0.1 and distance < config.arrival_distance) then
+	if distance < car.speed * config.braking_duration
+		or (car.speed < config.speed.slow and distance < config.arrival_distance) then
 		acceleration = riding.acceleration.braking
 	end
 
@@ -196,7 +177,7 @@ function movement.drive_tick(car, tick)
 		lookahead_length = config.precision_lookahead_length
 	end
 	local bonus = 0
-	if car.speed > 0.25 then
+	if car.speed > config.speed.fast then
 		bonus = config.lookahead_speed_bonus
 	end
 
@@ -223,15 +204,16 @@ function movement.drive_tick(car, tick)
 	-- Add the obstacle density further along each heading, so the car steers
 	-- away from crowded areas well before it reaches them.
 	local radius = config.density_radius
+	local density_weight = config.steering_cost.density
 	local straight_density, right_density, left_density = 0, 0, 0
 	for step = 0, config.density_lookahead_steps do
 		straight_density = straight_density + obstacle_density(car, x + sx * radius * (2 * step + 1), y + sy * radius * (2 * step + 1))
 		right_density = right_density + obstacle_density(car, x + rx * radius * (2 * step + 1), y + ry * radius * (2 * step + 1))
 		left_density = left_density + obstacle_density(car, x + lx * radius * (2 * step + 1), y + ly * radius * (2 * step + 1))
 	end
-	straight = straight + 1.5 * straight_density
-	right = right + 1.5 * right_density
-	left = left + 1.5 * left_density
+	straight = straight + density_weight * straight_density
+	right = right + density_weight * right_density
+	left = left + density_weight * left_density
 
 	-- Steer to the cheapest heading; a tie between right and left goes left.
 	local direction = riding.direction.straight
@@ -247,22 +229,73 @@ function movement.drive_tick(car, tick)
 	end
 end
 
--- Free room along a heading, in PROBE_STEP units: how many probe points the car
--- fits at before the first one it would not fit at. Two things keep a thin
--- obstacle (a wall is 0.58 tile thick) from slipping through:
---  - the probes start at config.maneuver_probe_start so that the car does not
+-- ============================================================
+-- Maneuver
+-- ============================================================
+
+-- Assumed, not checked in game yet: whether steering left in reverse turns the
+-- car the other way round than steering left going forwards. If it does, set this.
+local REVERSE_STEERING_INVERTED = false
+
+-- The six arcs of a maneuver: forward or backward, steering left (-1),
+-- straight (0) or right (1). The car follows one arc for
+-- config.maneuver_arc_duration, then picks the next.
+local ARCS = {
+	{reverse = false, turn = 0}, {reverse = false, turn = -1}, {reverse = false, turn = 1},
+	{reverse = true, turn = 0}, {reverse = true, turn = -1}, {reverse = true, turn = 1},
+}
+
+-- How choose_arc ranks the arcs. These are not tuning values: each one only has
+-- to outweigh everything below it. One more step of free room comes first,
+-- then steering toward the target, then keeping the current arc, then the
+-- listing order of ARCS (which weighs 1 to 6).
+local RANK_ROOM, RANK_TOWARD_TARGET, RANK_SAME_ARC = 100, 20, 10
+
+-- Distance between two probes of free_room: half a car length (see
+-- config.maneuver_probe).
+local PROBE_STEP = config.car_size.length / 2
+
+-- Starts a maneuver (see movement.maneuver_tick). `reason` tells when it may end:
+--   rear_turn    the target is behind a slow car
+--   blocked      the car stopped dead short of its destination
+--   no_progress  the car barely moved over config.medium_delay (see travel.stuck_reason)
+-- The attempts count is left alone: it is reset by a maneuver that succeeds and
+-- at the start of each leg (see travel.begin_leg).
+function movement.start_maneuver(car, tick, reason)
+	local car_data = storage.car_data[car.unit_number]
+	local maneuver = car_data.maneuver
+	maneuver.active = true
+	maneuver.reason = reason
+	maneuver.since = tick
+	maneuver.arc_since = nil
+	maneuver.arcs = 0
+	maneuver.reverse = false
+	maneuver.turn = 0
+	maneuver.origin = car.position
+
+	-- Emergency braking belongs to drive_tick: it must not hold the car back, and
+	-- its cooldown starts now.
+	car_data.emergency_brake.active = false
+	car_data.emergency_brake.since = tick
+end
+
+-- Free room along a heading, in PROBE_STEP units: how many probes the car fits
+-- at before the first one it would not fit at. Two things keep a thin obstacle
+-- (a wall is 0.58 tile thick) from slipping through:
+--  - the probes start at config.maneuver_probe.start so that the car does not
 --    detect itself, which leaves a blind zone next to it: the entities there are
---    looked for apart, with an area search that skips the car;
---  - the probes are closer than the width of the car.
-local PROBE_STEP = 0.5
+--    looked for apart, with a disc search that skips the car;
+--  - the probes are closer to each other than the car is wide.
 local function free_room(car, x, y, orientation)
 	local vx, vy = heading_vector(orientation)
 	local surface = car.surface
+	local probe = config.maneuver_probe
 
-	local near = config.maneuver_probe_start - 0.5
+	-- The disc sits where the first probe begins, half a car length before its centre.
+	local near = probe.start - config.car_size.length / 2
 	for _, entity in pairs(surface.find_entities_filtered{
 		position = {x + vx * near, y + vy * near},
-		radius = 0.6,
+		radius = probe.near_radius,
 		collision_mask = car.prototype.collision_mask.layers,
 	}) do
 		if entity ~= car then
@@ -270,9 +303,9 @@ local function free_room(car, x, y, orientation)
 		end
 	end
 
-	local steps = math.floor(config.maneuver_probe_length / PROBE_STEP)
+	local steps = math.floor(probe.length / PROBE_STEP)
 	for step = 0, steps do
-		local distance = config.maneuver_probe_start + step * PROBE_STEP
+		local distance = probe.start + step * PROBE_STEP
 		if not surface.can_place_entity{name = car.name, position = {x + vx * distance, y + vy * distance}} then
 			return step
 		end
@@ -298,12 +331,12 @@ local function choose_arc(car, maneuver, side)
 		end
 		local heading = orientation + (arc.reverse and 0.5 or 0) + turn * config.lookahead_angle
 
-		local rank = free_room(car, x, y, heading) * 100 - index
+		local rank = free_room(car, x, y, heading) * RANK_ROOM - index
 		if arc.turn ~= 0 and arc.turn == side then
-			rank = rank + 20
+			rank = rank + RANK_TOWARD_TARGET
 		end
 		if arc.reverse == maneuver.reverse and arc.turn == maneuver.turn and maneuver.arcs > 0 then
-			rank = rank + 10
+			rank = rank + RANK_SAME_ARC
 		end
 		if not best or rank > best_rank then
 			best, best_rank = arc, rank
@@ -342,6 +375,13 @@ local function maneuver_done(car, car_data)
 	return util.distance(car.position, maneuver.origin) >= config.maneuver_min_travel
 end
 
+-- Ends the maneuver of a car, successful or not, and brakes.
+local function end_maneuver(car, maneuver, tick)
+	maneuver.active = false
+	maneuver.ended_tick = tick
+	car.riding_state = {acceleration = riding.acceleration.braking, direction = riding.direction.straight}
+end
+
 -- Drives a car that is in a maneuver. Every config.maneuver_arc_duration it
 -- checks whether the maneuver is done, then picks the roomiest of the six arcs
 -- and follows it, forwards or backwards, at the slow speed that update_mode's
@@ -361,18 +401,14 @@ function movement.maneuver_tick(car, tick)
 	end
 
 	if maneuver_done(car, car_data) then
-		maneuver.active = false
+		end_maneuver(car, maneuver, tick)
 		maneuver.attempts = 0
-		maneuver.ended_tick = tick
-		car.riding_state = {acceleration = riding.acceleration.braking, direction = riding.direction.straight}
 		return false
 	end
 
 	if tick - maneuver.since > config.maneuver_duration then
-		maneuver.active = false
+		end_maneuver(car, maneuver, tick)
 		maneuver.attempts = maneuver.attempts + 1
-		maneuver.ended_tick = tick
-		car.riding_state = {acceleration = riding.acceleration.braking, direction = riding.direction.straight}
 		if maneuver.attempts >= config.max_maneuver_attempts then
 			return true
 		end
