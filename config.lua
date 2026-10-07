@@ -124,7 +124,7 @@ config.maneuver_min_travel = 2 -- a maneuver started by an obstacle or a lack of
 -- Slow driving with a finer look-ahead. For now it is on in dense areas only.
 
 config.dense_area_threshold = 0.12 -- blended density above which precision mode turns on (see "Obstacle density")
-config.precision_lookahead_side_offset = 0.4 -- replaces lookahead_side_offset
+config.precision_lookahead_side_offset = config.lookahead_side_offset
 config.precision_lookahead_start = 1 -- replaces lookahead_start
 config.precision_lookahead_length = 2 -- replaces lookahead_length
 

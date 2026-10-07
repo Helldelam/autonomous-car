@@ -164,7 +164,7 @@ function movement.drive_tick(car, tick)
 	-- Brake when close enough to stop at the destination, or when already slow within arrival distance.
 	local acceleration = riding.acceleration.accelerating
 	if distance < car.speed * config.braking_duration
-		or (car.speed < config.speed.slow and distance < config.arrival_distance) then
+		or arrived then
 		acceleration = riding.acceleration.braking
 	end
 
@@ -194,7 +194,7 @@ function movement.drive_tick(car, tick)
 	local bx, by = x - sy * side_offset, y + sx * side_offset
 	local straight, right, left = 0, 0, 0
 	for d = lookahead_start, lookahead_start + (lookahead_length + bonus) do
-		local weight = ((lookahead_start + lookahead_length + bonus - (d / 2)) + 1) / 4
+		local weight = ((lookahead_start + lookahead_length + bonus - (d / 2)) + 1) / (lookahead_length + bonus)
 		straight = straight + (weight * sample_cost(car, ax + sx * d, ay + sy * d, target, distance)
 			+ weight * sample_cost(car, bx + sx * d, by + sy * d, target, distance)) / 2
 		right = right + weight * sample_cost(car, x + rx * d, y + ry * d, target, distance)
