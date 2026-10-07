@@ -43,8 +43,8 @@ config.charger_input_flow_limit = "1600kW"
 -- to the car's own (so about 1), plus what config.steering_cost adds.
 
 config.lookahead_angle = 1 / 12 -- angle between the straight heading and each side heading; a maneuver uses it for its left and right arcs too
-config.lookahead_side_offset = 0.5 -- the straight heading is sampled along two lines, this far on each side of the car
-config.lookahead_start = 1.5 -- distance of the first sample point
+config.lookahead_side_offset = config.car_size.width -- the straight heading is sampled along two lines, this far on each side of the car
+config.lookahead_start = 1.2 -- distance of the first sample point
 config.lookahead_length = 4 -- distance covered by the sample points beyond the first one
 config.lookahead_speed_bonus = 2 -- extra look-ahead length above config.speed.fast
 config.steering_cost = {
