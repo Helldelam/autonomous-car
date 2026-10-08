@@ -1,8 +1,8 @@
 local util = require("util")
 local config = require("config")
 
--- Shared helpers: car fuel, closest-entity search, deque, alerts, entity
--- cleanup and the next-task event.
+-- Shared helpers: car fuel, closest-entity search, slow checks, the waiting
+-- state, deque, alerts, entity cleanup and the next-task event.
 local _utils = {}
 
 -- ============================================================
@@ -83,6 +83,19 @@ end
 -- so that the cars do not all measure on the same tick.
 function _utils.slow_check_due(car, tick)
 	return (tick + car.unit_number) % config.slow_check_interval == 0
+end
+
+-- ============================================================
+-- Waiting state
+-- ============================================================
+
+-- Hands a car to the waiting loop of control.lua (see end_wait), which decides
+-- what it does next once config.idle_delay has passed since `since` (the
+-- current tick by default). A wait that should end on the next tick starts
+-- config.idle_delay ago.
+function _utils.start_waiting(car_data, since)
+	car_data.waiting.active = true
+	car_data.waiting.since = since or game.tick
 end
 
 -- ============================================================

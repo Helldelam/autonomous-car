@@ -21,6 +21,7 @@ local names = config.names
 _utils.register_release_handler("car", function(id)
 	local car_data = storage.car_data[id]
 	if car_data then
+		travel.release_charger_slot(car_data) -- a car lost on its way to a charger, or at it, must not keep the slot
 		travel.requeue_construction(car_data)
 	end
 	storage.cars[id] = nil
@@ -71,7 +72,8 @@ local function new_car_data(tick)
 		-- and `ended_tick` is when the last one ended (or the leg began). `heading` is the orientation
 		-- the maneuver turns toward, `last_arc` the arc it drove last (the opposite one is forbidden),
 		-- `stall_since` the tick the car stopped moving while driving, `back_off_until` the end of a back-off,
-		-- `follow` the direction (reverse or not) the car follows along a wall, `blocked` the directions found blocked.
+		-- `follow` the direction (reverse or not) the car follows along a wall, `blocked` where (position and
+			-- orientation) it stalled straight, per direction (see movement.back_off).
 		maneuver = {
 			active = false, reason = nil, since = nil, arc_since = nil, arcs = 0,
 			reverse = false, turn = 0, origin = nil, attempts = 0, ended_tick = tick,
@@ -84,7 +86,6 @@ local function new_car_data(tick)
 		slowing = false, -- braking down to entry_speed after leaving high speed
 		precision_mode = false,
 		neighbours = nil, -- moving cars nearby, see movement.lua
-
 
 		construction = nil, -- current batch, see ghost.lua
 		tasks = _utils.deque.new(), -- what to do when the current step ends; the front task runs first
@@ -192,9 +193,11 @@ end
 -- The wait of an idle car is over: it resumes its batch, takes a pending
 -- cluster, or goes to park, topping up its tank first if needed.
 local function end_wait(car, car_data, tick)
+	-- Whatever starts a leg ends the wait (travel.begin_leg), and a car that
+	-- cannot set off goes back to waiting (travel.reset_to_waiting): only the
+	-- branches that do nothing restart the wait themselves.
 	if car_data.construction then
 		-- The batch was waiting for missing items: try again.
-		car_data.waiting.active = false
 		ghost_control.proceed(car)
 	elseif _utils.deque.length(car_data.tasks) > 0 then
 		-- Tasks are still queued but the car is idle: they belong to a leg that no
@@ -203,9 +206,7 @@ local function end_wait(car, car_data, tick)
 		car_data.waiting.since = tick
 	elseif not car.get_inventory(defines.inventory.car_trunk).is_empty() then
 		-- Leftovers must be unloaded before the car takes a new batch or parks.
-		if ghost_control.deposit_leftovers(car) then
-			car_data.waiting.active = false
-		else
+		if not ghost_control.deposit_leftovers(car) then
 			car_data.waiting.since = tick
 		end
 	elseif not ghost_control.try_assign_pending(car) then
@@ -215,7 +216,6 @@ local function end_wait(car, car_data, tick)
 			car_data.waiting.since = tick
 		elseif not travel.top_up_before_parking(car, garage.position) then
 			_utils.alert_reset(car_data.alerts, "no_garage")
-			car_data.waiting.active = false
 			travel.set_destination(car, garage, {type = "parking"})
 		end
 	end
@@ -324,10 +324,9 @@ local function on_next_task(event)
 	moving.destination = nil
 
 	if _utils.deque.length(car_data.tasks) == 0 then
-		-- Nothing queued (the car arrived from a step back).
+		-- Nothing queued (the car arrived from a step back, or is charged).
 		if not ghost_control.try_assign_pending(car) then
-			car_data.waiting.active = true
-			car_data.waiting.since = event.tick
+			_utils.start_waiting(car_data)
 		end
 		return
 	end
@@ -341,9 +340,7 @@ local function on_next_task(event)
 	-- the waiting loop decide.
 	local reached = destination and destination.valid and destination.name
 	if (task.type == "charging" and reached ~= names.charger) or (task.type == "parking" and reached ~= names.garage) then
-		car_data.tasks = _utils.deque.new()
-		car_data.waiting.active = true
-		car_data.waiting.since = event.tick
+		travel.reset_to_waiting(car)
 		return
 	end
 

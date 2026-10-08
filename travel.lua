@@ -35,15 +35,39 @@ local function heading_to_charger(car_data)
 	return destination and destination.valid and destination.name == config.names.charger
 end
 
--- Gives back the charger slot that a leg to a charger holds (see go_to_charger),
--- when that leg is dropped.
+-- Gives back the charger slot that a car holds (see go_to_charger), whether it
+-- is still on its way to the charger or already charging there, when the trip
+-- is dropped. A car that was charging stops charging. Does nothing for a car
+-- that holds no slot, so it is safe to call whenever a trip ends.
 function travel.release_charger_slot(car_data)
-	if heading_to_charger(car_data) then
-		local charger_data = storage.charger_data[leg_destination(car_data).unit_number]
-		if charger_data and charger_data.users > 0 then
-			charger_data.users = charger_data.users - 1
-		end
+	local charger
+	if car_data.charging.active then
+		charger = car_data.charging.charger
+		car_data.charging.active = false
+		car_data.charging.charger = nil
+	elseif heading_to_charger(car_data) then
+		charger = leg_destination(car_data)
 	end
+	local charger_data = charger and charger.valid and storage.charger_data[charger.unit_number]
+	if charger_data and charger_data.users > 0 then
+		charger_data.users = charger_data.users - 1
+	end
+end
+
+-- Drops the trip in progress: the leg or the stuck wait, a maneuver, a charge,
+-- the tasks queued for them and the charger slot they hold. The car keeps its
+-- batch: it decides again from the waiting loop (see reset_to_waiting) or by
+-- starting another leg.
+function travel.cancel_trip(car_data)
+	travel.release_charger_slot(car_data)
+	car_data.building.active = false
+	car_data.maneuver.active = false
+	car_data.stuck.active = false
+	car_data.stuck.destination = nil
+	car_data.moving.active = false
+	car_data.moving.destination = nil
+	car_data.moving.departure_tick = nil
+	car_data.tasks = _utils.deque.new()
 end
 
 -- Starts driving to `destination`: an entity, or any table with `position` and
@@ -140,14 +164,9 @@ end
 -- decides what it does next.
 function travel.reset_to_waiting(car)
 	local car_data = storage.car_data[car.unit_number]
-	car_data.building.active = false
-	car_data.moving.active = false
-	car_data.moving.destination = nil
-	car_data.moving.departure_tick = nil
-	car_data.tasks = _utils.deque.new() -- they belonged to the leg that was dropped
+	travel.cancel_trip(car_data) -- the queued tasks belonged to the trip that was dropped
 	travel.stop_car(car)
-	car_data.waiting.active = true
-	car_data.waiting.since = game.tick
+	_utils.start_waiting(car_data)
 end
 
 -- ============================================================
@@ -192,6 +211,7 @@ function travel.mark_unreachable(car)
 			"An autonomous car has ABANDONED its current task after failing for a long time - check the area for obstructions or missing chargers.", config.names.car)
 		travel.requeue_construction(car_data)
 		car_data.unreachable_since = nil
+		car_data.charge_detour_count = 0 -- the next task gets its full detour budget
 	end
 
 	travel.reset_to_waiting(car)
@@ -231,9 +251,7 @@ function travel.handle_critical_fuel(car, tick)
 		return true
 	end
 
-	car_data.building.active = false
-	car_data.moving.active = false
-	car_data.tasks = _utils.deque.new()
+	travel.cancel_trip(car_data)
 
 	local charger = charger_control.find_charger(car)
 	if charger then
@@ -363,11 +381,7 @@ function travel.stuck_tick(car, tick)
 	if destination and destination.valid then
 		travel.begin_leg(car, destination) -- its task is still at the front of the queue
 	else
-		-- The destination disappeared while the car waited.
-		stuck.active = false
-		stuck.destination = nil
-		car_data.tasks = _utils.deque.new()
-		travel.reset_to_waiting(car)
+		travel.reset_to_waiting(car) -- the destination disappeared while the car waited
 	end
 	return false
 end
@@ -396,15 +410,8 @@ function travel.handle_empty(car, tick)
 			return false
 		end
 		empty.active = true
-		travel.release_charger_slot(car_data)
-		car_data.moving.active = false
-		car_data.moving.destination = nil
-		car_data.moving.departure_tick = nil
-		car_data.stuck.active = false
-		car_data.stuck.destination = nil
-		car_data.maneuver.active = false
+		travel.cancel_trip(car_data)
 		car_data.waiting.active = false
-		car_data.tasks = _utils.deque.new()
 		_utils.alert_once(car_data.alerts, "battery_empty", car.force, car,
 			"An autonomous car has run out of battery and cannot move: recover it or recharge it.",
 			config.names.car)
@@ -414,8 +421,7 @@ function travel.handle_empty(car, tick)
 	if _utils.fuel_ratio(car) >= config.critical_fuel_ratio then
 		empty.active = false
 		_utils.alert_reset(car_data.alerts, "battery_empty")
-		car_data.waiting.active = true
-		car_data.waiting.since = tick - config.idle_delay -- already elapsed: handled on the next tick
+		_utils.start_waiting(car_data, tick - config.idle_delay) -- already elapsed: handled on the next tick
 		return false
 	end
 	return true

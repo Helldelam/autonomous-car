@@ -46,8 +46,8 @@ config.charger_input_flow_limit = "1600kW"
 config.lookahead_angle = 1 / 12 -- angle between the straight heading and each side heading; a maneuver uses it for its left and right arcs too
 config.lookahead_side_offset = config.car_size.width -- the straight heading is sampled along two lines, this far on each side of the car
 config.lookahead_start = 1.3 -- distance of the first sample point. Its minimum is about 1.11: half the car length plus the
-	-- furthest the car reaches along a heading 30 degrees off its own (hypot(length / 2, width / 2) = 0.61). Closer, the point
-	-- overlaps the car itself, the heading counts as blocked and the car does not steer toward it.
+	-- furthest a corner of the car reaches from its centre (hypot(length / 2, width / 2) = 0.61). Closer, the point overlaps
+	-- the car itself, the heading counts as blocked and the car does not steer toward it. Checked at the end of this file.
 config.lookahead_length = 4 -- distance covered by the sample points beyond the first one
 config.lookahead_speed_bonus = 2 -- extra look-ahead length above config.speed.fast
 config.steering_cost = {
@@ -132,7 +132,7 @@ config.maneuver_min_travel = 2 -- a maneuver started by an obstacle or a lack of
 
 config.dense_area_threshold = 0.12 -- blended density above which precision mode turns on (see "Obstacle density")
 config.precision_lookahead_side_offset = config.lookahead_side_offset
-config.precision_lookahead_start = 1.2 -- replaces lookahead_start; same minimum, see there
+config.precision_lookahead_start = 1.2 -- replaces lookahead_start; same minimum, see there and the checks at the end
 config.precision_lookahead_length = 2 -- replaces lookahead_length
 
 -- ============================================================
@@ -147,16 +147,17 @@ config.short_delay = 60 -- (1s)
 	-- movement.update_mode: cooldown before emergency braking can trigger again after a stop
 	-- movement.drive_tick: a car that stands still this long after a leg began or a maneuver ended has hit an obstacle
 	-- movement.maneuver_tick: a car that drives but does not move this long backs off; the heading is looked for again this often
-	-- gui.lua: period at which an open window is refreshed
+	-- control.lua: period at which an open window of missing items is refreshed (gui.refresh_all)
 config.medium_delay = 180 -- (3s)
 	-- ghost_control.attempt_one_ghost: cooldown of a ghost that failed to revive
 	-- travel.stuck_reason: window over which progress is measured
 config.idle_delay = 300 -- (5s) long on purpose during development, so idle waits are easy to see; lower to 60-120 before release
 	-- control.lua: wait before an idle car looks for a new task or a garage
+	-- ghost_control.go_idle, travel.handle_empty: a wait set as already elapsed, so that the car decides on the next tick
 	-- movement.maneuver_tick: longest a single maneuver may last; past it the maneuver counts as failed
 config.long_delay = 600 -- (10s)
 	-- ghost_control.proceed: a batch waits this long for missing items before the clusters lacking them go back to the pending pool
-	-- park.lua: period at which parked cars are repaired
+	-- control.lua: period at which parked cars are repaired (garage_control.repair_parked_cars)
 	-- control.lua: period of the fallback scan of pending clusters
 	-- travel.stuck_tick: wait before a stuck car tries its leg again
 	-- travel.stuck_reason: margin added to the expected duration of a leg
@@ -230,5 +231,13 @@ assert(config.high_speed_density.enter < config.high_speed_density.leave,
 	"config.high_speed_density.enter must be below config.high_speed_density.leave")
 assert(config.step_back_distance > config.arrival_distance,
 	"config.step_back_distance must be above config.arrival_distance: the car would arrive without moving")
+
+-- The first sample point of a heading must lie beyond the car's own box, or the
+-- car would detect itself.
+local car_reach = config.car_size.length / 2 + math.sqrt((config.car_size.length / 2) ^ 2 + (config.car_size.width / 2) ^ 2)
+assert(config.lookahead_start >= car_reach,
+	"config.lookahead_start must be above half the car length plus its half diagonal: the first sample point would overlap the car")
+assert(config.precision_lookahead_start >= car_reach,
+	"config.precision_lookahead_start must be above half the car length plus its half diagonal: the first sample point would overlap the car")
 
 return config

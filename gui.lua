@@ -74,16 +74,20 @@ local function build_body(frame, missing, names)
 	end
 end
 
-local function refresh(player, missing, names, signature)
-	local frame = player.gui.screen[FRAME]
-	if not frame or (frame.tags and frame.tags.signature == signature) then
-		return
-	end
+-- Replaces the body of the window with the current content.
+local function set_body(frame, missing, names, signature)
 	if frame.body then
 		frame.body.destroy()
 	end
 	build_body(frame, missing, names)
 	frame.tags = {signature = signature}
+end
+
+local function refresh(player, missing, names, signature)
+	local frame = player.gui.screen[FRAME]
+	if frame and not (frame.tags and frame.tags.signature == signature) then
+		set_body(frame, missing, names, signature)
+	end
 end
 
 local function open(player)
@@ -103,8 +107,7 @@ local function open(player)
 
 	local missing = missing_items()
 	local names, signature = sorted_signature(missing)
-	build_body(frame, missing, names)
-	frame.tags = {signature = signature}
+	set_body(frame, missing, names, signature)
 end
 
 local function close(player)

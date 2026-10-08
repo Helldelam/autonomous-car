@@ -10,6 +10,13 @@ local function alert_parking_failed(car, garage)
 		"Unexpected error while parking an autonomous car.", config.names.car)
 end
 
+-- Drops the parking task and hands the car to the waiting loop, which looks for another garage.
+local function stop_parking(car_data)
+	car_data.parking.active = false
+	car_data.parking.garage = nil
+	_utils.start_waiting(car_data)
+end
+
 -- TODO: do not park on rails; repair kit slots in the garage. See "À faire" in CLAUDE.md.
 -- Called every tick while the car is at its garage: mines the car into the
 -- garage inventory. The trunk must be empty first.
@@ -17,11 +24,7 @@ function garage_control.parking_tick(car, garage)
 	local car_data = storage.car_data[car.unit_number]
 
 	if not (garage and garage.valid) then
-		-- The garage is gone: go back to waiting and look for another one.
-		car_data.parking.active = false
-		car_data.parking.garage = nil
-		car_data.waiting.active = true
-		car_data.waiting.since = game.tick
+		stop_parking(car_data) -- the garage is gone
 		return
 	end
 
@@ -30,11 +33,7 @@ function garage_control.parking_tick(car, garage)
 	if inventory.is_full() then
 		_utils.alert_once(car_data.alerts, "garage_full", car.force, garage,
 			"No room left in this garage for the car trying to park.", config.names.garage)
-		-- Drop the parking task and wait: the waiting loop looks for another garage.
-		car_data.parking.active = false
-		car_data.parking.garage = nil
-		car_data.waiting.active = true
-		car_data.waiting.since = game.tick
+		stop_parking(car_data)
 		return
 	end
 	_utils.alert_reset(car_data.alerts, "garage_full")

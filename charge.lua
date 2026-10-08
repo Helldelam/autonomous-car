@@ -5,9 +5,14 @@ local _utils = require("_utils")
 -- Chargers: finding one a car can reach, and filling the car's tank from it.
 local charger_control = {}
 
--- Rough fuel cost of driving from the car to `position` (see config.fuel_per_tile).
+-- Rough fuel cost of driving `distance` tiles (see config.fuel_per_tile).
+local function fuel_for_distance(distance)
+	return distance * config.fuel_per_tile * config.fuel_safety_margin
+end
+
+-- Rough fuel cost of driving from the car to `position`.
 function charger_control.fuel_to_reach(car, position)
-	return util.distance(car.position, position) * config.fuel_per_tile * config.fuel_safety_margin
+	return fuel_for_distance(util.distance(car.position, position))
 end
 
 -- Fuel a car should still have on arriving at `position`: enough to get from
@@ -17,7 +22,7 @@ function charger_control.fuel_reserve(car, position)
 	local reserve = config.critical_fuel_ratio * _utils.fuel_capacity(car)
 	local charger = _utils.closest(storage.chargers, position, nil, "charger", car.surface)
 	if charger then
-		reserve = reserve + util.distance(position, charger.position) * config.fuel_per_tile * config.fuel_safety_margin
+		reserve = reserve + fuel_for_distance(util.distance(position, charger.position))
 	end
 	return reserve
 end
@@ -50,8 +55,7 @@ function charger_control.charging_tick(car, charger)
 		-- The charger is gone: go back to waiting and let the car decide again.
 		car_data.charging.active = false
 		car_data.charging.charger = nil
-		car_data.waiting.active = true
-		car_data.waiting.since = game.tick
+		_utils.start_waiting(car_data)
 		return
 	end
 

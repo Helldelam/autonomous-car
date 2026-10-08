@@ -13,6 +13,12 @@ local riding = defines.riding
 -- Friction of a car in a maneuver (see config.friction_base).
 local MANEUVER_FRICTION = config.friction_base * config.friction_maneuver_factor
 
+-- How far around the car the slow measurements look (gates, moving neighbours):
+-- the longest look-ahead of drive_tick plus the distance covered while braking
+-- from a fast speed.
+local SENSOR_REACH = config.lookahead_start + config.lookahead_length + config.lookahead_speed_bonus
+	+ config.car_size.length + config.speed.fast * config.braking_duration
+
 -- ============================================================
 -- Helpers
 -- ============================================================
@@ -53,19 +59,17 @@ local function fits_at(car, x, y, orientation)
 	}
 end
 
--- Asks the gates of the car's force near it to open, every config.slow_check_interval
--- ticks (offset per car) and for as long: the car cannot open a gate by itself
--- (its prototype has no can_open_gates), and a closed gate is a wall to it. The
--- reach is the look-ahead plus the distance covered while braking, so that the
--- gate is open by the time the car senses it.
+-- Asks the gates of the car's force within SENSOR_REACH to open, every
+-- config.slow_check_interval ticks (offset per car) and for as long: the car
+-- cannot open a gate by itself (its prototype has no can_open_gates), and a
+-- closed gate is a wall to it. The reach covers the look-ahead, so that the gate
+-- is open by the time the car senses it.
 local function open_gates(car, tick)
 	if not _utils.slow_check_due(car, tick) then
 		return
 	end
-	local reach = config.lookahead_start + config.lookahead_length + config.lookahead_speed_bonus
-		+ config.car_size.length + config.speed.fast * config.braking_duration
 	for _, gate in pairs(car.surface.find_entities_filtered{
-		position = car.position, radius = reach, type = "gate", force = car.force,
+		position = car.position, radius = SENSOR_REACH, type = "gate", force = car.force,
 	}) do
 		gate.request_to_open(car.force, config.slow_check_interval)
 	end
@@ -84,6 +88,19 @@ local function obstacle_density(car, x, y)
 	return count / (pi * radius * radius)
 end
 
+-- Obstacle density summed over config.density_lookahead_steps + 1 discs laid end
+-- to end from the car along the heading (hx, hy): steering adds it to the cost of
+-- a heading, so that the car steers away from crowded areas well before it
+-- reaches them.
+local function density_ahead(car, x, y, hx, hy)
+	local radius = config.density_radius
+	local total = 0
+	for step = 0, config.density_lookahead_steps do
+		total = total + obstacle_density(car, x + hx * radius * (2 * step + 1), y + hy * radius * (2 * step + 1))
+	end
+	return total
+end
+
 -- The other cars that are moving near this one: position, unit direction of
 -- travel and speed, measured every config.slow_check_interval ticks (offset per
 -- car, so they do not all measure on the same tick). A parked or stopped car is
@@ -93,11 +110,9 @@ local function refresh_neighbours(car, car_data, tick)
 	if car_data.neighbours and not _utils.slow_check_due(car, tick) then
 		return
 	end
-	local reach = config.lookahead_start + config.lookahead_length + config.lookahead_speed_bonus
-		+ config.car_size.length + config.speed.fast * config.braking_duration
 	local list = {}
 	for _, other in pairs(car.surface.find_entities_filtered{
-		position = car.position, radius = reach, name = config.names.car,
+		position = car.position, radius = SENSOR_REACH, name = config.names.car,
 	}) do
 		if other ~= car and math.abs(other.speed) > config.speed.stopped then
 			local hx, hy = heading_vector(other.orientation)
@@ -362,19 +377,11 @@ function movement.drive_tick(car, tick)
 		left = left + weight * sample_cost(car, x + lx * d, y + ly * d, orientation - config.lookahead_angle, target, distance, neighbours, tick, left_side)
 	end
 
-	-- Add the obstacle density further along each heading, so the car steers
-	-- away from crowded areas well before it reaches them.
-	local radius = config.density_radius
+	-- Add the obstacle density further along each heading.
 	local density_weight = config.steering_cost.density
-	local straight_density, right_density, left_density = 0, 0, 0
-	for step = 0, config.density_lookahead_steps do
-		straight_density = straight_density + obstacle_density(car, x + sx * radius * (2 * step + 1), y + sy * radius * (2 * step + 1))
-		right_density = right_density + obstacle_density(car, x + rx * radius * (2 * step + 1), y + ry * radius * (2 * step + 1))
-		left_density = left_density + obstacle_density(car, x + lx * radius * (2 * step + 1), y + ly * radius * (2 * step + 1))
-	end
-	straight = straight + density_weight * straight_density
-	right = right + density_weight * right_density
-	left = left + density_weight * left_density
+	straight = straight + density_weight * density_ahead(car, x, y, sx, sy)
+	right = right + density_weight * density_ahead(car, x, y, rx, ry)
+	left = left + density_weight * density_ahead(car, x, y, lx, ly)
 
 	-- Steer to the cheapest heading; a tie between right and left goes left.
 	local direction = riding.direction.straight
@@ -419,25 +426,38 @@ local RANK_FITS, RANK_TOWARD_HEADING, RANK_FORWARD = 1000, 100, 10
 -- config.maneuver_probe).
 local PROBE_STEP = config.car_size.length / 2
 
+-- True if driving the way `reverse` is known to be blocked from where the car
+-- is: it stalled straight that way (see back_off), and has neither moved a car
+-- length nor turned by an arc's worth since. A stall further away, or at another
+-- angle, says nothing about this spot: in a room the car may well have crossed
+-- it from one wall to the other.
+local function is_blocked(car, maneuver, reverse)
+	local stall = maneuver.blocked[reverse]
+	return stall ~= nil
+		and util.distance(car.position, stall.position) < config.car_size.length
+		and math.abs(angle_between(stall.orientation, car.orientation)) < config.lookahead_angle
+end
+
 -- Called when the car drives but does not move: something it cannot see is in
 -- the way, or a wall stops it from turning (a car turns around its centre, so
 -- along a wall it cannot turn into it, nor away from it with its rear). The car
 -- is sent the other way, straight, and follows that direction along the wall (see
 -- maneuver_tick) until a turn works. A straight stall is the end of the wall in
--- that direction: the car goes the other way round, and when both directions
--- are blocked there is nothing more it can do alone. Returns true then.
+-- that direction: the car goes the other way round. When it stalled straight both
+-- ways at the same spot (see is_blocked) it is wedged and there is nothing more
+-- it can do alone. Returns true then.
 local function back_off(car, maneuver, tick)
 	local stalled, turn = maneuver.reverse, maneuver.turn
 	maneuver.stall_since = nil
 	if turn == 0 then
-		maneuver.blocked[stalled] = true
+		maneuver.blocked[stalled] = {position = car.position, orientation = car.orientation}
 	end
 
 	local reverse = not stalled
 	if maneuver.follow ~= nil and turn ~= 0 then
 		reverse = maneuver.follow -- a turn failed: carry on along the wall
 	end
-	if maneuver.blocked[reverse] then
+	if is_blocked(car, maneuver, reverse) then
 		return true
 	end
 	if maneuver.follow ~= reverse then
@@ -691,7 +711,8 @@ end
 -- it cannot see, or a wall that stops it from turning (see back_off): it goes
 -- the other way, straight, and follows that direction until a turn works. Its
 -- arcs keep to that direction meanwhile. The second return value is true when
--- both directions are blocked: the car is stuck for good (see travel.start_stuck).
+-- the car is wedged, blocked both ways at the same spot: it is stuck for good
+-- (see travel.start_stuck).
 --
 -- A maneuver that lasts longer than config.idle_delay has failed: a new one
 -- starts, until config.max_maneuver_attempts. Returns true when the last

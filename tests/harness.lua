@@ -459,8 +459,9 @@ end
 -- Three cars walled in, for the maneuver in a closed space and the stuck escalation:
 --   car A  has a batch and a wall of its ring is opened at t = 600, while it is still
 --          looking for a way out: it should follow the walls, find the opening and build
---   car B  has a batch and is never freed: it finds both directions blocked, is stuck
---          without any retry and abandons its batch
+--   car B  has a batch and is never freed: it ends stuck and abandons its batch, with
+--          retries of its leg if it can still cross the room, without any once it is wedged
+--          (blocked both ways at one spot, see movement.back_off)
 --   car C  is walled in with a low tank and a charger out of reach of its walls:
 --          its leg to the charger is retried without limit and never abandoned
 -- The ghosts of B are not built, and must not be assigned again after the abandon.
