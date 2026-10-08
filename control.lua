@@ -48,7 +48,7 @@ local KIND_BY_NAME = {
 }
 
 -- Runtime state of a car, kept in storage.car_data[unit_number].
-local function new_car_data(tick)
+local function create_car_data(tick)
 	return {
 		-- Tick states: each tick runs the first active one, in the order of update_car.
 		moving = {
@@ -111,11 +111,11 @@ local function on_built(event)
 		entity.riding_state = {acceleration = defines.riding.acceleration.nothing, direction = defines.riding.direction.straight}
 		-- A new car starts with config.critical_fuel_ratio of a full tank.
 		_utils.set_fuel_item(entity)
-		if _utils.remaining_fuel(entity) == 0 then
-			_utils.set_fuel(entity, _utils.fuel_capacity(entity) * config.critical_fuel_ratio)
+		if _utils.get_fuel(entity) == 0 then
+			_utils.set_fuel(entity, _utils.get_fuel_capacity(entity) * config.critical_fuel_ratio)
 		end
 		storage.cars[id] = entity
-		storage.car_data[id] = new_car_data(event.tick)
+		storage.car_data[id] = create_car_data(event.tick)
 	elseif entity.name == names.charger then
 		storage.chargers[id] = entity
 		storage.charger_data[id] = {users = 0} -- cars charging here or on their way
@@ -296,7 +296,7 @@ end
 -- then hands on_tick over to the real handler, so it runs once per load.
 local function init_storage()
 	storage.cars = storage.cars or {} -- [unit_number] = car entity
-	storage.car_data = storage.car_data or {} -- [unit_number] = runtime state, see new_car_data
+	storage.car_data = storage.car_data or {} -- [unit_number] = runtime state, see create_car_data
 	storage.chargers = storage.chargers or {}
 	storage.charger_data = storage.charger_data or {}
 	storage.garages = storage.garages or {}

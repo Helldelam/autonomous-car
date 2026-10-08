@@ -21,7 +21,7 @@ function travel.stop_car(car)
 end
 
 -- The destination of the leg the car is on, or is waiting out a stuck state on.
-local function leg_destination(car_data)
+local function get_leg_destination(car_data)
 	if car_data.moving.active then
 		return car_data.moving.destination
 	elseif car_data.stuck.active then
@@ -30,8 +30,8 @@ local function leg_destination(car_data)
 	return nil
 end
 
-local function heading_to_charger(car_data)
-	local destination = leg_destination(car_data)
+local function is_heading_to_charger(car_data)
+	local destination = get_leg_destination(car_data)
 	return destination and destination.valid and destination.name == config.names.charger
 end
 
@@ -45,8 +45,8 @@ function travel.release_charger_slot(car_data)
 		charger = car_data.charging.charger
 		car_data.charging.active = false
 		car_data.charging.charger = nil
-	elseif heading_to_charger(car_data) then
-		charger = leg_destination(car_data)
+	elseif is_heading_to_charger(car_data) then
+		charger = get_leg_destination(car_data)
 	end
 	local charger_data = charger and charger.valid and storage.charger_data[charger.unit_number]
 	if charger_data and charger_data.users > 0 then
@@ -128,10 +128,10 @@ end
 -- dropped: the car decides again once charged. Returns false if the car could
 -- not set off at all.
 function travel.set_destination(car, destination, next_task)
-	if _utils.remaining_fuel(car) >= charger_control.fuel_needed(car, destination.position) then
+	if _utils.get_fuel(car) >= charger_control.compute_fuel_needed(car, destination.position) then
 		travel.begin_leg(car, destination, next_task)
 		return true
-	elseif _utils.fuel_ratio(car) >= 1 then
+	elseif _utils.get_fuel_ratio(car) >= 1 then
 		travel.mark_unreachable(car)
 		return false
 	end
@@ -225,9 +225,9 @@ end
 -- the closest charger from where it is, plus the critical level
 -- (config.critical_fuel_ratio). Measured every config.slow_check_interval
 -- ticks and kept in car_data.
-local function critical_fuel(car, car_data, tick)
-	if not car_data.critical_fuel or _utils.slow_check_due(car, tick) then
-		car_data.critical_fuel = charger_control.fuel_reserve(car, car.position)
+local function get_critical_fuel(car, car_data, tick)
+	if not car_data.critical_fuel or _utils.is_slow_check_due(car, tick) then
+		car_data.critical_fuel = charger_control.compute_fuel_reserve(car, car.position)
 	end
 	return car_data.critical_fuel
 end
@@ -238,11 +238,11 @@ end
 -- config.short_delay. Returns true when it took over the car for this tick.
 function travel.handle_critical_fuel(car, tick)
 	local car_data = storage.car_data[car.unit_number]
-	if car_data.charging.active or heading_to_charger(car_data) then
+	if car_data.charging.active or is_heading_to_charger(car_data) then
 		return false
 	end
 
-	if _utils.remaining_fuel(car) >= critical_fuel(car, car_data, tick) then
+	if _utils.get_fuel(car) >= get_critical_fuel(car, car_data, tick) then
 		return false
 	end
 
@@ -268,7 +268,7 @@ end
 -- Sends an idle car to the charger closest to `target_position` if its tank is
 -- below config.pre_park_fuel_ratio. Returns true if the car left for a charger.
 function travel.top_up_before_parking(car, target_position)
-	if _utils.fuel_ratio(car) >= config.pre_park_fuel_ratio then
+	if _utils.get_fuel_ratio(car) >= config.pre_park_fuel_ratio then
 		return false
 	end
 
@@ -330,10 +330,10 @@ function travel.start_stuck(car, tick, hopeless)
 	-- TODO: retry a leg to a charger without limit only when the car is on its
 	-- way back (top-up before the garage, or after an abandon); otherwise limit
 	-- it like any other leg. See "À faire" in CLAUDE.md.
-	local to_charger = heading_to_charger(car_data)
+	local to_charger = is_heading_to_charger(car_data)
 	car_data.stuck_retry_count = car_data.stuck_retry_count + 1
 	local can_retry = not hopeless and (to_charger or (car_data.stuck_retry_count <= config.max_stuck_retries
-		and _utils.remaining_fuel(car) >= charger_control.fuel_to_reach(car, moving.destination.position)))
+		and _utils.get_fuel(car) >= charger_control.compute_fuel_to_reach(car, moving.destination.position)))
 
 	if can_retry then
 		_utils.alert_once(car_data.alerts, "stuck", car.force, car,
@@ -405,7 +405,7 @@ function travel.handle_empty(car, tick)
 
 	if not empty.active then
 		-- Charging, parking and building do not need the car to move.
-		if _utils.remaining_fuel(car) > 0 or car_data.charging.active or car_data.parking.active
+		if _utils.get_fuel(car) > 0 or car_data.charging.active or car_data.parking.active
 			or car_data.building.active then
 			return false
 		end
@@ -418,7 +418,7 @@ function travel.handle_empty(car, tick)
 	end
 
 	travel.stop_car(car)
-	if _utils.fuel_ratio(car) >= config.critical_fuel_ratio then
+	if _utils.get_fuel_ratio(car) >= config.critical_fuel_ratio then
 		empty.active = false
 		_utils.alert_reset(car_data.alerts, "battery_empty")
 		_utils.start_waiting(car_data, tick - config.idle_delay) -- already elapsed: handled on the next tick

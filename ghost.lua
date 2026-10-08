@@ -121,7 +121,7 @@ end
 -- ============================================================
 
 -- Name and count of the item that builds a ghost, or nil if no item places it.
-function ghost_control.ghost_item(ghost)
+function ghost_control.get_ghost_item(ghost)
 	local items = ghost.ghost_prototype.items_to_place_this
 	if items and items[1] then
 		return items[1].name, items[1].count or 1
@@ -133,8 +133,8 @@ end
 -- ([item name] = count). Slots are rounded on the running total of each item,
 -- so ghosts built from the same item share its stacks. Also returns the item
 -- and count of the ghost.
-local function extra_slots(items, ghost)
-	local item_name, count = ghost_control.ghost_item(ghost)
+local function count_extra_slots(items, ghost)
+	local item_name, count = ghost_control.get_ghost_item(ghost)
 	if not item_name then
 		return 0, nil, 0
 	end
@@ -145,7 +145,7 @@ local function extra_slots(items, ghost)
 	return math.ceil(after / stack_size) - math.ceil(before / stack_size), item_name, count
 end
 
-local function neighbours_of(ghost, candidates)
+local function find_neighbours(ghost, candidates)
 	local neighbours = {}
 	for _, candidate in pairs(candidates) do
 		if util.distance(ghost.position, candidate.position) <= config.cluster_radius then
@@ -197,7 +197,7 @@ function ghost_control.build_clusters(ghosts)
 			local slots = 0
 			-- Adds a ghost to the cluster if its item still fits in the trunk.
 			local function try_add(ghost)
-				local delta, item_name, count = extra_slots(items, ghost)
+				local delta, item_name, count = count_extra_slots(items, ghost)
 				if slots + delta > config.car_inventory_size then
 					return false
 				end
@@ -215,7 +215,7 @@ function ghost_control.build_clusters(ghosts)
 			while _utils.deque.length(frontier) > 0 do
 				local current = _utils.deque.pop_front(frontier)
 
-				local neighbours = neighbours_of(current, remaining)
+				local neighbours = find_neighbours(current, remaining)
 				table.sort(neighbours, function(a, b)
 					return util.distance(current.position, a.position) < util.distance(current.position, b.position)
 				end)
@@ -276,7 +276,7 @@ function ghost_control.any_car_exists()
 end
 
 -- Surface of a cluster (its ghosts are all on one), or nil if it holds no ghost.
-local function cluster_surface(cluster)
+local function get_cluster_surface(cluster)
 	local _, ghost = next(cluster.ghosts)
 	return ghost and ghost.valid and ghost.surface or nil
 end
@@ -291,9 +291,9 @@ function ghost_control.find_available_car(cluster)
 	if not centroid then
 		return nil
 	end
-	local surface = cluster_surface(cluster)
+	local surface = get_cluster_surface(cluster)
 
-	local car = _utils.closest(storage.cars, centroid, function(car, id)
+	local car = _utils.find_closest(storage.cars, centroid, function(car, id)
 		local car_data = storage.car_data[id]
 		return car_data.waiting.active and not car_data.construction
 			and car.get_inventory(defines.inventory.car_trunk).is_empty()
@@ -302,7 +302,7 @@ function ghost_control.find_available_car(cluster)
 		return car
 	end
 
-	local garage = _utils.closest(storage.garages, centroid, garage_control.find_parked_car, nil, surface)
+	local garage = _utils.find_closest(storage.garages, centroid, garage_control.find_parked_car, nil, surface)
 	if garage then
 		return garage_control.release_car(garage)
 	end
@@ -321,7 +321,7 @@ function ghost_control.try_assign_pending(car)
 	local best_index, best_distance
 	for index, cluster in pairs(storage.pending_clusters) do
 		local centroid = ghost_control.compute_centroid(cluster.ghosts)
-		if centroid and cluster_surface(cluster) == car.surface then
+		if centroid and get_cluster_surface(cluster) == car.surface then
 			local distance = util.distance(car.position, centroid)
 			if not best_index or distance < best_distance then
 				best_index = index
@@ -367,7 +367,7 @@ function ghost_control.retry_pending_clusters()
 end
 
 -- Trunk slots a set of items ([item name] = count) takes.
-local function items_slots(items)
+local function count_items_slots(items)
 	local slots = 0
 	for item_name, count in pairs(items) do
 		local prototype = prototypes.item[item_name]
@@ -377,10 +377,10 @@ local function items_slots(items)
 end
 
 -- Items ([item name] = count) that build the ghosts of a cluster.
-local function cluster_items(cluster)
+local function compute_cluster_items(cluster)
 	local items = {}
 	for _, ghost in pairs(cluster.ghosts) do
-		local item_name, count = ghost_control.ghost_item(ghost)
+		local item_name, count = ghost_control.get_ghost_item(ghost)
 		if item_name then
 			items[item_name] = (items[item_name] or 0) + count
 		end
@@ -391,9 +391,9 @@ end
 -- Adds a cluster to the batch of a car. The entry remembers the item of each
 -- ghost: once a ghost is gone, its entity cannot tell any more (see drop_ghost_items).
 local function add_cluster(car_id, construction, cluster)
-	local entry = {ghosts = {}, items = cluster_items(cluster)}
+	local entry = {ghosts = {}, items = compute_cluster_items(cluster)}
 	for _, ghost in pairs(cluster.ghosts) do
-		local item_name, count = ghost_control.ghost_item(ghost)
+		local item_name, count = ghost_control.get_ghost_item(ghost)
 		construction.ghosts[ghost.unit_number] = ghost
 		entry.ghosts[ghost.unit_number] = {item = item_name, count = count}
 		storage.ghost_to_car[ghost.unit_number] = car_id
@@ -411,7 +411,7 @@ function ghost_control.fill_batch(car)
 	local construction = storage.car_data[car.unit_number].construction
 	local reserved = 0
 	for _, entry in ipairs(construction.clusters) do
-		reserved = reserved + items_slots(entry.items)
+		reserved = reserved + count_items_slots(entry.items)
 	end
 
 	while true do
@@ -422,8 +422,8 @@ function ghost_control.fill_batch(car)
 		local best_index, best_distance
 		for index, cluster in ipairs(storage.pending_clusters) do
 			local centroid = ghost_control.compute_centroid(cluster.ghosts)
-			if centroid and cluster_surface(cluster) == car.surface
-				and reserved + items_slots(cluster_items(cluster)) <= config.car_inventory_size then
+			if centroid and get_cluster_surface(cluster) == car.surface
+				and reserved + count_items_slots(compute_cluster_items(cluster)) <= config.car_inventory_size then
 				local distance = util.distance(origin, centroid)
 				if not best_index or distance < best_distance then
 					best_index, best_distance = index, distance
@@ -434,7 +434,7 @@ function ghost_control.fill_batch(car)
 			return
 		end
 		local cluster = table.remove(storage.pending_clusters, best_index)
-		reserved = reserved + items_slots(cluster_items(cluster))
+		reserved = reserved + count_items_slots(compute_cluster_items(cluster))
 		add_cluster(car.unit_number, construction, cluster)
 	end
 end
@@ -488,7 +488,7 @@ end
 
 -- Closest supply chest whose group holds at least one of the needed items, or nil.
 function ghost_control.find_supply_chest(car, items_needed)
-	return _utils.closest(storage.supply_chests, car.position, function(chest)
+	return _utils.find_closest(storage.supply_chests, car.position, function(chest)
 		return group_holds_any(ghost_control.chest_group(chest), items_needed)
 	end, "chest", car.surface)
 end
@@ -678,7 +678,7 @@ end
 -- Builds a ghost with an item from the car trunk. Returns false if the revive
 -- failed, usually because something - often the car itself - is in the way.
 function ghost_control.revive_ghost(car, ghost)
-	local item_name = ghost_control.ghost_item(ghost)
+	local item_name = ghost_control.get_ghost_item(ghost)
 	if not item_name then
 		return true -- no item places this ghost: count it as done, so it is not retried forever
 	end
@@ -802,7 +802,7 @@ end
 -- Closest supply chest whose group has room for something the car carries, or nil.
 function ghost_control.find_chest_with_room(car)
 	local trunk = car.get_inventory(defines.inventory.car_trunk)
-	return _utils.closest(storage.supply_chests, car.position, function(chest)
+	return _utils.find_closest(storage.supply_chests, car.position, function(chest)
 		return group_has_room_for(ghost_control.chest_group(chest), trunk)
 	end, "chest", car.surface)
 end

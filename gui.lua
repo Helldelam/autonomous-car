@@ -15,7 +15,7 @@ local CLOSE = "autonomous_car_missing_close"
 -- The items that cars wait for because no supply chest holds them (see
 -- construction.missing_since in ghost.lua):
 -- [item name] = {count = still to collect, cars = number of cars waiting for it}.
-local function missing_items()
+local function find_missing_items()
 	local missing = {}
 	for _, car_data in pairs(storage.car_data) do
 		local construction = car_data.construction
@@ -33,7 +33,7 @@ end
 
 -- Item names in a fixed order, and a string that changes when the content does,
 -- so that the window is only rebuilt when something changed.
-local function sorted_signature(missing)
+local function build_signature(missing)
 	local names = {}
 	for item_name in pairs(missing) do
 		table.insert(names, item_name)
@@ -105,8 +105,8 @@ local function open(player)
 		tooltip = {"gui.close"},
 	}
 
-	local missing = missing_items()
-	local names, signature = sorted_signature(missing)
+	local missing = find_missing_items()
+	local names, signature = build_signature(missing)
 	set_body(frame, missing, names, signature)
 end
 
@@ -141,8 +141,8 @@ function gui.refresh_all()
 	for _, player in pairs(game.connected_players) do
 		if player.gui.screen[FRAME] then
 			if not signature then
-				missing = missing_items()
-				names, signature = sorted_signature(missing)
+				missing = find_missing_items()
+				names, signature = build_signature(missing)
 			end
 			refresh(player, missing, names, signature)
 		end

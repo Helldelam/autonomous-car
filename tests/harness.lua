@@ -77,7 +77,7 @@ local function make_car(surface, x, y, orientation, fuel_ratio)
 	local car = make(surface, names.car, x, y)
 	car.orientation = orientation
 	if fuel_ratio then
-		_utils.set_fuel(car, _utils.fuel_capacity(car) * fuel_ratio)
+		_utils.set_fuel(car, _utils.get_fuel_capacity(car) * fuel_ratio)
 	end
 	return car
 end
@@ -514,7 +514,7 @@ scenarios["empty-battery"] = {
 			select_ghosts(35, 35, 45, 45)
 		end
 		if t == 3000 then
-			_utils.set_fuel(T.car, _utils.fuel_capacity(T.car) * 0.5)
+			_utils.set_fuel(T.car, _utils.get_fuel_capacity(T.car) * 0.5)
 			out("EVENT battery refilled")
 		end
 	end,
@@ -575,7 +575,7 @@ scenarios["gate-manual"] = {
 				car = s.create_entity{name = names.car, position = {14, y}, force = "player"}
 				car.orientation = 0.25
 				_utils.set_fuel_item(car)
-				_utils.set_fuel(car, _utils.fuel_capacity(car))
+				_utils.set_fuel(car, _utils.get_fuel_capacity(car))
 			end
 			T.test_cars[index] = car
 		end

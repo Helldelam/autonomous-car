@@ -24,29 +24,29 @@ local SENSOR_REACH = config.lookahead_start + config.lookahead_length + config.l
 -- ============================================================
 
 -- Unit vector of an orientation (0 = north, 0.25 = east, as LuaEntity.orientation).
-local function heading_vector(orientation)
+local function get_heading_vector(orientation)
 	return sin(2 * pi * orientation), -cos(2 * pi * orientation)
 end
 
 -- Angle from orientation `from` to orientation `to`, in turns, within
 -- [-0.5, 0.5): positive when `to` is clockwise (on the right) of `from`.
-local function angle_between(from, to)
+local function compute_angle_between(from, to)
 	return ((to - from + 0.5) % 1) - 0.5
 end
 
 -- Orientation of the direction from the car to `target`.
-local function orientation_to(car, target)
+local function compute_orientation_to(car, target)
 	local dx, dy = target.x - car.position.x, target.y - car.position.y
 	return (math.atan2(dx, -dy) / (2 * pi)) % 1
 end
 
 -- Angle from the heading of the car to `target`, in turns, within [-0.5, 0.5):
 -- positive when the target is on the right.
-local function target_angle(car, target)
-	return angle_between(car.orientation, orientation_to(car, target))
+local function compute_target_angle(car, target)
+	return compute_angle_between(car.orientation, compute_orientation_to(car, target))
 end
 
--- Sides of a heading for wall_margin.
+-- Sides of a heading for measure_wall_margin.
 local SIDE_LEFT, SIDE_RIGHT, SIDES_BOTH = {-1}, {1}, {-1, 1}
 
 -- True if a car turned toward `orientation` would fit at (x, y). The collision
@@ -65,7 +65,7 @@ end
 -- closed gate is a wall to it. The reach covers the look-ahead, so that the gate
 -- is open by the time the car senses it.
 local function open_gates(car, tick)
-	if not _utils.slow_check_due(car, tick) then
+	if not _utils.is_slow_check_due(car, tick) then
 		return
 	end
 	for _, gate in pairs(car.surface.find_entities_filtered{
@@ -78,7 +78,7 @@ end
 -- Obstacle density, in entities per square tile, in a disc of
 -- config.density_radius. A disc centred on the car counts the car itself (see
 -- "Obstacle density" in config.lua).
-local function obstacle_density(car, x, y)
+local function measure_obstacle_density(car, x, y)
 	local radius = config.density_radius
 	local count = car.surface.count_entities_filtered{
 		position = {x, y},
@@ -92,11 +92,11 @@ end
 -- to end from the car along the heading (hx, hy): steering adds it to the cost of
 -- a heading, so that the car steers away from crowded areas well before it
 -- reaches them.
-local function density_ahead(car, x, y, hx, hy)
+local function measure_density_ahead(car, x, y, hx, hy)
 	local radius = config.density_radius
 	local total = 0
 	for step = 0, config.density_lookahead_steps do
-		total = total + obstacle_density(car, x + hx * radius * (2 * step + 1), y + hy * radius * (2 * step + 1))
+		total = total + measure_obstacle_density(car, x + hx * radius * (2 * step + 1), y + hy * radius * (2 * step + 1))
 	end
 	return total
 end
@@ -105,9 +105,9 @@ end
 -- travel and speed, measured every config.slow_check_interval ticks (offset per
 -- car, so they do not all measure on the same tick). A parked or stopped car is
 -- an ordinary obstacle, which can_place_entity already sees. Trains could join
--- this list later: it only holds what in_neighbour_zone needs.
+-- this list later: it only holds what is_in_neighbour_zone needs.
 local function refresh_neighbours(car, car_data, tick)
-	if car_data.neighbours and not _utils.slow_check_due(car, tick) then
+	if car_data.neighbours and not _utils.is_slow_check_due(car, tick) then
 		return
 	end
 	local list = {}
@@ -115,7 +115,7 @@ local function refresh_neighbours(car, car_data, tick)
 		position = car.position, radius = SENSOR_REACH, name = config.names.car,
 	}) do
 		if other ~= car and math.abs(other.speed) > config.speed.stopped then
-			local hx, hy = heading_vector(other.orientation)
+			local hx, hy = get_heading_vector(other.orientation)
 			local sign = other.speed < 0 and -1 or 1
 			table.insert(list, {x = other.position.x, y = other.position.y, mx = hx * sign, my = hy * sign, speed = math.abs(other.speed)})
 		end
@@ -126,7 +126,7 @@ end
 -- True when (x, y) lies in the zone in front of a moving neighbour: as wide as
 -- a car, as long as the car, plus the distance it covers while braking. The
 -- neighbour is moved along its direction since the last measurement.
-local function in_neighbour_zone(neighbours, tick, x, y)
+local function is_in_neighbour_zone(neighbours, tick, x, y)
 	if not neighbours then
 		return false
 	end
@@ -150,10 +150,10 @@ end
 -- along the point at about a car width from its flank. Makes the car keep away
 -- from walls when it can. The point must be at least half a car length from the
 -- car, or the box would overlap the car itself.
-local function wall_margin(car, x, y, orientation, sides)
+local function measure_wall_margin(car, x, y, orientation, sides)
 	local cost = 0
 	if sides then
-		local hx, hy = heading_vector(orientation)
+		local hx, hy = get_heading_vector(orientation)
 		local offset = config.car_size.width * 1.5
 		for _, side in ipairs(sides) do
 			if not fits_at(car, x - hy * side * offset, y + hx * side * offset, orientation) then
@@ -167,14 +167,14 @@ end
 -- Steering cost of a sample point: the distance left from there to the target,
 -- relative to the car's own, plus config.steering_cost.blocked if the car would
 -- not fit there, and again if it lies in front of a moving car, plus the margin
--- cost of `sides` (see wall_margin) for a point where it fits.
-local function sample_cost(car, x, y, orientation, target, distance, neighbours, tick, sides)
+-- cost of `sides` (see measure_wall_margin) for a point where it fits.
+local function compute_sample_cost(car, x, y, orientation, target, distance, neighbours, tick, sides)
 	local blocked = fits_at(car, x, y, orientation) and 0 or 1
-	if in_neighbour_zone(neighbours, tick, x, y) then
+	if is_in_neighbour_zone(neighbours, tick, x, y) then
 		blocked = blocked + 1
 	end
 	return util.distance({x, y}, target) / distance + config.steering_cost.blocked * blocked
-		+ (blocked == 0 and wall_margin(car, x, y, orientation, sides) or 0)
+		+ (blocked == 0 and measure_wall_margin(car, x, y, orientation, sides) or 0)
 end
 
 -- ============================================================
@@ -182,7 +182,7 @@ end
 -- ============================================================
 
 -- Friction modifier of the tile under the car, read each time the friction is set.
-local function tile_friction(car)
+local function get_tile_friction(car)
 	local tile = car.surface.get_tile(math.floor(car.position.x), math.floor(car.position.y))
 	local friction = tile.valid and tile.prototype.vehicle_friction_modifier or 1
 	return friction > 0 and friction or 1
@@ -194,7 +194,7 @@ end
 -- it here and the car goes as fast on grass as on concrete. `braking_factor`
 -- (emergency braking) is not: it has to brake on any tile.
 local function set_friction(car, mode_friction, braking_factor)
-	car.friction_modifier = mode_friction / tile_friction(car) * (braking_factor or 1)
+	car.friction_modifier = mode_friction / get_tile_friction(car) * (braking_factor or 1)
 end
 
 -- ============================================================
@@ -222,12 +222,12 @@ function movement.update_mode(car, tick)
 	local distance = util.distance(car.position, target)
 	local orientation = car.orientation
 	local x, y = car.position.x, car.position.y
-	local sx, sy = heading_vector(orientation)
+	local sx, sy = get_heading_vector(orientation)
 
 	-- Density around the car (weight 2), blended with the density one disc
 	-- further ahead (weight 1).
-	local density = 1 / 3 * (2 * obstacle_density(car, x, y)
-		+ obstacle_density(car, x + sx * 2 * config.density_radius, y + sy * 2 * config.density_radius))
+	local density = 1 / 3 * (2 * measure_obstacle_density(car, x, y)
+		+ measure_obstacle_density(car, x + sx * 2 * config.density_radius, y + sy * 2 * config.density_radius))
 
 	-- Two thresholds, so the flag does not flicker when the density hovers around one value.
 	local was_high_speed = car_data.high_speed
@@ -263,7 +263,7 @@ function movement.update_mode(car, tick)
 		emergency_brake.since = tick
 	end
 
-	local angle = target_angle(car, target)
+	local angle = compute_target_angle(car, target)
 
 	-- The target is behind a slow car: turn around with a maneuver. Not near the
 	-- destination, where the car stops instead.
@@ -348,9 +348,9 @@ function movement.drive_tick(car, tick)
 
 	local x, y = car.position.x, car.position.y
 	local orientation = car.orientation
-	local sx, sy = heading_vector(orientation)
-	local rx, ry = heading_vector(orientation + config.lookahead_angle)
-	local lx, ly = heading_vector(orientation - config.lookahead_angle)
+	local sx, sy = get_heading_vector(orientation)
+	local rx, ry = get_heading_vector(orientation + config.lookahead_angle)
+	local lx, ly = get_heading_vector(orientation - config.lookahead_angle)
 
 	-- Cost of the straight, right and left headings, from sample points one
 	-- tile apart along each of them. Near points weigh more than far ones. The
@@ -359,7 +359,7 @@ function movement.drive_tick(car, tick)
 	local bx, by = x - sy * side_offset, y + sx * side_offset
 	local neighbours = car_data.neighbours
 
-	-- The margin cost (see wall_margin) is only worth its extra checks when
+	-- The margin cost (see measure_wall_margin) is only worth its extra checks when
 	-- something stands near the samples: one entity within reach is the car itself.
 	local reach = lookahead_start + lookahead_length + bonus + config.car_size.width * 1.5
 	local near = car.surface.count_entities_filtered{
@@ -371,17 +371,17 @@ function movement.drive_tick(car, tick)
 	local straight, right, left = 0, 0, 0
 	for d = lookahead_start, lookahead_start + (lookahead_length + bonus) do
 		local weight = ((lookahead_start + lookahead_length + bonus - (d / 2)) + 1) / (lookahead_length + bonus)
-		straight = straight + (weight * sample_cost(car, ax + sx * d, ay + sy * d, orientation, target, distance, neighbours, tick, left_side)
-			+ weight * sample_cost(car, bx + sx * d, by + sy * d, orientation, target, distance, neighbours, tick, right_side)) / 2
-		right = right + weight * sample_cost(car, x + rx * d, y + ry * d, orientation + config.lookahead_angle, target, distance, neighbours, tick, right_side)
-		left = left + weight * sample_cost(car, x + lx * d, y + ly * d, orientation - config.lookahead_angle, target, distance, neighbours, tick, left_side)
+		straight = straight + (weight * compute_sample_cost(car, ax + sx * d, ay + sy * d, orientation, target, distance, neighbours, tick, left_side)
+			+ weight * compute_sample_cost(car, bx + sx * d, by + sy * d, orientation, target, distance, neighbours, tick, right_side)) / 2
+		right = right + weight * compute_sample_cost(car, x + rx * d, y + ry * d, orientation + config.lookahead_angle, target, distance, neighbours, tick, right_side)
+		left = left + weight * compute_sample_cost(car, x + lx * d, y + ly * d, orientation - config.lookahead_angle, target, distance, neighbours, tick, left_side)
 	end
 
 	-- Add the obstacle density further along each heading.
 	local density_weight = config.steering_cost.density
-	straight = straight + density_weight * density_ahead(car, x, y, sx, sy)
-	right = right + density_weight * density_ahead(car, x, y, rx, ry)
-	left = left + density_weight * density_ahead(car, x, y, lx, ly)
+	straight = straight + density_weight * measure_density_ahead(car, x, y, sx, sy)
+	right = right + density_weight * measure_density_ahead(car, x, y, rx, ry)
+	left = left + density_weight * measure_density_ahead(car, x, y, lx, ly)
 
 	-- Steer to the cheapest heading; a tie between right and left goes left.
 	local direction = riding.direction.straight
@@ -422,7 +422,7 @@ local ARCS = {
 local ANGLE_PULL = 0.2
 local RANK_FITS, RANK_TOWARD_HEADING, RANK_FORWARD = 1000, 100, 10
 
--- Distance between two probes of free_room: half a car length (see
+-- Distance between two probes of measure_free_room: half a car length (see
 -- config.maneuver_probe).
 local PROBE_STEP = config.car_size.length / 2
 
@@ -435,7 +435,7 @@ local function is_blocked(car, maneuver, reverse)
 	local stall = maneuver.blocked[reverse]
 	return stall ~= nil
 		and util.distance(car.position, stall.position) < config.car_size.length
-		and math.abs(angle_between(stall.orientation, car.orientation)) < config.lookahead_angle
+		and math.abs(compute_angle_between(stall.orientation, car.orientation)) < config.lookahead_angle
 end
 
 -- Called when the car drives but does not move: something it cannot see is in
@@ -520,8 +520,8 @@ end
 --    detect itself, which leaves a blind zone next to it: the entities there are
 --    looked for apart, with a disc search that skips the car;
 --  - the probes are closer to each other than the car is wide.
-local function free_room(car, x, y, orientation)
-	local vx, vy = heading_vector(orientation)
+local function measure_free_room(car, x, y, orientation)
+	local vx, vy = get_heading_vector(orientation)
 	local surface = car.surface
 	local probe = config.maneuver_probe
 
@@ -553,7 +553,7 @@ end
 -- so along a wall it can neither turn into it, nor away from it with its rear.
 -- Checking it here spares the car from finding out by pressing against the wall.
 local function can_turn(car, to)
-	local angle = angle_between(car.orientation, to)
+	local angle = compute_angle_between(car.orientation, to)
 	local steps = math.max(1, math.ceil(math.abs(angle) / (config.lookahead_angle / 3)))
 	local x, y = car.position.x, car.position.y
 	local half_width, half_length = config.car_size.width / 2 - 0.02, config.car_size.length / 2 - 0.02
@@ -579,17 +579,17 @@ end
 -- maneuver that is not turning toward the destination minus the obstacle
 -- density around the point 2 * config.density_radius away along it.
 local function score_heading(car, x, y, orientation, preferred, toward_target)
-	local room = free_room(car, x, y, orientation) / (math.floor(config.maneuver_probe.length / PROBE_STEP) + 1)
-	local score = room - math.abs(angle_between(preferred, orientation)) * ANGLE_PULL
-	local vx, vy = heading_vector(orientation)
+	local room = measure_free_room(car, x, y, orientation) / (math.floor(config.maneuver_probe.length / PROBE_STEP) + 1)
+	local score = room - math.abs(compute_angle_between(preferred, orientation)) * ANGLE_PULL
+	local vx, vy = get_heading_vector(orientation)
 
 	-- Keeps off the walls: the margin cost of the first probe, as a fraction of a
 	-- blocked sample's, so that it weighs as little as it does when driving.
-	score = score - wall_margin(car, x + vx * config.maneuver_probe.start, y + vy * config.maneuver_probe.start,
+	score = score - measure_wall_margin(car, x + vx * config.maneuver_probe.start, y + vy * config.maneuver_probe.start,
 		orientation, SIDES_BOTH) / config.steering_cost.blocked
 	if not toward_target then
 		local reach = 2 * config.density_radius
-		score = score - config.steering_cost.density * obstacle_density(car, x + vx * reach, y + vy * reach)
+		score = score - config.steering_cost.density * measure_obstacle_density(car, x + vx * reach, y + vy * reach)
 	end
 	return score
 end
@@ -603,7 +603,7 @@ end
 local function choose_heading(car, car_data, maneuver)
 	local x, y = car.position.x, car.position.y
 	local toward_target = maneuver.reason == "rear_turn"
-	local preferred = orientation_to(car, car_data.moving.destination.position)
+	local preferred = compute_orientation_to(car, car_data.moving.destination.position)
 
 	local count = math.floor(1 / config.lookahead_angle + 0.5)
 	local best, best_score
@@ -632,7 +632,7 @@ end
 local function choose_arc(car, maneuver)
 	local x, y = car.position.x, car.position.y
 	local orientation = car.orientation
-	local angle = angle_between(orientation, maneuver.heading)
+	local angle = compute_angle_between(orientation, maneuver.heading)
 	local aligned = math.abs(angle) < config.lookahead_angle / 2 -- half a sector of choose_heading
 	local last = maneuver.last_arc
 	local best, best_rank
@@ -646,7 +646,7 @@ local function choose_arc(car, maneuver)
 			if arc.reverse and REVERSE_STEERING_INVERTED then
 				rotation = -rotation
 			end
-			local room = free_room(car, x, y,
+			local room = measure_free_room(car, x, y,
 				orientation + (arc.reverse and 0.5 or 0) + rotation * config.lookahead_angle)
 
 			local toward = rotation * (angle >= 0 and 1 or -1) -- 1 turns toward the heading, -1 away
@@ -665,7 +665,7 @@ local function choose_arc(car, maneuver)
 end
 
 -- True when the car is out of the situation that called for the maneuver.
-local function maneuver_done(car, car_data)
+local function is_maneuver_done(car, car_data)
 	local maneuver = car_data.maneuver
 	local target = car_data.moving.destination.position
 	local x, y = car.position.x, car.position.y
@@ -676,18 +676,18 @@ local function maneuver_done(car, car_data)
 	if maneuver.arcs == 0 then
 		return false -- at least one arc: the situation is not judged from where the car stood still
 	end
-	if obstacle_density(car, x, y) > config.maneuver_exit_density then
+	if measure_obstacle_density(car, x, y) > config.maneuver_exit_density then
 		return false
 	end
 
-	local sx, sy = heading_vector(car.orientation)
+	local sx, sy = get_heading_vector(car.orientation)
 	if not fits_at(car, x + sx * config.emergency_brake_lookahead, y + sy * config.emergency_brake_lookahead,
 		car.orientation) then
 		return false
 	end
 
 	if maneuver.reason == "rear_turn" then
-		return math.abs(target_angle(car, target)) < config.maneuver_exit_angle
+		return math.abs(compute_target_angle(car, target)) < config.maneuver_exit_angle
 	end
 	return util.distance(car.position, maneuver.origin) >= config.maneuver_min_travel
 end
@@ -742,7 +742,7 @@ function movement.maneuver_tick(car, tick)
 	-- Once the car has turned by an arc's worth while following a wall, the wall
 	-- is behind it: it goes back to choosing freely.
 	if maneuver.follow ~= nil
-		and math.abs(angle_between(maneuver.follow_orientation, car.orientation)) >= config.lookahead_angle then
+		and math.abs(compute_angle_between(maneuver.follow_orientation, car.orientation)) >= config.lookahead_angle then
 		maneuver.follow = nil
 		maneuver.blocked = {}
 	end
@@ -764,7 +764,7 @@ function movement.maneuver_tick(car, tick)
 		end
 	end
 
-	if maneuver_done(car, car_data) then
+	if is_maneuver_done(car, car_data) then
 		end_maneuver(car, maneuver, tick)
 		maneuver.attempts = 0
 		return false

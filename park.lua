@@ -51,7 +51,7 @@ function garage_control.parking_tick(car, garage)
 		alert_parking_failed(car, garage)
 		return
 	end
-	storage.garage_data[garage.unit_number].fuel[slot] = _utils.remaining_fuel(car)
+	storage.garage_data[garage.unit_number].fuel[slot] = _utils.get_fuel(car)
 
 	-- Once mined the car entity is invalid: on_tick releases its state on the next tick.
 	if not car.mine{inventory = inventory} then
@@ -121,7 +121,7 @@ end
 
 -- Closest garage with room left, or nil.
 function garage_control.find_garage(car)
-	return _utils.closest(storage.garages, car.position, function(garage)
+	return _utils.find_closest(storage.garages, car.position, function(garage)
 		return not garage.get_inventory(defines.inventory.chest).is_full()
 	end, "garage", car.surface)
 end
