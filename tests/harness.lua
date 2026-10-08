@@ -10,7 +10,8 @@
 ---@diagnostic disable: undefined-global
 --
 -- Output, in script-output/:
---   trace.txt     one line per car every 10 ticks, plus SETUP, EVENT, SELECT
+--   trace.txt     one line per car every 10 ticks, plus SETUP, EVENT, SELECT,
+--                 BATCH (clusters of a car's batch, each time it changes)
 --                 and SUMMARY lines, and the GATE-TEST lines of gate-manual
 --   coverage.txt  how many times each module function was called
 --
@@ -22,10 +23,10 @@
 -- when the car has no batch. tests/show.ps1 decodes these lines, and reads
 -- FLAG_NAMES from the line below.
 
-local FLAG_NAMES = {"moving", "charging", "parking", "building", "stuck", "waiting", "empty", "maneuver", "emergency_brake", "high_speed", "precision_mode"}
+local FLAG_NAMES = {"moving", "charging", "parking", "building", "stuck", "waiting", "empty", "maneuver", "emergency_brake", "high_speed", "precision_mode", "slowing"}
 local BUILT_NAMES = {"wooden-chest", "stone-furnace", "small-electric-pole", "steel-chest", "car"}
 
-local T = {chargers = {}} -- state of the running scenario
+local T = {chargers = {}, clusters = {}} -- state of the running scenario
 local scenarios = {}
 
 -- ============================================================
@@ -36,7 +37,9 @@ local function out(line)
 	helpers.write_file("trace.txt", line .. "\n", true)
 end
 
--- Creates the flat test surface, generated around each chunk centre given.
+-- Creates the flat test surface, generated around each chunk centre given. Lab
+-- tiles have no friction of their own, which makes the cars much faster than on
+-- the grass they are tuned on in game: the ground is laid with grass.
 local function new_surface(centres, radius)
 	local surface = game.create_surface("test")
 	surface.generate_with_lab_tiles = true
@@ -44,6 +47,16 @@ local function new_surface(centres, radius)
 		surface.request_to_generate_chunks(centre, radius)
 	end
 	surface.force_generate_chunk_requests()
+	for _, centre in pairs(centres) do
+		local tiles = {}
+		local half = radius * 32 + 16
+		for x = centre[1] - half, centre[1] + half - 1 do
+			for y = centre[2] - half, centre[2] + half - 1 do
+				tiles[#tiles + 1] = {name = "grass-1", position = {x, y}}
+			end
+		end
+		surface.set_tiles(tiles, false)
+	end
 	T.surface = surface
 	return surface
 end
@@ -113,21 +126,22 @@ end
 -- with `ticks = N,` as the next line.
 
 -- Driving, charging and parking, on open ground, around obstacles and on
--- natural terrain. Also: a destination destroyed on the way, and a critically
--- low car with no charger in reach.
+-- natural terrain. Also: a destination destroyed on the way, a critically
+-- low car with no charger in reach, and cars on two surfaces (a car must only
+-- pick the chargers and garages of its own surface).
 scenarios["basics"] = {
 	setup = function()
-		-- The flat zones sit far from the origin, away from the nauvis zone
-		-- below: cars pick chargers and garages by position only, whatever
-		-- the surface.
 		local s = new_surface({{10000, 0}, {11000, 0}, {11000, 1000}, {12000, 0}}, 6)
 
-		-- Open ground: three cars that charge, then park.
+		-- Open ground: five cars that charge, then park. Two of them start side
+		-- by side and head for the same charger: they must not collide.
 		make(s, names.charger, 10000, 0)
 		make(s, names.garage, 10040, 0)
 		make_car(s, 9920, 20, 0)
 		make_car(s, 9950, -60, 0.25)
 		make_car(s, 10020, 70, 0.6)
+		make_car(s, 9900, -2, 0.25)
+		make_car(s, 9900, 2, 0.25)
 
 		-- A wall and trees between two cars and their charger.
 		make(s, names.charger, 11000, 0)
@@ -204,8 +218,10 @@ scenarios["basics"] = {
 	end,
 }
 
--- A full construction run with three cars: several ghost types, a batch too
--- large for one trunk, items that arrive late, a ghost destroyed during its
+-- A full construction run with three cars: several ghost types, a cluster too
+-- large for one trunk, several clusters on one car (BATCH lines), items that
+-- arrive late (the steel chest cluster goes back to the pending pool while the
+-- others are built), recharging between clusters, a ghost destroyed during its
 -- batch, and a second selection.
 scenarios["construction"] = {
 	setup = function()
@@ -266,9 +282,10 @@ scenarios["construction"] = {
 }
 
 -- Failure paths: a destination destroyed on the way, a garage that fills up
--- before the car gets there, a car that reaches its garage with a loaded
--- trunk, a garage out of range with no charger, a car destroyed with a batch,
--- and no garage left at all.
+-- before the car gets there (the car should look for another one), a car that
+-- reaches its garage with a loaded trunk (it cannot park), a garage out of
+-- range with no charger, a car destroyed with a batch, and no garage left at
+-- all.
 scenarios["failures"] = {
 	setup = function()
 		local s = new_surface({{0, 0}, {3000, 3000}, {3500, 3000}}, 10)
@@ -339,53 +356,74 @@ scenarios["failures"] = {
 	end,
 }
 
--- One waiting car, no garage, and a ghost that cannot be built until its wall
--- is removed at t = 12000: failed revives, cooldown, step back, the ghost sent
--- back to the pending pool, and the leftover item deposited.
-scenarios["blocked-ghost"] = {
+-- One car, one garage, one supply chest, two ghosts one after the other:
+--  1. The car (damaged, to watch the slow repair in the garage: EVENT health
+--     lines) parks, is released at t = 4000 for an ordinary ghost and should build
+--     it. When this scenario was written the car stayed stuck against the garage.
+--  2. At t = 8000 a furnace ghost that cannot be built (a wall sits on it) is
+--     selected: failed revives, cooldown, step back, the ghost sent back to the
+--     pending pool. The chest is filled up while the car carries the furnace, so
+--     the leftover cannot be deposited: alert supply_full, the car keeps it and
+--     takes no new batch. The chest is emptied at t = 13000, the car deposits and
+--     the ghost goes round again until the wall is removed at t = 17000.
+scenarios["garage-exit"] = {
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
 		make(s, names.charger, 0, 0)
+		T.garage = make(s, names.garage, 30, 0)
 		T.chest = make(s, names.chest, 0.5, 30.5)
-		fill(T.chest, {["wooden-chest"] = 20})
-		make_car(s, -20, -20, 0)
-		make_blocked_ghost(s, 80.5, 40.5)
+		fill(T.chest, {["wooden-chest"] = 20, ["stone-furnace"] = 1})
+		T.car = make_car(s, -20, -20, 0)
+		T.car.health = T.car.max_health / 2
+		make_ghost(s, "wooden-chest", 80.5, 40.5)
+		T.wall = s.create_entity{name = "stone-wall", position = {80.5, -40.5}, force = "player"}
+		make_ghost(s, "stone-furnace", 81, -41)
 	end,
 	events = function(t)
-		if t == 400 then
+		local inventory = T.chest.get_inventory(defines.inventory.chest)
+		if t == 3900 or t == 7900 then
+			local stack = T.garage.get_inventory(defines.inventory.chest).find_item_stack(names.car)
+			if stack then
+				out(string.format("EVENT parked car health %.3f at %d", stack.health, t))
+			else
+				for _, car in pairs(storage.cars) do
+					out(string.format("EVENT car health %.3f of %.3f at %d", car.health, car.max_health, t))
+				end
+			end
+		end
+		if t == 4000 then
 			select_ghosts(70, 30, 90, 50)
 		end
-		if t == 12000 and T.wall.valid then
+		if t == 8000 then
+			select_ghosts(75, -50, 90, -30)
+		end
+		if t > 8000 and not T.chest_filled then
+			for _, car in pairs(storage.cars) do
+				if car.valid and car.get_inventory(defines.inventory.car_trunk).get_item_count("stone-furnace") > 0 then
+					T.chest_filled = true
+					while inventory.insert{name = "iron-plate", count = 100} > 0 do end
+					out("EVENT chest filled at " .. t)
+				end
+			end
+		end
+		if t == 13000 then
+			local plates = inventory.get_item_count("iron-plate")
+			if plates > 0 then
+				inventory.remove{name = "iron-plate", count = plates}
+			end
+			out("EVENT chest emptied (" .. plates .. " plates)")
+		end
+		if t == 17000 and T.wall.valid then
 			T.wall.destroy()
 			out("EVENT wall removed")
 		end
 	end,
 }
 
--- A parked car is released from its garage for one ordinary ghost. The ghost
--- should get built. When this scenario was written the car stayed stuck
--- against the garage and the ghost was never built.
-scenarios["garage-exit"] = {
-	setup = function()
-		local s = new_surface({{0, 0}}, 10)
-		make(s, names.charger, 0, 0)
-		make(s, names.garage, 30, 0)
-		T.chest = make(s, names.chest, 0.5, 30.5)
-		fill(T.chest, {["wooden-chest"] = 20})
-		make_car(s, -20, -20, 0)
-		make_ghost(s, "wooden-chest", 80.5, 40.5)
-	end,
-	events = function(t)
-		if t == 2500 then
-			select_ghosts(70, 30, 90, 50)
-		end
-	end,
-}
-
 -- A car on its way to a charger is given a batch whose only ghost cannot be
--- built. Its queued "charging" task stays in the queue and is run when the
--- car arrives from its step back. When this scenario was written that ended
--- in a script error in charge.lua.
+-- built. It must not be available for a batch on its way (it used to be, and
+-- its queued "charging" task was then run on arrival from its step back, which
+-- ended in a script error in charge.lua).
 scenarios["stale-task"] = {
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
@@ -418,10 +456,11 @@ local function wall_ring(surface, cx, cy)
 	return walls
 end
 
--- Three cars walled in, for the stuck escalation (maneuvers, retries, final stop,
--- abandon):
---   car A  has a batch and is freed at t = 2600, during its first stuck wait: its retry should work
---   car B  has a batch and is never freed: stuck again and again, then the batch is abandoned
+-- Three cars walled in, for the maneuver in a closed space and the stuck escalation:
+--   car A  has a batch and a wall of its ring is opened at t = 600, while it is still
+--          looking for a way out: it should follow the walls, find the opening and build
+--   car B  has a batch and is never freed: it finds both directions blocked, is stuck
+--          without any retry and abandons its batch
 --   car C  is walled in with a low tank and a charger out of reach of its walls:
 --          its leg to the charger is retried without limit and never abandoned
 -- The ghosts of B are not built, and must not be assigned again after the abandon.
@@ -448,7 +487,7 @@ scenarios["sealed"] = {
 			select_ghosts(85, 45, 95, 55)
 			select_ghosts(85, -55, 95, -45)
 		end
-		if t == 2600 then
+		if t == 600 then
 			T.ring_a["3,0"].destroy()
 			out("EVENT wall of car A opened")
 		end
@@ -459,6 +498,7 @@ scenarios["sealed"] = {
 -- (flag `empty`, alert battery_empty) and is not given the ghost selected at
 -- t = 200. Its battery is refilled at t = 3000: it should resume and build it.
 scenarios["empty-battery"] = {
+	ticks = 8000,
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
 		make(s, names.charger, 0, 0)
@@ -480,9 +520,8 @@ scenarios["empty-battery"] = {
 }
 
 -- A wall with a gate on the straight way between a supply chest and a ghost: the
--- car can only build the ghost if it gets through the gate. When this scenario
--- was written it did not: the gate stays shut for the car (see gate-manual),
--- which follows the wall without ever heading for the gate.
+-- car can only build the ghost if it gets through the gate. The car has no
+-- can_open_gates: movement.open_gates asks the gate to open as it approaches.
 scenarios["gate"] = {
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
@@ -507,7 +546,8 @@ scenarios["gate"] = {
 	end,
 }
 
--- Does a gate open for an autonomous car at all? An untracked car (the mod does
+-- Does a gate open by itself for a car? It does not (the control for the gate
+-- scenario, which the mod solves with open_gates). An untracked car (the mod does
 -- not drive it) is driven straight at a gate by the scenario itself, once with
 -- the gate on a wall and once without any gate, for comparison. Lines GATE-TEST
 -- give its x position every 10 ticks, for 400 ticks: the wall is at x = 20.5.
@@ -585,6 +625,12 @@ local function trace_cars(tick)
 			end
 
 			local construction = car_data.construction
+			local clusters = construction and #construction.clusters or 0
+			if T.clusters[id] ~= clusters then
+				T.clusters[id] = clusters
+				out(string.format("BATCH %d car %d clusters=%d ghosts=%d", tick, id, clusters,
+					construction and table_size(construction.ghosts) or 0))
+			end
 			out(string.format("%d %d %.10f %.10f %.10f %.10f %.4f %s a%d d%d f%.6f t%d g%d i%d k%d,%d dst%s [%s]",
 				tick, id, car.position.x, car.position.y, car.orientation, car.speed, car.burner.remaining_burning_fuel,
 				flags, car.riding_state.acceleration, car.riding_state.direction, car.friction_modifier,
@@ -628,7 +674,7 @@ local call_counts = {}
 for module_name, module in pairs{
 	movement = movement, travel = travel, charger_control = charger_control,
 	garage_control = garage_control, ghost_control = ghost_control,
-	_utils = _utils, ["_utils.deque"] = _utils.deque,
+	_utils = _utils, ["_utils.deque"] = _utils.deque, gui = gui,
 } do
 	for name, fn in pairs(module) do
 		if type(fn) == "function" then

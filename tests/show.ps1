@@ -33,7 +33,7 @@ $lines = Get-Content $Trace
 $carLine = '^(\d+) (\d+) (\S+) (\S+) \S+ (\S+) (\S+) ([01]+) a\d+ d\d+ f\S+ t(\d+) g(-?\d+) i(-?\d+) k(\S+) dst(\S+) \[(.*)\]$'
 
 if ($Car -lt 0) {
-	$lines | Where-Object { $_ -match "^(SETUP|EVENT|SELECT|SUMMARY|GATE-TEST) " }
+	$lines | Where-Object { $_ -match "^(SETUP|EVENT|SELECT|BATCH|SUMMARY|GATE-TEST) " }
 	$cars = @{}
 	foreach ($line in $lines) {
 		if ($line -match $carLine) {

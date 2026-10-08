@@ -25,7 +25,7 @@ tests\run.ps1
 Runs every scenario.
 
 .EXAMPLE
-tests\run.ps1 construction, blocked-ghost -Ticks 8000
+tests\run.ps1 construction, garage-exit -Ticks 8000
 Runs two scenarios, for 8000 ticks each.
 
 .EXAMPLE
@@ -144,7 +144,7 @@ function Write-Report([string]$name, $result) {
 		$stdout[$first..([Math]::Min($first + 6, $stdout.Count - 1))] | ForEach-Object { Write-Host "  $_" }
 	}
 
-	$lines | Where-Object { $_ -match "^(SETUP|EVENT|SELECT) " } | ForEach-Object { Write-Host "  $_" }
+	$lines | Where-Object { $_ -match "^(SETUP|EVENT|SELECT|BATCH) " } | ForEach-Object { Write-Host "  $_" }
 	# gate-manual has no tracked car: its result is the last position of each subject.
 	$lines | Where-Object { $_ -match "^GATE-TEST " } | Group-Object { ($_ -split " ")[2] } |
 		ForEach-Object { Write-Host "  $($_.Group[-1])" }
