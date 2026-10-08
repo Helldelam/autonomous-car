@@ -9,16 +9,20 @@ local travel = require("travel")
 --
 -- A cluster is a group of ghosts of one type that fits in a single car trunk:
 --   {ghosts = {ghost, ...}}
--- Once assigned to a car it becomes the batch of that car, car_data.construction:
---   ghosts          [unit_number] = ghost still to build
---   items_needed    [item name] = count still to collect
+-- Once assigned to a car it becomes the batch of that car, car_data.construction.
+-- A batch holds one cluster, or several when the trunk has room for them: their
+-- slots are counted cluster by cluster, two clusters never share a slot.
+--   ghosts          [unit_number] = ghost still to build, all clusters together
+--   items_needed    [item name] = count still to collect, all clusters together
+--   clusters        list of {ghosts = {[unit_number] = true}, items = {[item name] = count}}
+--   missing_since   tick the batch began waiting for items no supply chest holds, or nil
 --   alerted_items   alert_once flags of the missing-item alerts
 --   failed_attempts [unit_number] = {count, retry_tick} of a ghost that failed to revive
 --
 -- control.lua enters through register_ghost, on_ghost_destroyed, build_clusters,
 -- any_car_exists, find_available_car, assign_cluster, try_assign_pending,
--- retry_pending_clusters, proceed, collect_items, deposit_items, building_tick
--- and abandon. The other functions are steps of those: they sit on the table
+-- retry_pending_clusters, proceed, collect_items, deposit_items,
+-- deposit_leftovers, building_tick and abandon. The other functions are steps of those: they sit on the table
 -- too, so that they can call one another in any order and be counted by the
 -- test harness.
 local ghost_control = {}
@@ -130,6 +134,7 @@ local function remove_value(list, value)
 	return false
 end
 
+-- TODO: build last the ghosts that extend the native construction network. See "À faire" in CLAUDE.md.
 -- Splits ghosts into clusters: one ghost type per cluster, small enough for a
 -- car trunk (config.car_inventory_size slots). A cluster grows breadth-first
 -- from a seed ghost, nearest neighbours first, so it stays compact. The first
@@ -238,24 +243,34 @@ function ghost_control.any_car_exists()
 	return false
 end
 
--- Finds a car for a cluster: the closest waiting car without a batch,
--- otherwise a car released from the closest garage that holds one. Returns nil
--- if there is none, or if the cluster has no valid ghost left.
+-- Surface of a cluster (its ghosts are all on one), or nil if it holds no ghost.
+local function cluster_surface(cluster)
+	local _, ghost = next(cluster.ghosts)
+	return ghost and ghost.valid and ghost.surface or nil
+end
+
+-- Finds a car for a cluster: the closest waiting car without a batch and with
+-- an empty trunk (one still carrying leftovers first unloads them, see
+-- end_wait in control.lua), otherwise a car released from the closest garage
+-- that holds one. Returns nil if there is none, or if the cluster has no valid
+-- ghost left.
 function ghost_control.find_available_car(cluster)
 	local centroid = ghost_control.compute_centroid(cluster.ghosts)
 	if not centroid then
 		return nil
 	end
+	local surface = cluster_surface(cluster)
 
-	local car = _utils.closest(storage.cars, centroid, function(_, id)
+	local car = _utils.closest(storage.cars, centroid, function(car, id)
 		local car_data = storage.car_data[id]
 		return car_data.waiting.active and not car_data.construction
-	end)
+			and car.get_inventory(defines.inventory.car_trunk).is_empty()
+	end, nil, surface)
 	if car then
 		return car
 	end
 
-	local garage = _utils.closest(storage.garages, centroid, garage_control.find_parked_car)
+	local garage = _utils.closest(storage.garages, centroid, garage_control.find_parked_car, nil, surface)
 	if garage then
 		return garage_control.release_car(garage)
 	end
@@ -266,14 +281,15 @@ end
 -- Gives the closest pending cluster to a car that just became free. Returns
 -- true if the car got one.
 function ghost_control.try_assign_pending(car)
-	if storage.car_data[car.unit_number].construction then
+	if storage.car_data[car.unit_number].construction
+		or not car.get_inventory(defines.inventory.car_trunk).is_empty() then
 		return false
 	end
 
 	local best_index, best_distance
 	for index, cluster in pairs(storage.pending_clusters) do
 		local centroid = ghost_control.compute_centroid(cluster.ghosts)
-		if centroid then
+		if centroid and cluster_surface(cluster) == car.surface then
 			local distance = util.distance(car.position, centroid)
 			if not best_index or distance < best_distance then
 				best_index = index
@@ -289,44 +305,118 @@ function ghost_control.try_assign_pending(car)
 	return true
 end
 
--- Fallback scan, run every config.long_delay: offers every pending cluster to
--- the available cars again. It is also what notices a car that a player put in
--- a garage by hand, for which there is no event. Clusters with no valid ghost
--- left are dropped.
+-- Offers every pending cluster to the available cars, in order, until one finds
+-- none. A car takes other pending clusters along (see fill_batch), so the scan
+-- starts over after each assignment. Clusters with no valid ghost left are
+-- dropped. Called when the player selects ghosts and every config.long_delay as
+-- a fallback: that also notices a car that a player put in a garage by hand,
+-- for which there is no event. Returns the number of cars that got a batch.
 function ghost_control.retry_pending_clusters()
-	local still_pending = {}
-	for _, cluster in pairs(storage.pending_clusters) do
+	local assigned = 0
+	local index = 1
+	while index <= #storage.pending_clusters do
+		local cluster = storage.pending_clusters[index]
 		local _, count = ghost_control.compute_centroid(cluster.ghosts)
-		if count > 0 then
+		if count == 0 then
+			table.remove(storage.pending_clusters, index)
+		else
 			local car = ghost_control.find_available_car(cluster)
 			if car then
+				table.remove(storage.pending_clusters, index)
 				ghost_control.assign_cluster(car, cluster)
+				assigned = assigned + 1
+				index = 1
 			else
-				table.insert(still_pending, cluster)
+				index = index + 1 -- another cluster may be on a surface that has a car
 			end
 		end
 	end
-	storage.pending_clusters = still_pending
+	return assigned
 end
 
--- Makes a cluster the batch of a car and gets the car going.
-function ghost_control.assign_cluster(car, cluster)
-	local id = car.unit_number
-	local ghosts, items_needed = {}, {}
+-- Trunk slots a set of items ([item name] = count) takes.
+local function items_slots(items)
+	local slots = 0
+	for item_name, count in pairs(items) do
+		local prototype = prototypes.item[item_name]
+		slots = slots + math.ceil(count / (prototype and prototype.stack_size or 1))
+	end
+	return slots
+end
 
+-- Items ([item name] = count) that build the ghosts of a cluster.
+local function cluster_items(cluster)
+	local items = {}
 	for _, ghost in pairs(cluster.ghosts) do
-		ghosts[ghost.unit_number] = ghost
-		storage.ghost_to_car[ghost.unit_number] = id
 		local item_name, count = ghost_control.ghost_item(ghost)
 		if item_name then
-			items_needed[item_name] = (items_needed[item_name] or 0) + count
+			items[item_name] = (items[item_name] or 0) + count
 		end
 	end
+	return items
+end
 
-	local car_data = storage.car_data[id]
-	car_data.construction = {ghosts = ghosts, items_needed = items_needed, alerted_items = {}, failed_attempts = {}}
+-- Adds a cluster to the batch of a car.
+local function add_cluster(car_id, construction, cluster)
+	local entry = {ghosts = {}, items = cluster_items(cluster)}
+	for _, ghost in pairs(cluster.ghosts) do
+		construction.ghosts[ghost.unit_number] = ghost
+		entry.ghosts[ghost.unit_number] = true
+		storage.ghost_to_car[ghost.unit_number] = car_id
+	end
+	for item_name, count in pairs(entry.items) do
+		construction.items_needed[item_name] = (construction.items_needed[item_name] or 0) + count
+	end
+	table.insert(construction.clusters, entry)
+end
+
+-- Adds to the batch of a car the closest pending clusters that still fit in its
+-- trunk. Each cluster keeps its own slots: the slots of the batch are the sum of
+-- the slots of its clusters, never shared.
+function ghost_control.fill_batch(car)
+	local construction = storage.car_data[car.unit_number].construction
+	local reserved = 0
+	for _, entry in ipairs(construction.clusters) do
+		reserved = reserved + items_slots(entry.items)
+	end
+
+	while true do
+		local origin = ghost_control.compute_centroid(construction.ghosts)
+		if not origin then
+			return
+		end
+		local best_index, best_distance
+		for index, cluster in ipairs(storage.pending_clusters) do
+			local centroid = ghost_control.compute_centroid(cluster.ghosts)
+			if centroid and cluster_surface(cluster) == car.surface
+				and reserved + items_slots(cluster_items(cluster)) <= config.car_inventory_size then
+				local distance = util.distance(origin, centroid)
+				if not best_index or distance < best_distance then
+					best_index, best_distance = index, distance
+				end
+			end
+		end
+		if not best_index then
+			return
+		end
+		local cluster = table.remove(storage.pending_clusters, best_index)
+		reserved = reserved + items_slots(cluster_items(cluster))
+		add_cluster(car.unit_number, construction, cluster)
+	end
+end
+
+-- Makes a cluster the batch of a car, adds the pending clusters that fit next
+-- to it, and gets the car going.
+function ghost_control.assign_cluster(car, cluster)
+	local car_data = storage.car_data[car.unit_number]
+	car_data.construction = {
+		ghosts = {}, items_needed = {}, clusters = {}, missing_since = nil,
+		alerted_items = {}, failed_attempts = {},
+	}
+	add_cluster(car.unit_number, car_data.construction, cluster)
 	car_data.waiting.active = false
 
+	ghost_control.fill_batch(car)
 	ghost_control.proceed(car)
 end
 
@@ -366,12 +456,7 @@ end
 function ghost_control.find_supply_chest(car, items_needed)
 	return _utils.closest(storage.supply_chests, car.position, function(chest)
 		return group_holds_any(ghost_control.chest_group(chest), items_needed)
-	end, "chest")
-end
-
--- Closest supply chest, or nil.
-function ghost_control.find_nearest_chest(car)
-	return _utils.closest(storage.supply_chests, car.position, nil, "chest")
+	end, "chest", car.surface)
 end
 
 -- ============================================================
@@ -393,10 +478,79 @@ local function alert_build_failed(car, ghost)
 		config.names.car)
 end
 
+-- Puts back in the pending pool the clusters of a batch whose items are not all
+-- on board, when at least one other cluster is complete: that one can be built
+-- meanwhile. Items are given to the clusters in order, which is also the order
+-- they were added in. Returns true if clusters went back.
+local function release_unsupplied_clusters(construction)
+	local total, on_board = {}, {}
+	for _, entry in ipairs(construction.clusters) do
+		for item_name, count in pairs(entry.items) do
+			total[item_name] = (total[item_name] or 0) + count
+		end
+	end
+	for item_name, count in pairs(total) do
+		on_board[item_name] = count - (construction.items_needed[item_name] or 0)
+	end
+
+	local supplied, unsupplied = {}, {}
+	local left = {}
+	for item_name, count in pairs(on_board) do
+		left[item_name] = count
+	end
+	for _, entry in ipairs(construction.clusters) do
+		local complete = true
+		for item_name, count in pairs(entry.items) do
+			local given = math.min(count, left[item_name])
+			left[item_name] = left[item_name] - given
+			complete = complete and given == count
+		end
+		table.insert(complete and supplied or unsupplied, entry)
+	end
+	if #supplied == 0 or #unsupplied == 0 then
+		return false
+	end
+
+	for _, entry in ipairs(unsupplied) do
+		local ghosts = {}
+		for id in pairs(entry.ghosts) do
+			local ghost = construction.ghosts[id]
+			if ghost and ghost.valid then
+				table.insert(ghosts, ghost)
+			end
+			construction.ghosts[id] = nil
+			construction.failed_attempts[id] = nil
+			storage.ghost_to_car[id] = nil
+		end
+		if #ghosts > 0 then
+			table.insert(storage.pending_clusters, {ghosts = ghosts})
+		end
+	end
+	construction.clusters = supplied
+
+	-- What the remaining clusters still lack; the items already on board stay there.
+	local remaining = {}
+	for _, entry in ipairs(supplied) do
+		for item_name, count in pairs(entry.items) do
+			remaining[item_name] = (remaining[item_name] or 0) + count
+		end
+	end
+	construction.items_needed = {}
+	for item_name, count in pairs(remaining) do
+		local lacking = count - (on_board[item_name] or 0)
+		if lacking > 0 then
+			construction.items_needed[item_name] = lacking
+		end
+	end
+	return true
+end
+
 -- Decides the next step of a car's batch: end it if no ghost is left, drive to
 -- the site once every item is on board, otherwise fetch items from a supply
--- chest, or wait with an alert if no chest holds any. Called on assignment,
--- after each chest stop, and by the waiting loop of control.lua.
+-- chest, or wait with an alert if no chest holds any. After config.long_delay
+-- of that wait the clusters still lacking items go back to the pending pool and
+-- the car builds the others. Called on assignment, after each chest stop, and
+-- by the waiting loop of control.lua.
 function ghost_control.proceed(car)
 	local car_data = storage.car_data[car.unit_number]
 	local construction = car_data.construction
@@ -407,16 +561,26 @@ function ghost_control.proceed(car)
 	if next(construction.ghosts) == nil then
 		ghost_control.finish(car)
 	elseif next(construction.items_needed) == nil then
+		construction.missing_since = nil
 		ghost_control.go_to_site(car)
 	else
 		local chest = ghost_control.find_supply_chest(car, construction.items_needed)
 		if chest then
+			construction.missing_since = nil
 			travel.set_destination(car, chest, {type = "collect"})
-		else
-			alert_missing_items(car, construction)
-			car_data.waiting.active = true
-			car_data.waiting.since = game.tick
+			return
 		end
+
+		alert_missing_items(car, construction)
+		construction.missing_since = construction.missing_since or game.tick
+		if game.tick - construction.missing_since >= config.long_delay
+			and release_unsupplied_clusters(construction) then
+			construction.missing_since = nil
+			ghost_control.proceed(car)
+			return
+		end
+		car_data.waiting.active = true
+		car_data.waiting.since = game.tick
 	end
 end
 
@@ -476,6 +640,7 @@ function ghost_control.nearest_ready_ghost(car)
 	return best, any_valid
 end
 
+-- TODO: let cars destroy and replace entities marked for deconstruction or upgrade. See "À faire" in CLAUDE.md.
 -- Builds a ghost with an item from the car trunk. Returns false if the revive
 -- failed, usually because something - often the car itself - is in the way.
 function ghost_control.revive_ghost(car, ghost)
@@ -555,7 +720,9 @@ end
 function ghost_control.go_to_site(car)
 	local ghost, any_valid = ghost_control.nearest_ready_ghost(car)
 	if ghost then
-		travel.begin_leg(car, ghost, {type = "building"})
+		-- Recharges first if the car could not get back to a charger afterwards: this
+		-- is also what lets it recharge between two clusters.
+		travel.set_destination(car, ghost, {type = "building"})
 	elseif any_valid then
 		ghost_control.step_back(car)
 	else
@@ -580,15 +747,43 @@ function ghost_control.building_tick(car, tick)
 	end
 end
 
--- Sends the car to the nearest supply chest if its trunk is not empty.
--- Leftovers happen when a ghost is given up on or disappears during a batch.
--- Returns true if the car left for a chest ("deposit" task).
+-- True if a group of supply chests has room for at least one of the items of
+-- `trunk`.
+local function group_has_room_for(group, trunk)
+	for _, item in pairs(trunk.get_contents()) do -- an array of {name, count, quality} records
+		for _, chest in pairs(group) do
+			if chest.get_inventory(defines.inventory.chest).can_insert{name = item.name, count = 1} then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+-- Closest supply chest whose group has room for something the car carries, or nil.
+function ghost_control.find_chest_with_room(car)
+	local trunk = car.get_inventory(defines.inventory.car_trunk)
+	return _utils.closest(storage.supply_chests, car.position, function(chest)
+		return group_has_room_for(ghost_control.chest_group(chest), trunk)
+	end, "chest", car.surface)
+end
+
+-- Sends the car to the nearest supply chest that has room if its trunk is not
+-- empty; alerts the player when none has (the car then keeps its items, and the
+-- waiting loop of control.lua tries again). Leftovers happen when a ghost is
+-- given up on or disappears during a batch. Returns true if the car left for a
+-- chest ("deposit" task).
 function ghost_control.deposit_leftovers(car)
+	local car_data = storage.car_data[car.unit_number]
 	if car.get_inventory(defines.inventory.car_trunk).is_empty() then
+		_utils.alert_reset(car_data.alerts, "supply_full")
 		return false
 	end
-	local chest = ghost_control.find_nearest_chest(car)
+	local chest = ghost_control.find_chest_with_room(car)
 	if not chest then
+		_utils.alert_once(car_data.alerts, "supply_full", car.force, car,
+			"The supply chests are full (or there is none): an autonomous car cannot empty its trunk. Make room in a chest.",
+			config.names.car)
 		return false
 	end
 	travel.set_destination(car, chest, {type = "deposit"})
@@ -596,20 +791,26 @@ function ghost_control.deposit_leftovers(car)
 end
 
 -- "deposit" task: the car reached the supply chest `chest`. Unloads its trunk
--- into it, then goes idle.
+-- into it and the chests next to it. What does not fit goes to the next chest
+-- with room; with none left the car goes idle with its items (see
+-- deposit_leftovers).
 function ghost_control.deposit_items(car, chest)
+	local trunk = car.get_inventory(defines.inventory.car_trunk)
 	if chest and chest.valid then
-		local inventory = chest.get_inventory(defines.inventory.chest)
-		local trunk = car.get_inventory(defines.inventory.car_trunk)
-		-- get_contents() returns an array of {name, count, quality} records.
-		for _, item in pairs(trunk.get_contents()) do
-			local inserted = inventory.insert{name = item.name, count = item.count}
-			if inserted > 0 then
-				trunk.remove{name = item.name, count = inserted}
+		for _, member in pairs(ghost_control.chest_group(chest)) do
+			local inventory = member.get_inventory(defines.inventory.chest)
+			for _, item in pairs(trunk.get_contents()) do
+				local inserted = inventory.insert{name = item.name, count = item.count}
+				if inserted > 0 then
+					trunk.remove{name = item.name, count = inserted}
+				end
 			end
 		end
 	end
 
+	if ghost_control.deposit_leftovers(car) then
+		return
+	end
 	ghost_control.go_idle(car)
 end
 
@@ -630,6 +831,8 @@ function ghost_control.finish(car)
 	local car_data = storage.car_data[car.unit_number]
 	car_data.construction = nil
 	car_data.building.active = false
+	travel.release_charger_slot(car_data) -- the leg may be one to a charger
+	car_data.charge_detour_count = 0
 	car_data.moving.active = false
 	car_data.moving.destination = nil
 	car_data.tasks = _utils.deque.new()

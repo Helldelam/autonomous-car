@@ -54,12 +54,13 @@ end
 -- `accept(entity, id)`, if given, tells whether an entity may be chosen. A
 -- stale entity is released as `kind` (see "Entity cleanup") when a kind is
 -- given, and just skipped otherwise. Of two entities at the same distance, the
--- first one in the table wins.
-function _utils.closest(entities, position, accept, kind)
+-- first one in the table wins. With a `surface`, entities of other surfaces are
+-- skipped: positions of two surfaces cannot be compared.
+function _utils.closest(entities, position, accept, kind, surface)
 	local best, best_distance
 	for id, entity in pairs(entities) do
 		if entity.valid then
-			if not accept or accept(entity, id) then
+			if (not surface or entity.surface == surface) and (not accept or accept(entity, id)) then
 				local distance = util.distance(position, entity.position)
 				if not best or distance < best_distance then
 					best = entity
@@ -71,6 +72,17 @@ function _utils.closest(entities, position, accept, kind)
 		end
 	end
 	return best
+end
+
+-- ============================================================
+-- Slow checks
+-- ============================================================
+
+-- True on the ticks when a car does its slow measurements (nearby cars, closest
+-- charger): every config.slow_check_interval ticks, offset by the id of the car
+-- so that the cars do not all measure on the same tick.
+function _utils.slow_check_due(car, tick)
+	return (tick + car.unit_number) % config.slow_check_interval == 0
 end
 
 -- ============================================================

@@ -25,6 +25,7 @@ config.names = {
 	ghost_selector = "autonomous_car_ghost_selector", -- selection tool
 	ghost_selector_shortcut = "autonomous_car_ghost_selector_shortcut",
 	ghost_selector_input = "autonomous_car_ghost_selector_input", -- key binding
+	missing_items_shortcut = "autonomous_car_missing_items_shortcut", -- shows or hides the window of missing items
 	next_task_event = "autonomous_car_next_task", -- custom event, see _utils.raise_next_task
 }
 
@@ -44,12 +45,15 @@ config.charger_input_flow_limit = "1600kW"
 
 config.lookahead_angle = 1 / 12 -- angle between the straight heading and each side heading; a maneuver uses it for its left and right arcs too
 config.lookahead_side_offset = config.car_size.width -- the straight heading is sampled along two lines, this far on each side of the car
-config.lookahead_start = 1.2 -- distance of the first sample point
+config.lookahead_start = 1.3 -- distance of the first sample point. Its minimum is about 1.11: half the car length plus the
+	-- furthest the car reaches along a heading 30 degrees off its own (hypot(length / 2, width / 2) = 0.61). Closer, the point
+	-- overlaps the car itself, the heading counts as blocked and the car does not steer toward it.
 config.lookahead_length = 4 -- distance covered by the sample points beyond the first one
 config.lookahead_speed_bonus = 2 -- extra look-ahead length above config.speed.fast
 config.steering_cost = {
 	blocked = 3, -- added for a sample point where the car would not fit
 	density = 1.5, -- weight of the obstacle density summed further along the heading
+	margin = 0.5, -- added, per side, for a sample point with an obstacle about a car width beside it: keeps the car off the walls
 }
 config.arrival_distance = 6 -- a car this close to its destination has arrived and can act on it
 config.emergency_brake_lookahead = 3 -- an obstacle this far straight ahead triggers emergency braking, and keeps a maneuver from ending
@@ -84,7 +88,9 @@ config.braking_duration = 30 -- (0.5s) the car brakes, and leaves high speed, on
 
 -- car.friction_modifier scales the friction of the car prototype: more friction
 -- means a lower cruising speed. It is rebuilt from these factors every tick
--- (see movement.update_mode), so it cannot drift.
+-- (see movement.update_mode), so it cannot drift. The game also multiplies it by
+-- the friction of the tile under the car: the factors below are divided by that
+-- friction, except the emergency one, so a mode has the same speed on any tile.
 config.friction_base = 1
 config.friction_high_speed_factor = 0.1 -- cruising in an open area
 config.friction_precision_factor = 4 -- precision mode
@@ -96,13 +102,14 @@ config.friction_emergency_factor = 100 -- emergency braking, on top of the mode 
 -- ============================================================
 -- Slow driving, forwards or backwards, to get out of a dense area or to turn
 -- (almost) on the spot before setting off. It does not head for the destination:
--- every few ticks it measures the free room along six arcs (forward or backward,
--- each straight, left or right) and follows the roomiest.
+-- it picks a heading (the direction of the destination for a car that must turn
+-- around, otherwise the roomiest and least dense direction around the car), then
+-- drives one of six arcs (forward or backward, each straight, left or right) at
+-- a time to turn toward it. A maneuver lasts at most idle_delay.
 
 config.rear_turn_min_angle = 0.33 -- a target further than this off the heading is behind the car, which starts a maneuver to turn around
 config.rear_turn_max_speed = 0.2 -- that maneuver only starts below this speed
-config.maneuver_duration = 300 -- (5s) longest a single maneuver may last; past it the maneuver counts as failed
-config.max_maneuver_attempts = 3 -- failed maneuvers in a row before the car is declared stuck
+config.max_maneuver_attempts = 3 -- maneuvers that ran out of time in a row before the car is declared stuck
 config.maneuver_arc_duration = 6 -- the car follows one arc this long before the room around it is measured again
 
 -- Free room is measured with probes the size of the car, placed along a heading
@@ -125,7 +132,7 @@ config.maneuver_min_travel = 2 -- a maneuver started by an obstacle or a lack of
 
 config.dense_area_threshold = 0.12 -- blended density above which precision mode turns on (see "Obstacle density")
 config.precision_lookahead_side_offset = config.lookahead_side_offset
-config.precision_lookahead_start = 1 -- replaces lookahead_start
+config.precision_lookahead_start = 1.2 -- replaces lookahead_start; same minimum, see there
 config.precision_lookahead_length = 2 -- replaces lookahead_length
 
 -- ============================================================
@@ -139,15 +146,25 @@ config.short_delay = 60 -- (1s)
 	-- travel.handle_critical_fuel: pause between two charger searches when none is reachable
 	-- movement.update_mode: cooldown before emergency braking can trigger again after a stop
 	-- movement.drive_tick: a car that stands still this long after a leg began or a maneuver ended has hit an obstacle
+	-- movement.maneuver_tick: a car that drives but does not move this long backs off; the heading is looked for again this often
+	-- gui.lua: period at which an open window is refreshed
 config.medium_delay = 180 -- (3s)
 	-- ghost_control.attempt_one_ghost: cooldown of a ghost that failed to revive
 	-- travel.stuck_reason: window over which progress is measured
 config.idle_delay = 300 -- (5s) long on purpose during development, so idle waits are easy to see; lower to 60-120 before release
 	-- control.lua: wait before an idle car looks for a new task or a garage
+	-- movement.maneuver_tick: longest a single maneuver may last; past it the maneuver counts as failed
 config.long_delay = 600 -- (10s)
+	-- ghost_control.proceed: a batch waits this long for missing items before the clusters lacking them go back to the pending pool
+	-- park.lua: period at which parked cars are repaired
 	-- control.lua: period of the fallback scan of pending clusters
 	-- travel.stuck_tick: wait before a stuck car tries its leg again
 	-- travel.stuck_reason: margin added to the expected duration of a leg
+
+-- Measurements that need not happen every tick (the cars nearby, the closest
+-- charger) are repeated this often, offset per car. Raise it if the mod slows
+-- the game down: every player gets the same behaviour.
+config.slow_check_interval = 6 -- (0.1s)
 
 -- The two ways a car abandons its task, each with its own delay:
 config.unreachable_abandon_delay = 3600 -- (60s) a car that has found no way to recharge for this long abandons its task:
@@ -194,6 +211,7 @@ config.max_stuck_retries = 3 -- times a car retries a stuck leg before it abando
 
 config.garage_exit_radius = 8 -- how far around a garage to look for a free spot to release a car
 config.garage_exit_precision = 0.25 -- step of that search
+config.garage_repair_rate = 0.01 -- fraction of its health a parked car recovers every long_delay (free for now)
 
 -- ============================================================
 -- Consistency checks

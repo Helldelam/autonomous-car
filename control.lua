@@ -8,6 +8,7 @@ local travel = require("travel")
 local charger_control = require("charge")
 local garage_control = require("park")
 local ghost_control = require("ghost")
+local gui = require("gui")
 
 local names = config.names
 
@@ -67,14 +68,23 @@ local function new_car_data(tick)
 		-- (new leg, stuck, empty battery) and resets its counters when a leg begins.
 		-- Maneuver mode, a sub-mode of moving. `reason`: rear_turn, blocked or no_progress.
 		-- `arcs` counts the arcs of the current maneuver, `attempts` the failed maneuvers in a row,
-		-- and `ended_tick` is when the last one ended (or the leg began).
+		-- and `ended_tick` is when the last one ended (or the leg began). `heading` is the orientation
+		-- the maneuver turns toward, `last_arc` the arc it drove last (the opposite one is forbidden),
+		-- `stall_since` the tick the car stopped moving while driving, `back_off_until` the end of a back-off,
+		-- `follow` the direction (reverse or not) the car follows along a wall, `blocked` the directions found blocked.
 		maneuver = {
 			active = false, reason = nil, since = nil, arc_since = nil, arcs = 0,
 			reverse = false, turn = 0, origin = nil, attempts = 0, ended_tick = tick,
+			heading = nil, heading_since = nil, last_arc = nil, stall_since = nil, back_off_until = nil, back_off_from = nil,
+			follow = nil, follow_orientation = nil, blocked = {},
 		},
 		emergency_brake = {active = false, since = nil},
 		high_speed = false,
+		entry_speed = nil, -- speed of the car when it entered high speed
+		slowing = false, -- braking down to entry_speed after leaving high speed
 		precision_mode = false,
+		neighbours = nil, -- moving cars nearby, see movement.lua
+
 
 		construction = nil, -- current batch, see ghost.lua
 		tasks = _utils.deque.new(), -- what to do when the current step ends; the front task runs first
@@ -154,19 +164,14 @@ local function on_area_selected(event)
 		return
 	end
 
-	local clusters = ghost_control.build_clusters(selected)
-	local any_car = ghost_control.any_car_exists()
-	local assigned, queued = 0, 0
-	for _, cluster in pairs(clusters) do
-		local car = ghost_control.find_available_car(cluster)
-		if car then
-			ghost_control.assign_cluster(car, cluster)
-			assigned = assigned + 1
-		else
-			table.insert(storage.pending_clusters, cluster)
-			queued = queued + 1
-		end
+	-- All the clusters go to the pending pool first, so that a car can take
+	-- several of them along (see ghost_control.fill_batch).
+	for _, cluster in pairs(ghost_control.build_clusters(selected)) do
+		table.insert(storage.pending_clusters, cluster)
 	end
+	local any_car = ghost_control.any_car_exists()
+	local assigned = ghost_control.retry_pending_clusters()
+	local queued = #storage.pending_clusters
 
 	if player then
 		player.print(assigned .. " construction batch(es) assigned.")
@@ -192,9 +197,17 @@ local function end_wait(car, car_data, tick)
 		car_data.waiting.active = false
 		ghost_control.proceed(car)
 	elseif _utils.deque.length(car_data.tasks) > 0 then
-		-- Tasks are still queued: only leave the waiting state.
-		car_data.waiting.active = false
+		-- Tasks are still queued but the car is idle: they belong to a leg that no
+		-- longer exists. Drop them and wait again.
+		car_data.tasks = _utils.deque.new()
 		car_data.waiting.since = tick
+	elseif not car.get_inventory(defines.inventory.car_trunk).is_empty() then
+		-- Leftovers must be unloaded before the car takes a new batch or parks.
+		if ghost_control.deposit_leftovers(car) then
+			car_data.waiting.active = false
+		else
+			car_data.waiting.since = tick
+		end
 	elseif not ghost_control.try_assign_pending(car) then
 		local garage = garage_control.find_garage(car)
 		if not garage then
@@ -221,8 +234,9 @@ local function update_car(car, car_data, tick)
 			-- start a maneuver: keep this order.
 			movement.update_mode(car, tick)
 			if car_data.maneuver.active then
-				if movement.maneuver_tick(car, tick) then
-					travel.start_stuck(car, tick) -- the last maneuver failed
+				local failed, hopeless = movement.maneuver_tick(car, tick)
+				if failed then
+					travel.start_stuck(car, tick, hopeless) -- the last maneuver failed
 				end
 			else
 				movement.drive_tick(car, tick)
@@ -268,8 +282,12 @@ local function on_tick(event)
 		end
 	end
 
+	if event.tick % config.short_delay == 0 then
+		gui.refresh_all()
+	end
 	if event.tick % config.long_delay == 0 then
 		ghost_control.retry_pending_clusters()
+		garage_control.repair_parked_cars()
 	end
 end
 
@@ -315,6 +333,20 @@ local function on_next_task(event)
 	end
 
 	local task = _utils.deque.pop_front(car_data.tasks)
+	if task.type ~= "charging" then
+		car_data.charge_detour_count = 0 -- the trip reached a destination of its own
+	end
+
+	-- A task that does not match what the car reached is stale: drop it and let
+	-- the waiting loop decide.
+	local reached = destination and destination.valid and destination.name
+	if (task.type == "charging" and reached ~= names.charger) or (task.type == "parking" and reached ~= names.garage) then
+		car_data.tasks = _utils.deque.new()
+		car_data.waiting.active = true
+		car_data.waiting.since = event.tick
+		return
+	end
+
 	if task.type == "charging" then
 		car_data.charging.active = true
 		car_data.charging.charger = destination
@@ -341,4 +373,10 @@ script.on_event(defines.events.on_object_destroyed, on_object_destroyed)
 script.on_event(defines.events.on_player_selected_area, on_area_selected)
 script.on_event(defines.events.on_player_alt_selected_area, on_area_selected)
 script.on_event(prototypes.custom_event[names.next_task_event], on_next_task)
+script.on_event(defines.events.on_lua_shortcut, function(event)
+	if event.prototype_name == names.missing_items_shortcut then
+		gui.toggle(game.get_player(event.player_index))
+	end
+end)
+script.on_event(defines.events.on_gui_click, gui.on_click)
 script.on_event(defines.events.on_tick, init_storage)
