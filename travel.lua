@@ -55,11 +55,13 @@ function travel.release_charger_slot(car_data)
 end
 
 -- Drops the trip in progress: the leg or the stuck wait, a maneuver, a charge,
--- the tasks queued for them and the charger slot they hold. The car keeps its
--- batch: it decides again from the waiting loop (see reset_to_waiting) or by
--- starting another leg.
+-- a parking, the tasks queued for them and the charger slot they hold. The car
+-- keeps its batch: it decides again from the waiting loop (see reset_to_waiting)
+-- or by starting another leg.
 function travel.cancel_trip(car_data)
 	travel.release_charger_slot(car_data)
+	car_data.parking.active = false
+	car_data.parking.garage = nil
 	car_data.building.active = false
 	car_data.maneuver.active = false
 	car_data.stuck.active = false
@@ -88,7 +90,7 @@ function travel.begin_leg(car, destination, next_task)
 	car_data.stuck.destination = nil
 	moving.active = true
 	moving.destination = destination
-	-- Reference points of the stuck detection (see travel.stuck_reason).
+	-- Reference points of the stuck detection (see travel.find_stuck_reason).
 	moving.departure_tick = game.tick
 	moving.departure_distance = util.distance(car.position, destination.position)
 	moving.last_check_position = car.position
@@ -106,6 +108,7 @@ function travel.begin_leg(car, destination, next_task)
 	-- trip must add up. It is reset on arrival at a destination that is not a charger.
 	car_data.unreachable_since = nil
 	_utils.alert_reset(car_data.alerts, "stuck")
+	_utils.alert_reset(car_data.alerts, "stuck_final") -- a final wait that was dropped (see cancel_trip) never reset it
 	_utils.alert_reset(car_data.alerts, "no_charger")
 	_utils.alert_reset(car_data.alerts, "unreachable")
 
@@ -173,24 +176,41 @@ end
 -- Unreachable goal
 -- ============================================================
 
+-- Takes one cluster (an entry of construction.clusters) out of a batch and puts
+-- its ghosts still to build back in the pending pool, as a cluster. The ghosts
+-- of that entry that left the batch earlier (built, gone, or given up on and
+-- queued again) are left alone: they may be with another car by now.
+function travel.requeue_cluster(construction, entry)
+	local ghosts = {}
+	for id in pairs(entry.ghosts) do
+		local ghost = construction.ghosts[id]
+		if ghost then
+			if ghost.valid then
+				table.insert(ghosts, ghost)
+			end
+			construction.ghosts[id] = nil
+			construction.failed_attempts[id] = nil
+			storage.ghost_to_car[id] = nil
+		end
+	end
+	if #ghosts > 0 then
+		table.insert(storage.pending_clusters, {ghosts = ghosts})
+	end
+end
+
 -- Takes the construction batch away from a car and puts its remaining ghosts
--- back in the pending pool, as one cluster. It lives here rather than in
--- ghost.lua because ghost.lua requires this module, not the other way round.
+-- back in the pending pool, cluster by cluster: merged into one, the next car
+-- would build them all from its first stop (see ghost_control.go_to_site). It
+-- lives here rather than in ghost.lua because ghost.lua requires this module,
+-- not the other way round.
 function travel.requeue_construction(car_data)
 	local construction = car_data.construction
 	if not construction then
 		return
 	end
 
-	local ghosts = {}
-	for id, ghost in pairs(construction.ghosts) do
-		if ghost.valid then
-			table.insert(ghosts, ghost)
-		end
-		storage.ghost_to_car[id] = nil
-	end
-	if #ghosts > 0 then
-		table.insert(storage.pending_clusters, {ghosts = ghosts})
+	for _, entry in ipairs(construction.clusters) do
+		travel.requeue_cluster(construction, entry)
 	end
 	car_data.construction = nil
 end
@@ -261,6 +281,10 @@ function travel.handle_critical_fuel(car, tick)
 		charger_control.alert_no_charger(car)
 		car_data.critical_fuel_retry_tick = tick + config.short_delay
 		travel.stop_car(car)
+		-- The car must keep an active state: its fuel can stop being critical
+		-- without a charge (a charger built closer lowers the level, see
+		-- get_critical_fuel), and the waiting loop then decides what it does.
+		_utils.start_waiting(car_data)
 	end
 	return true
 end
@@ -292,7 +316,7 @@ end
 -- The progress window is suspended during a maneuver, where the car moves little
 -- on purpose, and within arrival distance, where it is about to stop; it starts
 -- again afterwards. The car must be on a leg (see update_car in control.lua).
-function travel.stuck_reason(car, tick)
+function travel.find_stuck_reason(car, tick)
 	local car_data = storage.car_data[car.unit_number]
 	local moving = car_data.moving
 

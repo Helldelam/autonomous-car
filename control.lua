@@ -54,7 +54,7 @@ local function create_car_data(tick)
 		moving = {
 			active = false,
 			destination = nil, -- entity, or waypoint table with `position` and `valid`
-			departure_tick = nil, departure_distance = nil, -- stuck detection, see travel.stuck_reason
+			departure_tick = nil, departure_distance = nil, -- stuck detection, see travel.find_stuck_reason
 			last_check_position = nil, last_check_tick = nil,
 		},
 		charging = {active = false, charger = nil},
@@ -150,17 +150,16 @@ local function on_area_selected(event)
 	local player = game.get_player(event.player_index)
 	local selected = {}
 	for _, entity in pairs(event.entities) do
-		if entity.valid and entity.type == "entity-ghost" then
-			ghost_control.register_ghost(entity)
-			if storage.ghosts[entity.unit_number] then
-				table.insert(selected, entity)
-			end
+		-- Only the ghosts that are newly tracked: one selected before is with a car
+		-- or in the pending pool already.
+		if entity.valid and entity.type == "entity-ghost" and ghost_control.register_ghost(entity) then
+			table.insert(selected, entity)
 		end
 	end
 
 	if #selected == 0 then
 		if player then
-			player.print("No ghost outside the robot network found in the selection.")
+			player.print("No new ghost outside the robot network found in the selection.")
 		end
 		return
 	end
@@ -170,7 +169,7 @@ local function on_area_selected(event)
 	for _, cluster in pairs(ghost_control.build_clusters(selected)) do
 		table.insert(storage.pending_clusters, cluster)
 	end
-	local any_car = ghost_control.any_car_exists()
+	local any_car = ghost_control.is_any_car_present()
 	local assigned = ghost_control.retry_pending_clusters()
 	local queued = #storage.pending_clusters
 
@@ -244,7 +243,7 @@ local function update_car(car, car_data, tick)
 
 			-- Drive may have ended the leg (arrival): only a leg under way is checked.
 			if car_data.moving.active then
-				local reason = travel.stuck_reason(car, tick)
+				local reason = travel.find_stuck_reason(car, tick)
 				if reason == "timeout" then
 					travel.start_stuck(car, tick)
 				elseif reason == "no_progress" then
@@ -293,8 +292,10 @@ end
 
 -- Creates the storage tables that are missing. This is bound to on_tick instead
 -- of on_init so that it also runs on a save made before a table existed; it
--- then hands on_tick over to the real handler, so it runs once per load.
-local function init_storage()
+-- then hands on_tick over to the real handler, so it runs once per load, and
+-- runs that handler for this tick too: a player who joins a multiplayer game
+-- must not skip a tick that the others run.
+local function init_storage(event)
 	storage.cars = storage.cars or {} -- [unit_number] = car entity
 	storage.car_data = storage.car_data or {} -- [unit_number] = runtime state, see create_car_data
 	storage.chargers = storage.chargers or {}
@@ -307,6 +308,7 @@ local function init_storage()
 	storage.pending_clusters = storage.pending_clusters or {} -- clusters waiting for a free car
 
 	script.on_event(defines.events.on_tick, on_tick)
+	on_tick(event)
 end
 
 -- A car finished its current step - it arrived, or its tank is full: starts
@@ -363,6 +365,7 @@ end
 script.on_event(defines.events.on_built_entity, on_built)
 script.on_event(defines.events.on_robot_built_entity, on_built)
 script.on_event(defines.events.script_raised_built, on_built)
+script.on_event(defines.events.script_raised_revive, on_built) -- a ghost built by a car (see ghost_control.revive_ghost)
 script.on_event(defines.events.on_entity_died, on_removed)
 script.on_event(defines.events.on_player_mined_entity, on_removed)
 script.on_event(defines.events.on_robot_mined_entity, on_removed)

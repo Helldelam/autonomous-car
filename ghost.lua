@@ -25,7 +25,7 @@ local travel = require("travel")
 --   failed_attempts [unit_number] = {count, retry_tick} of a ghost that failed to revive
 --
 -- control.lua enters through register_ghost, on_ghost_destroyed, build_clusters,
--- any_car_exists, retry_pending_clusters, try_assign_pending, proceed,
+-- is_any_car_present, retry_pending_clusters, try_assign_pending, proceed,
 -- collect_items, deposit_items, deposit_leftovers, building_tick and abandon.
 -- The other functions are steps of those: they sit on the table too, so that
 -- they can call one another in any order and be counted by the test harness.
@@ -35,19 +35,22 @@ local ghost_control = {}
 -- Tracking
 -- ============================================================
 
--- Starts tracking a ghost, unless it lies inside a robot network: robots will
--- build that one.
+-- Starts tracking a ghost, unless it lies inside a robot network (robots will
+-- build that one) or is tracked already: it is then with a car or in the
+-- pending pool, and must not be queued twice. Returns true if the ghost is newly
+-- tracked.
 function ghost_control.register_ghost(ghost)
-	if not ghost.valid then
-		return
+	if not ghost.valid or storage.ghosts[ghost.unit_number] then
+		return false
 	end
 	if ghost.surface.find_logistic_network_by_position(ghost.position, ghost.force) then
-		return
+		return false
 	end
 	storage.ghosts[ghost.unit_number] = ghost
 	-- A ghost can go away in many ways (built by anyone, cancelled, destroyed),
 	-- which only on_object_destroyed reports reliably.
 	script.register_on_object_destroyed(ghost)
+	return true
 end
 
 -- The cluster of a batch that holds the ghost `id` (built or not), or nil.
@@ -65,9 +68,12 @@ end
 -- has are a surplus, deposited at the end of the batch.
 local function drop_ghost_items(construction, id)
 	local entry = find_cluster(construction, id)
-	local record = entry and entry.ghosts[id]
-	if not (record and record.item) then
+	if not entry then
 		return
+	end
+	local record = entry.ghosts[id]
+	if not record.item then
+		return -- no item places this ghost
 	end
 	local left = (entry.items[record.item] or 0) - record.count
 	entry.items[record.item] = left > 0 and left or nil
@@ -263,7 +269,7 @@ end
 -- ============================================================
 
 -- True if at least one car exists, on the map or parked in a garage.
-function ghost_control.any_car_exists()
+function ghost_control.is_any_car_present()
 	if next(storage.cars) ~= nil then
 		return true
 	end
@@ -460,7 +466,7 @@ end
 
 -- A chest and every supply chest within config.chest_group_radius of it:
 -- reaching one of them gives access to all.
-function ghost_control.chest_group(chest)
+function ghost_control.find_chest_group(chest)
 	local group = {chest}
 	for id, other in pairs(storage.supply_chests) do
 		if other.valid then
@@ -474,7 +480,7 @@ function ghost_control.chest_group(chest)
 	return group
 end
 
-local function group_holds_any(group, items)
+local function can_group_supply(group, items)
 	for _, chest in pairs(group) do
 		local inventory = chest.get_inventory(defines.inventory.chest)
 		for item_name in pairs(items) do
@@ -489,7 +495,7 @@ end
 -- Closest supply chest whose group holds at least one of the needed items, or nil.
 function ghost_control.find_supply_chest(car, items_needed)
 	return _utils.find_closest(storage.supply_chests, car.position, function(chest)
-		return group_holds_any(ghost_control.chest_group(chest), items_needed)
+		return can_group_supply(ghost_control.find_chest_group(chest), items_needed)
 	end, "chest", car.surface)
 end
 
@@ -546,19 +552,7 @@ local function release_unsupplied_clusters(construction)
 	end
 
 	for _, entry in ipairs(unsupplied) do
-		local ghosts = {}
-		for id in pairs(entry.ghosts) do
-			local ghost = construction.ghosts[id]
-			if ghost and ghost.valid then
-				table.insert(ghosts, ghost)
-			end
-			construction.ghosts[id] = nil
-			construction.failed_attempts[id] = nil
-			storage.ghost_to_car[id] = nil
-		end
-		if #ghosts > 0 then
-			table.insert(storage.pending_clusters, {ghosts = ghosts})
-		end
+		travel.requeue_cluster(construction, entry)
 	end
 	construction.clusters = supplied
 
@@ -624,7 +618,7 @@ function ghost_control.collect_items(car, chest)
 
 	if construction and chest and chest.valid then
 		local trunk = car.get_inventory(defines.inventory.car_trunk)
-		for _, member in pairs(ghost_control.chest_group(chest)) do
+		for _, member in pairs(ghost_control.find_chest_group(chest)) do
 			local inventory = member.get_inventory(defines.inventory.chest)
 			for item_name, needed in pairs(construction.items_needed) do
 				local available = inventory.get_item_count(item_name)
@@ -648,7 +642,7 @@ end
 -- are considered. Also returns whether any valid ghost is left in the batch,
 -- which tells "nothing left" from "everything left is on cooldown" (or, with a
 -- cluster, "elsewhere"). Invalid ghosts are removed from the batch.
-function ghost_control.nearest_ready_ghost(car, cluster)
+function ghost_control.find_nearest_ready_ghost(car, cluster)
 	local construction = storage.car_data[car.unit_number].construction
 	local best, best_distance
 	local any_valid = false
@@ -706,7 +700,7 @@ end
 --   "empty"   the batch has no ghost left
 function ghost_control.attempt_one_ghost(car)
 	local construction = storage.car_data[car.unit_number].construction
-	local ghost, any_valid = ghost_control.nearest_ready_ghost(car, construction.site)
+	local ghost, any_valid = ghost_control.find_nearest_ready_ghost(car, construction.site)
 	if not ghost then
 		return any_valid and "none" or "empty"
 	end
@@ -754,7 +748,7 @@ end
 -- cooldown the car steps back instead.
 function ghost_control.go_to_site(car)
 	local construction = storage.car_data[car.unit_number].construction
-	local ghost, any_valid = ghost_control.nearest_ready_ghost(car)
+	local ghost, any_valid = ghost_control.find_nearest_ready_ghost(car)
 	if ghost then
 		construction.site = find_cluster(construction, ghost.unit_number)
 		-- Recharges first if the car could not get back to a charger afterwards: this
@@ -788,7 +782,7 @@ end
 
 -- True if a group of supply chests has room for at least one of the items of
 -- `trunk`.
-local function group_has_room_for(group, trunk)
+local function can_group_store(group, trunk)
 	for _, item in pairs(trunk.get_contents()) do -- an array of {name, count, quality} records
 		for _, chest in pairs(group) do
 			if chest.get_inventory(defines.inventory.chest).can_insert{name = item.name, count = 1} then
@@ -803,7 +797,7 @@ end
 function ghost_control.find_chest_with_room(car)
 	local trunk = car.get_inventory(defines.inventory.car_trunk)
 	return _utils.find_closest(storage.supply_chests, car.position, function(chest)
-		return group_has_room_for(ghost_control.chest_group(chest), trunk)
+		return can_group_store(ghost_control.find_chest_group(chest), trunk)
 	end, "chest", car.surface)
 end
 
@@ -837,7 +831,7 @@ end
 function ghost_control.deposit_items(car, chest)
 	local trunk = car.get_inventory(defines.inventory.car_trunk)
 	if chest and chest.valid then
-		for _, member in pairs(ghost_control.chest_group(chest)) do
+		for _, member in pairs(ghost_control.find_chest_group(chest)) do
 			local inventory = member.get_inventory(defines.inventory.chest)
 			for _, item in pairs(trunk.get_contents()) do
 				local inserted = inventory.insert{name = item.name, count = item.count}

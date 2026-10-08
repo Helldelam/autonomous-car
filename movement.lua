@@ -446,10 +446,13 @@ end
 -- that direction: the car goes the other way round. When it stalled straight both
 -- ways at the same spot (see is_blocked) it is wedged and there is nothing more
 -- it can do alone. Returns true then.
-local function back_off(car, maneuver, tick)
+-- `assumed`: the car did not stall, it is only taken to have been driving forward
+-- (the start of a "blocked" maneuver, see start_maneuver). It is sent backwards
+-- the same way, but no direction is noted as blocked.
+local function back_off(car, maneuver, tick, assumed)
 	local stalled, turn = maneuver.reverse, maneuver.turn
 	maneuver.stall_since = nil
-	if turn == 0 then
+	if turn == 0 and not assumed then
 		maneuver.blocked[stalled] = {position = car.position, orientation = car.orientation}
 	end
 
@@ -480,7 +483,7 @@ end
 -- Starts a maneuver (see movement.maneuver_tick). `reason` tells when it may end:
 --   rear_turn    the target is behind a slow car
 --   blocked      the car stopped dead short of its destination: it backs off first
---   no_progress  the car barely moved over config.medium_delay (see travel.stuck_reason)
+--   no_progress  the car barely moved over config.medium_delay (see travel.find_stuck_reason)
 -- The attempts count is left alone: it is reset by a maneuver that succeeds and
 -- at the start of each leg (see travel.begin_leg).
 function movement.start_maneuver(car, tick, reason)
@@ -509,7 +512,11 @@ function movement.start_maneuver(car, tick, reason)
 	car_data.emergency_brake.since = tick
 
 	if reason == "blocked" then
-		back_off(car, maneuver, tick) -- it was driving forward
+		-- The car stood still on its leg: it backs off first, as if it had been
+		-- driving forward. Nothing says that it stalled straight against something
+		-- (its own emergency braking stops it too, and a maneuver that starts over
+		-- may have been reversing), so forward is not noted as blocked.
+		back_off(car, maneuver, tick, true)
 	end
 end
 

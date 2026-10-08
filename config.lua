@@ -150,7 +150,7 @@ config.short_delay = 60 -- (1s)
 	-- control.lua: period at which an open window of missing items is refreshed (gui.refresh_all)
 config.medium_delay = 180 -- (3s)
 	-- ghost_control.attempt_one_ghost: cooldown of a ghost that failed to revive
-	-- travel.stuck_reason: window over which progress is measured
+	-- travel.find_stuck_reason: window over which progress is measured
 config.idle_delay = 300 -- (5s) long on purpose during development, so idle waits are easy to see; lower to 60-120 before release
 	-- control.lua: wait before an idle car looks for a new task or a garage
 	-- ghost_control.go_idle, travel.handle_empty: a wait set as already elapsed, so that the car decides on the next tick
@@ -160,7 +160,7 @@ config.long_delay = 600 -- (10s)
 	-- control.lua: period at which parked cars are repaired (garage_control.repair_parked_cars)
 	-- control.lua: period of the fallback scan of pending clusters
 	-- travel.stuck_tick: wait before a stuck car tries its leg again
-	-- travel.stuck_reason: margin added to the expected duration of a leg
+	-- travel.find_stuck_reason: margin added to the expected duration of a leg
 
 -- Measurements that need not happen every tick (the cars nearby, the closest
 -- charger) are repeated this often, offset per car. Raise it if the mod slows
@@ -199,7 +199,7 @@ config.pre_park_fuel_ratio = 0.9 -- an idle car below this fraction tops up befo
 config.max_charger_users = 4 -- cars that can use the same charger at once
 
 -- ============================================================
--- Stuck detection (see travel.stuck_reason)
+-- Stuck detection (see travel.find_stuck_reason)
 -- ============================================================
 
 config.stuck_min_speed = 0.1 -- lowest average speed expected over a leg; bounds how long the leg may last
