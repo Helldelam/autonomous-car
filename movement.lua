@@ -40,14 +40,32 @@ local function compute_orientation_to(car, target)
 	return (math.atan2(dx, -dy) / (2 * pi)) % 1
 end
 
--- Angle from the heading of the car to `target`, in turns, within [-0.5, 0.5):
--- positive when the target is on the right.
-local function compute_target_angle(car, target)
-	return compute_angle_between(car.orientation, compute_orientation_to(car, target))
+-- Where the car steers: the next waypoint of its path (see request_path), or
+-- its destination. Arrival and braking always go by the destination itself.
+local function get_target(car_data)
+	local path = car_data.path
+	if path.active then
+		return path.waypoints[path.index]
+	end
+	return car_data.moving.destination.position
+end
+
+-- A waypoint is passed once the car is within two car lengths of it. The path
+-- ends with its last waypoint: the car then drives to its destination as usual.
+local PATH_REACH = 2 * config.car_size.length
+
+local function advance_path(car, car_data)
+	local path = car_data.path
+	while path.active and util.distance(car.position, path.waypoints[path.index]) < PATH_REACH do
+		path.index = path.index + 1
+		if path.index > #path.waypoints then
+			path.active = false
+		end
+	end
 end
 
 -- Sides of a heading for measure_wall_margin.
-local SIDE_LEFT, SIDE_RIGHT, SIDES_BOTH = {-1}, {1}, {-1, 1}
+local SIDE_LEFT, SIDE_RIGHT = {-1}, {1}
 
 -- True if a car turned toward `orientation` would fit at (x, y). The collision
 -- box is turned to the closest of the 16 directions: without it can_place_entity
@@ -213,13 +231,15 @@ end
 function movement.update_mode(car, tick)
 	local car_data = storage.car_data[car.unit_number]
 	open_gates(car, tick)
+	advance_path(car, car_data)
 	if car_data.maneuver.active then
 		set_friction(car, MANEUVER_FRICTION)
 		return
 	end
 
-	local target = car_data.moving.destination.position
-	local distance = util.distance(car.position, target)
+	local destination = car_data.moving.destination.position
+	local target = get_target(car_data)
+	local distance = util.distance(car.position, destination)
 	local orientation = car.orientation
 	local x, y = car.position.x, car.position.y
 	local sx, sy = get_heading_vector(orientation)
@@ -263,17 +283,6 @@ function movement.update_mode(car, tick)
 		emergency_brake.since = tick
 	end
 
-	local angle = compute_target_angle(car, target)
-
-	-- The target is behind a slow car: turn around with a maneuver. Not near the
-	-- destination, where the car stops instead.
-	if math.abs(angle) > config.rear_turn_min_angle and car.speed <= config.rear_turn_max_speed
-		and distance >= config.arrival_distance and not emergency_brake.active then
-		movement.start_maneuver(car, tick, "rear_turn")
-		set_friction(car, MANEUVER_FRICTION)
-		return
-	end
-
 	-- Work in progress: precision mode only covers dense areas for now.
 	car_data.precision_mode = density > config.dense_area_threshold
 
@@ -294,8 +303,8 @@ end
 -- raises the next-task event once it has stopped at its destination.
 function movement.drive_tick(car, tick)
 	local car_data = storage.car_data[car.unit_number]
-	local target = car_data.moving.destination.position
-	local distance = util.distance(car.position, target)
+	local target = get_target(car_data)
+	local distance = util.distance(car.position, car_data.moving.destination.position)
 	local arrived = car.speed < config.speed.stopped and distance < config.arrival_distance
 
 	if car_data.emergency_brake.active then
@@ -311,7 +320,7 @@ function movement.drive_tick(car, tick)
 	-- last maneuver ended: the car hit something and needs a maneuver.
 	if car.speed == 0 and distance >= config.arrival_distance
 		and tick - car_data.maneuver.ended_tick > config.short_delay then
-		movement.start_maneuver(car, tick, "blocked") -- takes over from the next tick
+		movement.start_maneuver(car, tick, true) -- takes over from the next tick
 		return
 	end
 
@@ -358,6 +367,7 @@ function movement.drive_tick(car, tick)
 	local ax, ay = x + sy * side_offset, y - sx * side_offset
 	local bx, by = x - sy * side_offset, y + sx * side_offset
 	local neighbours = car_data.neighbours
+	local target_distance = math.max(util.distance(car.position, target), 1) -- the steering costs are relative to it
 
 	-- The margin cost (see measure_wall_margin) is only worth its extra checks when
 	-- something stands near the samples: one entity within reach is the car itself.
@@ -371,10 +381,10 @@ function movement.drive_tick(car, tick)
 	local straight, right, left = 0, 0, 0
 	for d = lookahead_start, lookahead_start + (lookahead_length + bonus) do
 		local weight = ((lookahead_start + lookahead_length + bonus - (d / 2)) + 1) / (lookahead_length + bonus)
-		straight = straight + (weight * compute_sample_cost(car, ax + sx * d, ay + sy * d, orientation, target, distance, neighbours, tick, left_side)
-			+ weight * compute_sample_cost(car, bx + sx * d, by + sy * d, orientation, target, distance, neighbours, tick, right_side)) / 2
-		right = right + weight * compute_sample_cost(car, x + rx * d, y + ry * d, orientation + config.lookahead_angle, target, distance, neighbours, tick, right_side)
-		left = left + weight * compute_sample_cost(car, x + lx * d, y + ly * d, orientation - config.lookahead_angle, target, distance, neighbours, tick, left_side)
+		straight = straight + (weight * compute_sample_cost(car, ax + sx * d, ay + sy * d, orientation, target, target_distance, neighbours, tick, left_side)
+			+ weight * compute_sample_cost(car, bx + sx * d, by + sy * d, orientation, target, target_distance, neighbours, tick, right_side)) / 2
+		right = right + weight * compute_sample_cost(car, x + rx * d, y + ry * d, orientation + config.lookahead_angle, target, target_distance, neighbours, tick, right_side)
+		left = left + weight * compute_sample_cost(car, x + lx * d, y + ly * d, orientation - config.lookahead_angle, target, target_distance, neighbours, tick, left_side)
 	end
 
 	-- Add the obstacle density further along each heading.
@@ -401,9 +411,18 @@ end
 -- Maneuver
 -- ============================================================
 
--- Seen in game: steering left in reverse swings the rear of the car to its left,
--- so the orientation turns the other way round than going forwards.
+-- Whether steering left in reverse turns the orientation the other way round than
+-- going forwards. True: steering left in reverse swings the rear of the car to its
+-- left, as seen in game. Everything that depends on it goes through get_arc_rotation.
 local REVERSE_STEERING_INVERTED = true
+
+-- Turn of the orientation of an arc, as -1 (counter-clockwise), 0 or 1 (clockwise).
+local function get_arc_rotation(arc)
+	if arc.reverse and REVERSE_STEERING_INVERTED then
+		return -arc.turn
+	end
+	return arc.turn
+end
 
 -- The six arcs of a maneuver: forward or backward, steering left (-1),
 -- straight (0) or right (1). The car follows one arc for
@@ -444,8 +463,8 @@ end
 -- is sent the other way, straight, and follows that direction along the wall (see
 -- maneuver_tick) until a turn works. A straight stall is the end of the wall in
 -- that direction: the car goes the other way round. When it stalled straight both
--- ways at the same spot (see is_blocked) it is wedged and there is nothing more
--- it can do alone. Returns true then.
+-- ways at the same spot (see is_blocked) there is nothing more it can do alone.
+-- Returns true then.
 -- `assumed`: the car did not stall, it is only taken to have been driving forward
 -- (the start of a "blocked" maneuver, see start_maneuver). It is sent backwards
 -- the same way, but no direction is noted as blocked.
@@ -472,7 +491,6 @@ local function back_off(car, maneuver, tick, assumed)
 	maneuver.back_off_from = car.position
 	maneuver.reverse = reverse
 	maneuver.turn = 0
-	maneuver.last_arc = {reverse = reverse, turn = 0}
 	car.riding_state = {
 		acceleration = reverse and riding.acceleration.reversing or riding.acceleration.accelerating,
 		direction = riding.direction.straight,
@@ -480,17 +498,12 @@ local function back_off(car, maneuver, tick, assumed)
 	return false
 end
 
--- Starts a maneuver (see movement.maneuver_tick). `reason` tells when it may end:
---   rear_turn    the target is behind a slow car
---   blocked      the car stopped dead short of its destination: it backs off first
---   no_progress  the car barely moved over config.medium_delay (see travel.find_stuck_reason)
--- The attempts count is left alone: it is reset by a maneuver that succeeds and
--- at the start of each leg (see travel.begin_leg).
-function movement.start_maneuver(car, tick, reason)
+-- Starts a maneuver (see movement.maneuver_tick). `backing_off`: the car stopped dead
+-- short of its destination, it backs off first (otherwise it only waits for a path).
+function movement.start_maneuver(car, tick, backing_off)
 	local car_data = storage.car_data[car.unit_number]
 	local maneuver = car_data.maneuver
 	maneuver.active = true
-	maneuver.reason = reason
 	maneuver.since = tick
 	maneuver.arc_since = nil
 	maneuver.arcs = 0
@@ -499,7 +512,6 @@ function movement.start_maneuver(car, tick, reason)
 	maneuver.origin = car.position
 	maneuver.heading = nil
 	maneuver.heading_since = nil
-	maneuver.last_arc = nil
 	maneuver.stall_since = nil
 	maneuver.back_off_until = nil
 	maneuver.follow = nil
@@ -511,7 +523,7 @@ function movement.start_maneuver(car, tick, reason)
 	car_data.emergency_brake.active = false
 	car_data.emergency_brake.since = tick
 
-	if reason == "blocked" then
+	if backing_off then
 		-- The car stood still on its leg: it backs off first, as if it had been
 		-- driving forward. Nothing says that it stalled straight against something
 		-- (its own emergency braking stops it too, and a maneuver that starts over
@@ -554,77 +566,30 @@ local function measure_free_room(car, x, y, orientation)
 	return steps + 1
 end
 
--- True when the car can turn on the spot from its orientation to `to` without its
--- box touching anything on the way: the box, turned by steps of a third of an
--- arc, is searched for entities (the car excepted). A car turns around its centre,
--- so along a wall it can neither turn into it, nor away from it with its rear.
--- Checking it here spares the car from finding out by pressing against the wall.
-local function can_turn(car, to)
-	local angle = compute_angle_between(car.orientation, to)
-	local steps = math.max(1, math.ceil(math.abs(angle) / (config.lookahead_angle / 3)))
-	local x, y = car.position.x, car.position.y
-	local half_width, half_length = config.car_size.width / 2 - 0.02, config.car_size.length / 2 - 0.02
-	local mask = car.prototype.collision_mask.layers
-	for step = 1, steps do
-		for _, entity in pairs(car.surface.find_entities_filtered{
-			area = {
-				left_top = {x - half_width, y - half_length}, right_bottom = {x + half_width, y + half_length},
-				orientation = (car.orientation + angle * step / steps) % 1,
-			},
-			collision_mask = mask,
-		}) do
-			if entity ~= car then
-				return false
-			end
-		end
-	end
-	return true
-end
-
 -- Score of an orientation as the heading a maneuver turns toward: its free
--- room (0 to 1), minus a small pull away from `preferred`, and for a
--- maneuver that is not turning toward the destination minus the obstacle
+-- room (0 to 1), minus a small pull away from `preferred`, minus the obstacle
 -- density around the point 2 * config.density_radius away along it.
-local function score_heading(car, x, y, orientation, preferred, toward_target)
+local function score_heading(car, x, y, orientation, preferred)
 	local room = measure_free_room(car, x, y, orientation) / (math.floor(config.maneuver_probe.length / PROBE_STEP) + 1)
-	local score = room - math.abs(compute_angle_between(preferred, orientation)) * ANGLE_PULL
 	local vx, vy = get_heading_vector(orientation)
-
-	-- Keeps off the walls: the margin cost of the first probe, as a fraction of a
-	-- blocked sample's, so that it weighs as little as it does when driving.
-	score = score - measure_wall_margin(car, x + vx * config.maneuver_probe.start, y + vy * config.maneuver_probe.start,
-		orientation, SIDES_BOTH) / config.steering_cost.blocked
-	if not toward_target then
-		local reach = 2 * config.density_radius
-		score = score - config.steering_cost.density * measure_obstacle_density(car, x + vx * reach, y + vy * reach)
-	end
-	return score
+	local reach = 2 * config.density_radius
+	return room - math.abs(compute_angle_between(preferred, orientation)) * ANGLE_PULL
+		- config.steering_cost.density * measure_obstacle_density(car, x + vx * reach, y + vy * reach)
 end
 
 -- Picks the direction a maneuver turns toward. It starts from the direction of
--- the destination. `rear_turn` takes the closest direction the car fits along;
--- the other reasons look for the roomiest and least dense direction around the
--- car, the one closest to the destination on a tie. The heading found before is
--- kept unless the new one is better by a whole probe step, so a re-scan does
--- not make the car change its mind.
-local function choose_heading(car, car_data, maneuver)
+-- the destination and looks for the roomiest and least dense direction around the
+-- car, the one closest to the destination on a tie.
+local function choose_heading(car, car_data)
 	local x, y = car.position.x, car.position.y
-	local toward_target = maneuver.reason == "rear_turn"
-	local preferred = compute_orientation_to(car, car_data.moving.destination.position)
+	local preferred = compute_orientation_to(car, get_target(car_data))
 
 	local count = math.floor(1 / config.lookahead_angle + 0.5)
 	local best, best_score
 	for index = 0, count - 1 do
-		local score = score_heading(car, x, y, index / count, preferred, toward_target)
+		local score = score_heading(car, x, y, index / count, preferred)
 		if not best or score > best_score then
 			best, best_score = index / count, score
-		end
-	end
-
-	if maneuver.heading then
-		local kept = score_heading(car, x, y, maneuver.heading, preferred, toward_target)
-		if kept >= best_score - 1 / (math.floor(config.maneuver_probe.length / PROBE_STEP) + 1) then
-			return maneuver.heading
 		end
 	end
 	return best
@@ -633,39 +598,44 @@ end
 -- Picks the next arc to drive the car toward `maneuver.heading`. Ranked: an arc
 -- the car fits along (first probe free), then one that turns the car toward the
 -- heading (or keeps it straight once it is aligned), then forward, then free
--- room. The arc that undoes the last one (same steering, other direction) is
--- never chosen: the car cannot simply go back to where it was. This also checks
--- REVERSE_STEERING_INVERTED: a car that still retraces its steps steers the other way.
+-- room. When it is blocked ahead and behind (no straight arc has room) driving
+-- straight leads nowhere: it has to turn, and a turning arc counts as fitting as
+-- soon as there is room along it.
 local function choose_arc(car, maneuver)
 	local x, y = car.position.x, car.position.y
 	local orientation = car.orientation
 	local angle = compute_angle_between(orientation, maneuver.heading)
 	local aligned = math.abs(angle) < config.lookahead_angle / 2 -- half a sector of choose_heading
-	local last = maneuver.last_arc
-	local best, best_rank
 
+	-- The arcs open to the car, with the room along each.
+	local options = {}
+	local straight_free = false
 	for index, arc in ipairs(ARCS) do
 		-- Following a wall (see back_off), the car keeps to its direction.
-		if (maneuver.follow == nil or arc.reverse == maneuver.follow)
-			and not (last and arc.turn == last.turn and arc.reverse ~= last.reverse) then
+		if maneuver.follow == nil or arc.reverse == maneuver.follow then
 			-- The orientation turns clockwise with a right turn; in reverse the car moves along the opposite heading.
-			local rotation = arc.turn
-			if arc.reverse and REVERSE_STEERING_INVERTED then
-				rotation = -rotation
-			end
+			local rotation = get_arc_rotation(arc)
 			local room = measure_free_room(car, x, y,
 				orientation + (arc.reverse and 0.5 or 0) + rotation * config.lookahead_angle)
+			table.insert(options, {index = index, arc = arc, rotation = rotation, room = room})
+			if rotation == 0 and room >= 1 then
+				straight_free = true
+			end
+		end
+	end
 
-			local toward = rotation * (angle >= 0 and 1 or -1) -- 1 turns toward the heading, -1 away
-			if aligned then
-				toward = (rotation == 0 and not arc.reverse) and 1 or -1 -- aligned: drive straight ahead
-			end
-			local fits = room >= 1 and (rotation == 0 or can_turn(car, orientation + rotation * config.lookahead_angle))
-			local rank = (fits and RANK_FITS or 0) + toward * RANK_TOWARD_HEADING
-				+ (arc.reverse and 0 or RANK_FORWARD) + math.min(room, 9) - index / 100
-			if not best or rank > best_rank then
-				best, best_rank = arc, rank
-			end
+	local best, best_rank
+	for _, option in ipairs(options) do
+		local arc, rotation, room = option.arc, option.rotation, option.room
+		local toward = rotation * (angle >= 0 and 1 or -1) -- 1 turns toward the heading, -1 away
+		if aligned and straight_free then
+			toward = (rotation == 0 and not arc.reverse) and 1 or -1 -- aligned: drive straight ahead
+		end
+		local fits = room >= 1
+		local rank = (fits and RANK_FITS or 0) + toward * RANK_TOWARD_HEADING
+			+ (arc.reverse and 0 or RANK_FORWARD) + math.min(room, 9) - option.index / 100
+		if not best or rank > best_rank then
+			best, best_rank = arc, rank
 		end
 	end
 	return best
@@ -693,9 +663,6 @@ local function is_maneuver_done(car, car_data)
 		return false
 	end
 
-	if maneuver.reason == "rear_turn" then
-		return math.abs(compute_target_angle(car, target)) < config.maneuver_exit_angle
-	end
 	return util.distance(car.position, maneuver.origin) >= config.maneuver_min_travel
 end
 
@@ -704,6 +671,150 @@ local function end_maneuver(car, maneuver, tick)
 	maneuver.active = false
 	maneuver.ended_tick = tick
 	car.riding_state = {acceleration = riding.acceleration.braking, direction = riding.direction.straight}
+end
+
+-- ============================================================
+-- Path (last resort)
+-- ============================================================
+-- A car whose last maneuver attempt has failed asks the game's pathfinder for a
+-- way out, once per leg: the maneuver only sees what lies around the car, the
+-- pathfinder knows the whole map. The request is asynchronous (see
+-- movement.on_path_finished); the car waits, braked, in its maneuver. The path
+-- is then followed waypoint by waypoint with the usual driving (drive_tick steers
+-- toward the next waypoint, maneuvers included), and ends where the car drives to
+-- its destination as before.
+
+-- The box sent to the pathfinder is the car's, a little larger so that the path
+-- keeps off the walls.
+local PATH_MARGIN = 0.1
+
+local function send_path_request(car, car_data)
+	local path = car_data.path
+	local half_width, half_length = config.car_size.width / 2 + PATH_MARGIN, config.car_size.length / 2 + PATH_MARGIN
+	local id = car.surface.request_path{
+		bounding_box = {{-half_width, -half_length}, {half_width, half_length}},
+		collision_mask = car.prototype.collision_mask,
+		start = car.position,
+		goal = car_data.moving.destination.position,
+		force = car.force,
+		radius = config.arrival_distance / 2,
+		can_open_gates = true,
+		entity_to_ignore = car,
+		pathfind_flags = {cache = false, low_priority = true, prefer_straight_paths = true},
+	}
+	path.request = id
+	path.retry_tick = nil
+	storage.path_requests[id] = car.unit_number
+end
+
+-- Starts waiting for a path. False when this leg has already had one.
+local function request_path(car, car_data, tick)
+	local path = car_data.path
+	if path.tried then
+		return false
+	end
+	path.tried = true
+	path.pending = true
+	path.result = nil
+	path.requested_tick = tick
+	send_path_request(car, car_data)
+	return true
+end
+
+-- Asks for a path outside a maneuver: the car holds in a maneuver until the
+-- answer (see wait_for_path). False when this leg has already had its path.
+function movement.request_path(car, tick)
+	local car_data = storage.car_data[car.unit_number]
+	if car_data.path.tried then
+		return false
+	end
+	if not car_data.maneuver.active then
+		movement.start_maneuver(car, tick)
+	end
+	return request_path(car, car_data, tick)
+end
+
+-- Keeps the corners and a point every config.lookahead_length tiles: the path of
+-- the game has a waypoint per tile.
+local function simplify_path(raw)
+	local points, last_kept = {}, nil
+	for index, waypoint in ipairs(raw) do
+		local p = waypoint.position
+		local keep = index == #raw
+		if not keep and index > 1 then
+			local previous, following = raw[index - 1].position, raw[index + 1].position
+			keep = math.abs((p.x - previous.x) - (following.x - p.x)) > 0.01
+				or math.abs((p.y - previous.y) - (following.y - p.y)) > 0.01
+		end
+		if not keep and last_kept and util.distance(p, last_kept) >= config.lookahead_length then
+			keep = true
+		end
+		if keep then
+			table.insert(points, {x = p.x, y = p.y})
+			last_kept = p
+		end
+	end
+	return points
+end
+
+-- on_script_path_request_finished: stores the answer for the waiting car, which
+-- acts on it at its next maneuver_tick.
+function movement.on_path_finished(event)
+	local unit_number = storage.path_requests[event.id]
+	if not unit_number then
+		return
+	end
+	storage.path_requests[event.id] = nil
+	local car, car_data = storage.cars[unit_number], storage.car_data[unit_number]
+	if not (car and car.valid and car_data) then
+		return
+	end
+	local path = car_data.path
+	if not path.pending or path.request ~= event.id then
+		return -- the leg changed meanwhile
+	end
+	if event.try_again_later then
+		path.retry_tick = event.tick + config.short_delay
+	elseif event.path and #event.path > 1 then
+		path.waypoints = simplify_path(event.path)
+		path.result = "found"
+	else
+		path.result = "none"
+	end
+end
+
+-- The car is waiting for its path: braked, until the answer comes (returns false),
+-- or until it is clear that none will, which makes the car stuck (returns true).
+local function wait_for_path(car, car_data, maneuver, tick)
+	local path = car_data.path
+	car.riding_state = {acceleration = riding.acceleration.braking, direction = riding.direction.straight}
+
+	if path.retry_tick and tick >= path.retry_tick then
+		send_path_request(car, car_data)
+	end
+	if path.result == "found" then
+		path.pending = false
+		path.active = true
+		path.index = 1
+		end_maneuver(car, maneuver, tick)
+
+		-- The stuck detection judges the leg by its length: it is the path's now.
+		local length, from = 0, car.position
+		for _, waypoint in ipairs(path.waypoints) do
+			length = length + util.distance(from, waypoint)
+			from = waypoint
+		end
+		local moving = car_data.moving
+		moving.departure_tick = tick
+		moving.departure_distance = length + util.distance(from, moving.destination.position)
+		return false
+	end
+	if path.result == "none" or tick - path.requested_tick > config.long_delay then
+		path.pending = false
+		end_maneuver(car, maneuver, tick)
+		return true
+	end
+	return false
 end
 
 -- Drives a car that is in a maneuver, at the slow speed that update_mode's
@@ -717,16 +828,29 @@ end
 -- A car that drives but does not move for config.short_delay has an obstacle
 -- it cannot see, or a wall that stops it from turning (see back_off): it goes
 -- the other way, straight, and follows that direction until a turn works. Its
--- arcs keep to that direction meanwhile. The second return value is true when
--- the car is wedged, blocked both ways at the same spot: it is stuck for good
--- (see travel.start_stuck).
+-- arcs keep to that direction meanwhile. When the car is
+-- blocked both ways at the same spot the maneuver fails at once.
 --
--- A maneuver that lasts longer than config.idle_delay has failed: a new one
--- starts, until config.max_maneuver_attempts. Returns true when the last
--- attempt failed, which makes the car stuck (see travel.start_stuck).
+-- A maneuver gets one try, of at most config.long_delay. When it fails (time out,
+-- or a car wedged between walls) the car asks for a path, once per leg (see
+-- request_path); when that fails too, or has already been tried, maneuver_tick
+-- returns true and the car is stuck (see travel.start_stuck).
+local function fail_maneuver(car, car_data, maneuver, tick)
+	if request_path(car, car_data, tick) then
+		return false
+	end
+	end_maneuver(car, maneuver, tick)
+	-- Wedged for good only if no path showed a way out on this leg.
+	return true
+end
+
 function movement.maneuver_tick(car, tick)
 	local car_data = storage.car_data[car.unit_number]
 	local maneuver = car_data.maneuver
+
+	if car_data.path.pending then
+		return wait_for_path(car, car_data, maneuver, tick)
+	end
 
 	-- Drive straight along the wall for a car length (or config.short_delay). A car
 	-- that did not move is blocked this way as well.
@@ -738,7 +862,7 @@ function movement.maneuver_tick(car, tick)
 		maneuver.back_off_until = nil
 		if moved < PROBE_STEP then
 			if back_off(car, maneuver, tick) then
-				return true, true -- both directions blocked
+				return fail_maneuver(car, car_data, maneuver, tick) -- both directions blocked
 			end
 			return false
 		end
@@ -759,7 +883,7 @@ function movement.maneuver_tick(car, tick)
 			maneuver.stall_since = maneuver.stall_since or tick
 			if tick - maneuver.stall_since >= config.short_delay then
 				if back_off(car, maneuver, tick) then
-					return true, true -- both directions blocked
+					return fail_maneuver(car, car_data, maneuver, tick) -- both directions blocked
 				end
 				return false
 			end
@@ -773,26 +897,18 @@ function movement.maneuver_tick(car, tick)
 
 	if is_maneuver_done(car, car_data) then
 		end_maneuver(car, maneuver, tick)
-		maneuver.attempts = 0
 		return false
 	end
 
 	if tick - maneuver.since > config.idle_delay then
-		end_maneuver(car, maneuver, tick)
-		maneuver.attempts = maneuver.attempts + 1
-		if maneuver.attempts >= config.max_maneuver_attempts then
-			return true
-		end
-		movement.start_maneuver(car, tick, maneuver.reason)
-		return false
+		return fail_maneuver(car, car_data, maneuver, tick)
 	end
 
 	if not maneuver.heading or tick - maneuver.heading_since >= config.short_delay then
-		maneuver.heading = choose_heading(car, car_data, maneuver)
+		maneuver.heading = choose_heading(car, car_data)
 		maneuver.heading_since = tick
 	end
 	local arc = choose_arc(car, maneuver)
-	maneuver.last_arc = arc
 	maneuver.arc_since = tick
 	maneuver.arcs = maneuver.arcs + 1
 	maneuver.reverse = arc.reverse

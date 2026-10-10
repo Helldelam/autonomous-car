@@ -23,7 +23,7 @@
 -- when the car has no batch. tests/show.ps1 decodes these lines, and reads
 -- FLAG_NAMES from the line below.
 
-local FLAG_NAMES = {"moving", "charging", "parking", "building", "stuck", "waiting", "empty", "maneuver", "emergency_brake", "high_speed", "precision_mode", "slowing"}
+local FLAG_NAMES = {"moving", "charging", "parking", "building", "stuck", "waiting", "empty", "maneuver", "emergency_brake", "high_speed", "precision_mode", "slowing", "path"}
 local BUILT_NAMES = {"wooden-chest", "stone-furnace", "small-electric-pole", "steel-chest", "car"}
 
 local T = {chargers = {}, clusters = {}} -- state of the running scenario
@@ -456,11 +456,14 @@ local function wall_ring(surface, cx, cy)
 	return walls
 end
 
--- Three cars walled in, for the maneuver in a closed space and the stuck escalation:
---   car A  has a batch and a wall of its ring is opened at t = 600, while it is still
---          looking for a way out: it should follow the walls, find the opening and build
+-- Four cars walled in, for the maneuver in a closed space and the stuck escalation:
+--   car A  has a batch and an opening of 3 tiles is made in its ring at t = 600 (an opening
+--          of 1 tile is not a valid exit for a car, which needs 3 to find its way): it should
+--          get out through it and build
+--   car D  is like car A, but its opening is made at t = 300, while it is still manoeuvring
+--          (before it asks for a path): it should find the opening and build, without any stuck
 --   car B  has a batch and is never freed: it ends stuck and abandons its batch, with
---          retries of its leg if it can still cross the room, without any once it is wedged
+--          retries of its leg if it can still cross the room, without any once it is blocked both ways
 --          (blocked both ways at one spot, see movement.back_off)
 --   car C  is walled in with a low tank and a charger out of reach of its walls:
 --          its leg to the charger is retried without limit and never abandoned
@@ -482,17 +485,443 @@ scenarios["sealed"] = {
 
 		wall_ring(s, -50.5, 0.5)
 		make_car(s, -50.5, 0.5, 0, 0.05)
+
+		T.ring_d = wall_ring(s, 50.5, 110.5)
+		make_car(s, 50.5, 110.5, 0, 1)
+		make_ghost(s, "wooden-chest", 90.5, 110.5)
 	end,
 	events = function(t)
 		if t == 100 then
 			select_ghosts(85, 45, 95, 55)
 			select_ghosts(85, -55, 95, -45)
+			select_ghosts(85, 105, 95, 115)
+		end
+		if t == 300 then
+			for dy = -1, 1 do
+				T.ring_d["3," .. dy].destroy()
+			end
+			out("EVENT wall of car D opened")
 		end
 		if t == 600 then
-			T.ring_a["3,0"].destroy()
+			for dy = -1, 1 do
+				T.ring_a["3," .. dy].destroy()
+			end
 			out("EVENT wall of car A opened")
 		end
 	end,
+}
+
+-- Cars in a dead end made of walls: a corridor 4 tiles wide and 16 long, closed at
+-- its west end and open (4 tiles) at its east end, with the ghost and the supply
+-- chest behind the closed end. The cars have to get out of the corridor and round
+-- the walls: the maneuvers alone do not see that far, the last attempt asks the
+-- pathfinder (flag `path` in the trace). Three starts: facing the closed end,
+-- facing a side wall, and facing the opening.
+scenarios["u-corridor"] = {
+	ticks = 9000,
+	setup = function()
+		local s = new_surface({{0, 0}}, 10)
+		make(s, names.charger, 0, 0)
+		T.starts = {{x = 2, o = 0.75}, {x = 6, o = 0}, {x = 10, o = 0.25}}
+		for index, start in ipairs(T.starts) do
+			local cx, cy = 100, index * 40 - 100
+			for x = -1, 16 do
+				s.create_entity{name = "stone-wall", position = {cx + x + 0.5, cy - 0.5}, force = "player"}
+				s.create_entity{name = "stone-wall", position = {cx + x + 0.5, cy + 4.5}, force = "player"}
+			end
+			for y = 0, 3 do
+				s.create_entity{name = "stone-wall", position = {cx - 0.5, cy + y + 0.5}, force = "player"}
+			end
+			make_car(s, cx + start.x, cy + 2, start.o, 1)
+			fill(make(s, names.chest, cx - 8.5, cy - 4.5), {["wooden-chest"] = 20})
+			make_ghost(s, "wooden-chest", cx - 8.5, cy + 2.5)
+		end
+	end,
+	events = function(t)
+		if t == 100 then
+			for index = 1, #T.starts do
+				local cy = index * 40 - 100
+				select_ghosts(88, cy, 94, cy + 5)
+			end
+		end
+	end,
+}
+
+-- Twenty cars, each in its own closed room 16 tiles long whose only exit, 3 tiles wide,
+-- is in the middle of its north wall (inside the U, not at its end): the cars start at
+-- twenty places and orientations, and have to leave the room to reach a supply chest and
+-- a ghost outside, to the north. The number of chests built is the number of cars that
+-- got out and finished (SUMMARY), BATCH lines give the tick each finished. u-side rooms
+-- are 4 tiles wide, u-narrow ones 3.
+local ROOM_STARTS = {
+	{x = 2, o = 0.75}, {x = 4, o = 0}, {x = 6, o = 0.25}, {x = 8, o = 0.5}, {x = 10, o = 0.125},
+	{x = 12, o = 0.625}, {x = 14, o = 0.875}, {x = 15, o = 0.25}, {x = 3, o = 0.5}, {x = 11, o = 0},
+	{x = 1.5, o = 0.375}, {x = 3.5, o = 0.5}, {x = 5, o = 0.125}, {x = 7, o = 0.75}, {x = 9, o = 0.875},
+	{x = 10.5, o = 0.25}, {x = 12.5, o = 0.625}, {x = 13.5, o = 0}, {x = 14.5, o = 0.5}, {x = 6.5, o = 0.75},
+}
+
+local function room_origin(index)
+	return 100 + 40 * math.floor((index - 1) / 10), ((index - 1) % 10 + 1) * 30 - 170
+end
+
+local function build_rooms(width)
+	local s = new_surface({{0, 0}}, 10)
+	make(s, names.charger, 0, 0)
+	for index, start in ipairs(ROOM_STARTS) do
+		local cx, cy = room_origin(index)
+		for x = -1, 16 do
+			if x < 7 or x > 9 then
+				s.create_entity{name = "stone-wall", position = {cx + x + 0.5, cy - 0.5}, force = "player"}
+			end
+			s.create_entity{name = "stone-wall", position = {cx + x + 0.5, cy + width + 0.5}, force = "player"}
+		end
+		for y = 0, width - 1 do
+			s.create_entity{name = "stone-wall", position = {cx - 0.5, cy + y + 0.5}, force = "player"}
+			s.create_entity{name = "stone-wall", position = {cx + 16.5, cy + y + 0.5}, force = "player"}
+		end
+		local lane = width / 2 + (index % 2 == 0 and -0.6 or 0.6) * (width - 2) / 2
+		make_car(s, cx + start.x, cy + lane, start.o, 1)
+		fill(make(s, names.chest, cx + 13.5, cy - 10.5), {["wooden-chest"] = 20})
+		make_ghost(s, "wooden-chest", cx + 3.5, cy - 10.5)
+	end
+end
+
+local function select_rooms(t)
+	if t == 100 then
+		for index = 1, #ROOM_STARTS do
+			local cx, cy = room_origin(index)
+			select_ghosts(cx + 1, cy - 12, cx + 6, cy - 9)
+		end
+	end
+end
+
+scenarios["u-side"] = {
+	ticks = 6000,
+	setup = function() build_rooms(4) end,
+	events = select_rooms,
+}
+
+scenarios["u-narrow"] = {
+	ticks = 6000,
+	setup = function() build_rooms(3) end,
+	events = select_rooms,
+}
+
+-- Open ground, no obstacle: twelve cars turned every 30 degrees, a supply chest and a
+-- ghost to the east of each. The cars that face away have to turn around before they
+-- drive. BATCH lines give the tick each finished.
+scenarios["turn-around"] = {
+	ticks = 4000,
+	setup = function()
+		local s = new_surface({{0, 0}}, 10)
+		make(s, names.charger, 0, 0)
+		T.turns = 12
+		for index = 1, T.turns do
+			local cx, cy = 100, index * 20 - 140
+			make_car(s, cx, cy, (index - 1) / T.turns, 1)
+			fill(make(s, names.chest, cx + 8.5, cy - 3.5), {["wooden-chest"] = 20})
+			make_ghost(s, "wooden-chest", cx + 16.5, cy - 3.5)
+		end
+	end,
+	events = function(t)
+		if t == 100 then
+			for index = 1, T.turns do
+				local cy = index * 20 - 140
+				select_ghosts(112, cy - 6, 120, cy)
+			end
+		end
+	end,
+}
+
+-- A wall 40 tiles long between each car and its supply chest and ghost: the straight way
+-- is shut, the car has to find that it must go round, which the steering alone does not
+-- (it follows the wall or stops in front of it). Eight cars at different distances along
+-- the wall.
+scenarios["long-wall"] = {
+	ticks = 8000,
+	setup = function()
+		local s = new_surface({{0, 0}}, 10)
+		make(s, names.charger, 0, 0)
+		T.offsets = {-15, -8, -3, 0, 3, 8, 15, 0}
+		for index, offset in ipairs(T.offsets) do
+			local cx, cy = 100 + 100 * math.floor((index - 1) / 4), ((index - 1) % 4) * 100 - 150
+			for y = -20, 20 do
+				s.create_entity{name = "stone-wall", position = {cx + 10.5, cy + y + 0.5}, force = "player"}
+			end
+			make_car(s, cx, cy + offset, 0.25, 1)
+			fill(make(s, names.chest, cx + 20.5, cy + 0.5), {["wooden-chest"] = 20})
+			make_ghost(s, "wooden-chest", cx + 24.5, cy + 3.5)
+		end
+	end,
+	events = function(t)
+		if t == 100 then
+			for index = 1, #T.offsets do
+				local cx, cy = 100 + 100 * math.floor((index - 1) / 4), ((index - 1) % 4) * 100 - 150
+				select_ghosts(cx + 22, cy, cx + 27, cy + 7)
+			end
+		end
+	end,
+}
+
+-- Obstacle courses: each course is a car, an obstacle field between it and its supply
+-- chest, and a ghost behind the chest. The number of chests built (SUMMARY) is the
+-- number of cars that got through; BATCH lines give the tick each finished.
+-- Course i sits at x = 60, y = (i - 1) * 100 - 250, so six courses fit a scenario (see T.spread).
+local seed = 12345
+local function random()
+	seed = (seed * 1103515245 + 12345) % 2147483648
+	return seed / 2147483648
+end
+
+-- `T.spread`: two columns of three, 250 tiles apart, for courses longer than 100 tiles.
+local function course_origin(index)
+	if T.spread then
+		return 60 + 160 * ((index - 1) % 2), math.floor((index - 1) / 2) * 250 - 250
+	end
+	return 60, (index - 1) * 100 - 250
+end
+
+local function wall_at(s, x, y)
+	s.create_entity{name = "stone-wall", position = {x, y}, force = "player"}
+end
+
+-- A line of wall tiles between two points (axis aligned).
+local function wall_line(s, x1, y1, x2, y2)
+	for x = x1, x2 do
+		for y = y1, y2 do
+			wall_at(s, x + 0.5, y + 0.5)
+		end
+	end
+end
+
+-- `course`: {obstacles = function(s, cx, cy), car = {dx, dy, orientation}, chest = {dx, dy}};
+-- the ghost is by default 4 tiles east and 3 south of the chest (`ghost = {dx, dy}`).
+local function build_courses(courses, chunks)
+	local s = new_surface({{0, 0}}, chunks or 11)
+	make(s, names.charger, 0, 0)
+	T.courses = courses
+	for index, course in ipairs(courses) do
+		local cx, cy = course_origin(index)
+		course.obstacles(s, cx, cy)
+		make_car(s, cx + course.car[1], cy + course.car[2], course.car[3], 1)
+		local chest_x, chest_y = cx + course.chest[1] + 0.5, cy + course.chest[2] + 0.5
+		fill(make(s, names.chest, chest_x, chest_y), {["wooden-chest"] = 20})
+		local ghost = course.ghost or {4, 3}
+		make_ghost(s, "wooden-chest", chest_x + ghost[1], chest_y + ghost[2])
+	end
+end
+
+local function select_courses(t)
+	if t == 100 then
+		for index, course in ipairs(T.courses) do
+			local cx, cy = course_origin(index)
+			local ghost = course.ghost or {4, 3}
+			local x, y = cx + course.chest[1] + 0.5 + ghost[1], cy + course.chest[2] + 0.5 + ghost[2]
+			select_ghosts(x - 2, y - 2, x + 2, y + 2)
+		end
+	end
+end
+
+-- Trees on a jittered grid of the given spacing over a rectangle.
+local function plant(s, x1, y1, x2, y2, spacing)
+	local failed = 0
+	for x = x1, x2, spacing do
+		for y = y1, y2, spacing do
+			local tree = s.create_entity{name = "tree-01", position = {x + (random() - 0.5) * spacing * 0.6,
+				y + (random() - 0.5) * spacing * 0.6}}
+			if not tree then failed = failed + 1 end
+		end
+	end
+	if failed > 0 then out("SETUP " .. failed .. " trees not created") end
+end
+
+-- Furnaces (2x2) on a grid whose lanes between them are `lane` tiles wide.
+local function build_factory(s, x1, y1, x2, y2, lane)
+	for x = x1, x2, 2 + lane do
+		for y = y1, y2, 2 + lane do
+			s.create_entity{name = "stone-furnace", position = {x + 1, y + 1}, force = "player"}
+		end
+	end
+end
+
+-- A perfect maze of n x n cells, `pitch` tiles apart (walls on the grid lines).
+local function build_maze(s, x0, y0, n, pitch)
+	local open = {} -- open["x,yE"] / open["x,yS"]: the passage east or south of a cell
+	local seen = {["1,1"] = true}
+	local stack = {{1, 1}}
+	while #stack > 0 do
+		local cx, cy = stack[#stack][1], stack[#stack][2]
+		local options = {}
+		for _, d in ipairs{{1, 0, "E", cx, cy}, {0, 1, "S", cx, cy}, {-1, 0, "E", cx - 1, cy}, {0, -1, "S", cx, cy - 1}} do
+			local nx, ny = cx + d[1], cy + d[2]
+			if nx >= 1 and ny >= 1 and nx <= n and ny <= n and not seen[nx .. "," .. ny] then
+				table.insert(options, {nx, ny, d[3], d[4], d[5]})
+			end
+		end
+		if #options == 0 then
+			table.remove(stack)
+		else
+			local o = options[math.floor(random() * #options) + 1]
+			open[o[4] .. "," .. o[5] .. o[3]] = true
+			seen[o[1] .. "," .. o[2]] = true
+			table.insert(stack, {o[1], o[2]})
+		end
+	end
+	local size = n * pitch
+	wall_line(s, x0, y0, x0 + size, y0)
+	wall_line(s, x0, y0 + size, x0 + size, y0 + size)
+	wall_line(s, x0, y0, x0, y0 + size)
+	wall_line(s, x0 + size, y0, x0 + size, y0 + size)
+	for cx = 1, n do
+		for cy = 1, n do
+			if cx < n and not open[cx .. "," .. cy .. "E"] then
+				wall_line(s, x0 + cx * pitch, y0 + (cy - 1) * pitch, x0 + cx * pitch, y0 + cy * pitch)
+			end
+			if cy < n and not open[cx .. "," .. cy .. "S"] then
+				wall_line(s, x0 + (cx - 1) * pitch, y0 + cy * pitch, x0 + cx * pitch, y0 + cy * pitch)
+			end
+		end
+	end
+end
+
+-- Trees between the car and its chest, 60 tiles of forest to cross; three cars start
+-- before it, three inside it. Three densities.
+scenarios["forest"] = {
+	ticks = 9000,
+	setup = function()
+		local function forest(spacing, inside)
+			return {
+				obstacles = function(s, cx, cy)
+					plant(s, cx + 10, cy - 20, cx + 70, cy + 20, spacing)
+					if inside then -- room for the car where it starts
+						for _, tree in pairs(s.find_entities_filtered{type = "tree", position = {cx + 35, cy}, radius = 3}) do
+							tree.destroy()
+						end
+					end
+				end,
+				car = {inside and 35 or 0, 0, 0}, chest = {90, 0},
+			}
+		end
+		build_courses{forest(3, false), forest(3, true), forest(2, false), forest(2, true), forest(1.5, false), forest(1.5, true)}
+	end,
+	events = select_courses,
+}
+
+-- A field of furnaces with lanes between them to cross, from outside and from inside.
+scenarios["factory"] = {
+	ticks = 9000,
+	setup = function()
+		local function factory(lane, inside)
+			-- Inside, the car starts in the lane crossing of the fourth column and row.
+			local x, y = 12 + 3 * (2 + lane) + lane / 2, -18 + 3 * (2 + lane) + lane / 2
+			return {
+				obstacles = function(s, cx, cy) build_factory(s, cx + 10, cy - 20, cx + 70, cy + 20, lane) end,
+				car = {inside and x or 0, inside and y or 0, 0}, chest = {90, 0},
+			}
+		end
+		build_courses{factory(4, false), factory(4, true), factory(3, false), factory(3, true), factory(6, false), factory(6, true)}
+	end,
+	events = select_courses,
+}
+
+-- A wall 200 tiles long with no gate across the road: the car has to go round, a hundred
+-- tiles one way or the other. Cars start facing it, along it, and away from it.
+scenarios["huge-wall"] = {
+	ticks = 14000,
+	setup = function()
+		T.spread = true
+		local function huge(orientation)
+			return {
+				obstacles = function(s, cx, cy) wall_line(s, cx + 30, cy - 100, cx + 30, cy + 100) end,
+				car = {0, 0, orientation}, chest = {60, 0},
+			}
+		end
+		build_courses({huge(0.25), huge(0.5), huge(0.75), huge(0), huge(0.125), huge(0.375)}, 14)
+	end,
+	events = select_courses,
+}
+
+-- A wall with turrets (2x2) built along its near side: the car cannot slip along the wall,
+-- and has to go round the whole row.
+scenarios["wall-turrets"] = {
+	ticks = 12000,
+	setup = function()
+		local function turrets(length, orientation)
+			return {
+				obstacles = function(s, cx, cy)
+					wall_line(s, cx + 30, cy - length, cx + 30, cy + length)
+					for y = -length, length - 2, 3 do
+						s.create_entity{name = "gun-turret", position = {cx + 28, cy + y + 1}, force = "player"}
+					end
+				end,
+				car = {0, 0, orientation}, chest = {60, 0},
+			}
+		end
+		build_courses({turrets(30, 0.25), turrets(30, 0.5), turrets(60, 0.25), turrets(60, 0.75), turrets(15, 0.25), turrets(15, 0)}, 12)
+	end,
+	events = select_courses,
+}
+
+-- An L-shaped corridor, 60 and 40 tiles long, with the supply chest at its end: 4, 6 and 8
+-- tiles wide, two cars each (starting inside the first leg, turned differently).
+scenarios["l-corridor"] = {
+	ticks = 9000,
+	setup = function()
+		local function corridor(width, orientation)
+			local w = width
+			return {
+				obstacles = function(s, cx, cy)
+					wall_line(s, cx - 2, cy - 3, cx + 60 + w, cy - 3)
+					wall_line(s, cx - 2, cy - 3 + w, cx + 60, cy - 3 + w)
+					wall_line(s, cx - 2, cy - 3, cx - 2, cy - 3 + w)
+					wall_line(s, cx + 60 + w, cy - 3, cx + 60 + w, cy + 45)
+					wall_line(s, cx + 60, cy - 3 + w, cx + 60, cy + 41)
+					wall_line(s, cx + 60, cy + 41, cx + 60 + w, cy + 41)
+				end,
+				car = {2, -3 + w / 2, orientation}, chest = {60 + w / 2 - 1, 34}, ghost = {0, 3},
+			}
+		end
+		build_courses{corridor(4, 0.25), corridor(4, 0.625), corridor(6, 0.25), corridor(6, 0.625), corridor(8, 0.25), corridor(8, 0.625)}
+	end,
+	events = select_courses,
+}
+
+-- Walls thrown at random over a field 60 tiles long: three densities, two cars each.
+scenarios["scatter"] = {
+	ticks = 9000,
+	setup = function()
+		local function scatter(count, orientation)
+			return {
+				obstacles = function(s, cx, cy)
+					for _ = 1, count do
+						local x, y = math.floor(cx + 8 + random() * 62), math.floor(cy - 25 + random() * 50)
+						wall_line(s, x, y, x + math.floor(random() * 4), y + math.floor(random() * 4))
+					end
+				end,
+				car = {0, 0, orientation}, chest = {90, 0},
+			}
+		end
+		build_courses{scatter(40, 0), scatter(40, 0.5), scatter(100, 0), scatter(100, 0.5), scatter(200, 0), scatter(200, 0.5)}
+	end,
+	events = select_courses,
+}
+
+-- Mazes, corridors 7 tiles wide: the maneuver has no chance of finding the way, only the
+-- pathfinder can. The car starts in the top left cell, chest and ghost are in the bottom
+-- right one. Sizes 3, 5 and 7 cells, two mazes each.
+scenarios["maze"] = {
+	ticks = 14000,
+	setup = function()
+		local function maze(n)
+			local pitch = 8
+			return {
+				obstacles = function(s, cx, cy) build_maze(s, cx, cy, n, pitch) end,
+				car = {pitch / 2, pitch / 2, 0.25}, chest = {(n - 1) * pitch + 2, (n - 1) * pitch + 2},
+			}
+		end
+		build_courses{maze(3), maze(3), maze(5), maze(5), maze(7), maze(7)}
+	end,
+	events = select_courses,
 }
 
 -- A car with a completely empty battery: it does nothing and alerts the player

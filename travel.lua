@@ -64,6 +64,7 @@ function travel.cancel_trip(car_data)
 	car_data.parking.garage = nil
 	car_data.building.active = false
 	car_data.maneuver.active = false
+	car_data.path = {active = false, pending = false, tried = false}
 	car_data.stuck.active = false
 	car_data.stuck.destination = nil
 	car_data.moving.active = false
@@ -90,17 +91,15 @@ function travel.begin_leg(car, destination, next_task)
 	car_data.stuck.destination = nil
 	moving.active = true
 	moving.destination = destination
-	-- Reference points of the stuck detection (see travel.find_stuck_reason).
+	-- Reference points of the stuck detection (see travel.is_leg_too_long).
 	moving.departure_tick = game.tick
 	moving.departure_distance = util.distance(car.position, destination.position)
-	moving.last_check_position = car.position
-	moving.last_check_tick = game.tick
 
 	-- A new leg starts without a maneuver, and a car that stands still at
 	-- departure is not blocked (see movement.drive_tick).
 	car_data.maneuver.active = false
-	car_data.maneuver.attempts = 0
 	car_data.maneuver.ended_tick = game.tick
+	car_data.path = {active = false, pending = false, tried = false} -- one path per leg, see movement.lua
 	car_data.slowing = false
 
 	-- stuck_retry_count is not reset here: a retry is a new leg too. It is reset on arrival.
@@ -309,44 +308,21 @@ end
 -- Stuck
 -- ============================================================
 
--- Why the current leg no longer makes real progress, or nil if it does:
---   "timeout"      it has lasted much longer than its length justifies: stuck
---   "no_progress"  the car barely moved over the last config.medium_delay: it
---                  needs a maneuver (see movement.start_maneuver)
--- The progress window is suspended during a maneuver, where the car moves little
--- on purpose, and within arrival distance, where it is about to stop; it starts
--- again afterwards. The car must be on a leg (see update_car in control.lua).
-function travel.find_stuck_reason(car, tick)
-	local car_data = storage.car_data[car.unit_number]
-	local moving = car_data.moving
-
+-- True when the current leg has lasted much longer than its length justifies
+-- (see config.stuck_min_speed): the car is stuck. A leg that lasts too long first
+-- gets its path (see update_car in control.lua). The car must be on a leg.
+function travel.is_leg_too_long(car, tick)
+	local moving = storage.car_data[car.unit_number].moving
 	local max_duration = moving.departure_distance / config.stuck_min_speed + config.long_delay
-	if tick - moving.departure_tick > max_duration then
-		return "timeout"
-	end
-
-	-- No progress is expected while maneuvering, or within arrival distance of the destination.
-	if car_data.maneuver.active or util.distance(car.position, moving.destination.position) < config.arrival_distance then
-		moving.last_check_position = car.position
-		moving.last_check_tick = tick
-	elseif tick - moving.last_check_tick >= config.medium_delay then
-		if util.distance(car.position, moving.last_check_position) < config.stuck_min_progress then
-			return "no_progress"
-		end
-		moving.last_check_position = car.position
-		moving.last_check_tick = tick
-	end
-
-	return nil
+	return tick - moving.departure_tick > max_duration
 end
 
 -- Stops a stuck car and alerts the player. The car waits for the player to free
 -- it, then tries its leg again (see travel.stuck_tick). It tries again only
 -- while it has retries left and fuel for the leg: otherwise it waits longer, then
 -- abandons its task. A leg to a charger is always retried: the car has nothing
--- better to do. `hopeless`: the car found no way out in either direction, which
--- no retry will change: it only waits before abandoning.
-function travel.start_stuck(car, tick, hopeless)
+-- better to do.
+function travel.start_stuck(car, tick)
 	local car_data = storage.car_data[car.unit_number]
 	local moving = car_data.moving
 	local stuck = car_data.stuck
@@ -356,8 +332,8 @@ function travel.start_stuck(car, tick, hopeless)
 	-- it like any other leg. See "À faire" in CLAUDE.md.
 	local to_charger = is_heading_to_charger(car_data)
 	car_data.stuck_retry_count = car_data.stuck_retry_count + 1
-	local can_retry = not hopeless and (to_charger or (car_data.stuck_retry_count <= config.max_stuck_retries
-		and _utils.get_fuel(car) >= charger_control.compute_fuel_to_reach(car, moving.destination.position)))
+	local can_retry = to_charger or (car_data.stuck_retry_count <= config.max_stuck_retries
+		and _utils.get_fuel(car) >= charger_control.compute_fuel_to_reach(car, moving.destination.position))
 
 	if can_retry then
 		_utils.alert_once(car_data.alerts, "stuck", car.force, car,

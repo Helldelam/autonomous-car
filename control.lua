@@ -54,8 +54,7 @@ local function create_car_data(tick)
 		moving = {
 			active = false,
 			destination = nil, -- entity, or waypoint table with `position` and `valid`
-			departure_tick = nil, departure_distance = nil, -- stuck detection, see travel.find_stuck_reason
-			last_check_position = nil, last_check_tick = nil,
+			departure_tick = nil, departure_distance = nil, -- stuck detection, see travel.is_leg_too_long
 		},
 		charging = {active = false, charger = nil},
 		parking = {active = false, garage = nil},
@@ -67,8 +66,8 @@ local function create_car_data(tick)
 
 		-- Driving flags, set by movement.lua. travel.lua only cancels a maneuver
 		-- (new leg, stuck, empty battery) and resets its counters when a leg begins.
-		-- Maneuver mode, a sub-mode of moving. `reason`: rear_turn, blocked or no_progress.
-		-- `arcs` counts the arcs of the current maneuver, `attempts` the failed maneuvers in a row,
+		-- Maneuver mode, a sub-mode of moving.
+		-- `arcs` counts the arcs of the current maneuver,
 		-- and `ended_tick` is when the last one ended (or the leg began). `heading` is the orientation
 		-- the maneuver turns toward, `last_arc` the arc it drove last (the opposite one is forbidden),
 		-- `stall_since` the tick the car stopped moving while driving, `back_off_until` the end of a back-off,
@@ -76,10 +75,13 @@ local function create_car_data(tick)
 			-- orientation) it stalled straight, per direction (see movement.back_off).
 		maneuver = {
 			active = false, reason = nil, since = nil, arc_since = nil, arcs = 0,
-			reverse = false, turn = 0, origin = nil, attempts = 0, ended_tick = tick,
+			reverse = false, turn = 0, origin = nil, ended_tick = tick,
 			heading = nil, heading_since = nil, last_arc = nil, stall_since = nil, back_off_until = nil, back_off_from = nil,
 			follow = nil, follow_orientation = nil, blocked = {},
 		},
+		-- Path from the game's pathfinder, a last resort for a car whose maneuvers failed (see movement.lua).
+		-- `tried`: the leg has had its one request; `pending`: waiting for the answer; `active`: following `waypoints`.
+		path = {active = false, pending = false, tried = false, waypoints = nil, index = 1, request = nil},
 		emergency_brake = {active = false, since = nil},
 		high_speed = false,
 		entry_speed = nil, -- speed of the car when it entered high speed
@@ -233,21 +235,21 @@ local function update_car(car, car_data, tick)
 			-- start a maneuver: keep this order.
 			movement.update_mode(car, tick)
 			if car_data.maneuver.active then
-				local failed, hopeless = movement.maneuver_tick(car, tick)
-				if failed then
-					travel.start_stuck(car, tick, hopeless) -- the last maneuver failed
+				if movement.maneuver_tick(car, tick) then
+					travel.start_stuck(car, tick) -- the last maneuver failed
 				end
 			else
 				movement.drive_tick(car, tick)
 			end
 
-			-- Drive may have ended the leg (arrival): only a leg under way is checked.
-			if car_data.moving.active then
-				local reason = travel.find_stuck_reason(car, tick)
-				if reason == "timeout" then
-					travel.start_stuck(car, tick)
-				elseif reason == "no_progress" then
-					movement.start_maneuver(car, tick, reason)
+			-- Drive may have ended the leg (arrival): only a leg under way is checked,
+			-- and not while the car waits for its path.
+			if car_data.moving.active and not car_data.path.pending then
+				if travel.is_leg_too_long(car, tick) then
+					-- A leg that lasts too long gets its path, as a last resort, before it is stuck.
+					if not movement.request_path(car, tick) then
+						travel.start_stuck(car, tick)
+					end
 				end
 			end
 		else
@@ -306,6 +308,7 @@ local function init_storage(event)
 	storage.ghosts = storage.ghosts or {} -- selected ghosts outside any robot network, assigned or not
 	storage.ghost_to_car = storage.ghost_to_car or {} -- [ghost unit_number] = unit_number of its car
 	storage.pending_clusters = storage.pending_clusters or {} -- clusters waiting for a free car
+	storage.path_requests = storage.path_requests or {} -- [request id] = unit_number of the car waiting for that path
 
 	script.on_event(defines.events.on_tick, on_tick)
 	on_tick(event)
@@ -379,4 +382,5 @@ script.on_event(defines.events.on_lua_shortcut, function(event)
 	end
 end)
 script.on_event(defines.events.on_gui_click, gui.on_click)
+script.on_event(defines.events.on_script_path_request_finished, movement.on_path_finished)
 script.on_event(defines.events.on_tick, init_storage)

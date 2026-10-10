@@ -100,16 +100,12 @@ config.friction_emergency_factor = 100 -- emergency braking, on top of the mode 
 -- ============================================================
 -- Maneuver mode (see movement.maneuver_tick)
 -- ============================================================
--- Slow driving, forwards or backwards, to get out of a dense area or to turn
--- (almost) on the spot before setting off. It does not head for the destination:
--- it picks a heading (the direction of the destination for a car that must turn
--- around, otherwise the roomiest and least dense direction around the car), then
--- drives one of six arcs (forward or backward, each straight, left or right) at
--- a time to turn toward it. A maneuver lasts at most idle_delay.
+-- Slow driving, forwards or backwards, to get out of a dense area or away from an
+-- obstacle. It does not head for the destination: it picks a heading (the
+-- roomiest and least dense direction around the car), then drives one of six
+-- arcs (forward or backward, each straight, left or right) at a time to turn
+-- toward it. A maneuver lasts at most idle_delay.
 
-config.rear_turn_min_angle = 0.33 -- a target further than this off the heading is behind the car, which starts a maneuver to turn around
-config.rear_turn_max_speed = 0.2 -- that maneuver only starts below this speed
-config.max_maneuver_attempts = 3 -- maneuvers that ran out of time in a row before the car is declared stuck
 config.maneuver_arc_duration = 6 -- the car follows one arc this long before the room around it is measured again
 
 -- Free room is measured with probes the size of the car, placed along a heading
@@ -122,8 +118,7 @@ config.maneuver_probe = {
 }
 config.maneuver_exit_density = 0.08 -- a maneuver cannot end while the density around the car is above this:
 	-- with the default radius, that is the car and one other entity at most (see "Obstacle density")
-config.maneuver_exit_angle = 0.2 -- a maneuver started because the target was behind the car ends once it is this close to the heading
-config.maneuver_min_travel = 2 -- a maneuver started by an obstacle or a lack of progress ends only once the car has moved this far
+config.maneuver_min_travel = 2 -- a maneuver ends only once the car has moved this far
 
 -- ============================================================
 -- Precision mode (work in progress)
@@ -150,17 +145,16 @@ config.short_delay = 60 -- (1s)
 	-- control.lua: period at which an open window of missing items is refreshed (gui.refresh_all)
 config.medium_delay = 180 -- (3s)
 	-- ghost_control.attempt_one_ghost: cooldown of a ghost that failed to revive
-	-- travel.find_stuck_reason: window over which progress is measured
 config.idle_delay = 300 -- (5s) long on purpose during development, so idle waits are easy to see; lower to 60-120 before release
+	-- movement.maneuver_tick: longest a maneuver may last, its single try; past it the car asks for a path (movement.request_path), then is stuck
 	-- control.lua: wait before an idle car looks for a new task or a garage
 	-- ghost_control.go_idle, travel.handle_empty: a wait set as already elapsed, so that the car decides on the next tick
-	-- movement.maneuver_tick: longest a single maneuver may last; past it the maneuver counts as failed
 config.long_delay = 600 -- (10s)
 	-- ghost_control.proceed: a batch waits this long for missing items before the clusters lacking them go back to the pending pool
 	-- control.lua: period at which parked cars are repaired (garage_control.repair_parked_cars)
 	-- control.lua: period of the fallback scan of pending clusters
 	-- travel.stuck_tick: wait before a stuck car tries its leg again
-	-- travel.find_stuck_reason: margin added to the expected duration of a leg
+	-- travel.is_leg_too_long: margin added to the expected duration of a leg
 
 -- Measurements that need not happen every tick (the cars nearby, the closest
 -- charger) are repeated this often, offset per car. Raise it if the mod slows
@@ -199,11 +193,10 @@ config.pre_park_fuel_ratio = 0.9 -- an idle car below this fraction tops up befo
 config.max_charger_users = 4 -- cars that can use the same charger at once
 
 -- ============================================================
--- Stuck detection (see travel.find_stuck_reason)
+-- Stuck detection (see travel.is_leg_too_long)
 -- ============================================================
 
 config.stuck_min_speed = 0.1 -- lowest average speed expected over a leg; bounds how long the leg may last
-config.stuck_min_progress = 1 -- least distance a car must cover over one medium_delay; below it the car starts a maneuver
 config.max_stuck_retries = 3 -- times a car retries a stuck leg before it abandons its task (a leg to a charger is retried without limit)
 
 -- ============================================================
