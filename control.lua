@@ -137,7 +137,7 @@ local function on_removed(event)
 	end
 end
 
--- Only ghosts and entities marked for deconstruction are registered for this
+-- Only ghosts and entities marked for deconstruction or upgrade are registered for this
 -- event (see ghost_control.register_ghost); one without a unit_number is found by its registration number.
 local function on_object_destroyed(event)
 	local id = storage.target_by_registration[event.registration_number]
@@ -146,7 +146,7 @@ local function on_object_destroyed(event)
 end
 
 -- The player dragged the ghost selector over an area: tracks the selected
--- ghosts and entities marked for deconstruction, splits them into clusters, and gives each cluster to a car or queues it.
+-- ghosts and entities marked for deconstruction or upgrade, splits them into clusters, and gives each cluster to a car or queues it.
 local function on_area_selected(event)
 	if event.item ~= names.ghost_selector then
 		return
@@ -164,7 +164,7 @@ local function on_area_selected(event)
 
 	if #selected == 0 then
 		if player then
-			player.print("No new ghost or entity marked for deconstruction outside the robot network found in the selection.")
+			player.print("No new ghost or entity marked for deconstruction or upgrade outside the robot network found in the selection.")
 		end
 		return
 	end
@@ -315,7 +315,7 @@ local function init_storage(event)
 	storage.garages = storage.garages or {}
 	storage.garage_data = storage.garage_data or {}
 	storage.supply_chests = storage.supply_chests or {}
-	storage.ghosts = storage.ghosts or {} -- selected ghosts and entities marked for deconstruction outside any robot network, assigned or not
+	storage.ghosts = storage.ghosts or {} -- selected ghosts and entities marked for deconstruction or upgrade outside any robot network, assigned or not
 	storage.target_by_registration = storage.target_by_registration or {} -- [registration number] = id of a tracked entity without unit_number
 	storage.ghost_to_car = storage.ghost_to_car or {} -- [ghost unit_number] = unit_number of its car
 	storage.pending_clusters = storage.pending_clusters or {} -- clusters waiting for a free car

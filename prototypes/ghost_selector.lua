@@ -21,12 +21,12 @@ data:extend{
 		select = {
 			border_color = {r = 0, g = 0.6, b = 1},
 			cursor_box_type = "entity",
-			mode = {"entity-ghost", "deconstruct"},
+			mode = {"entity-ghost", "deconstruct", "upgrade"},
 		},
 		alt_select = {
 			border_color = {r = 1, g = 0.2, b = 0.2},
 			cursor_box_type = "entity",
-			mode = {"entity-ghost", "deconstruct"},
+			mode = {"entity-ghost", "deconstruct", "upgrade"},
 		},
 	},
 	{

@@ -1197,6 +1197,97 @@ scenarios["deconstruct"] = {
 	end,
 }
 
+-- Marks an entity for upgrade to `target`, after filling its first inventory (or,
+-- for a machine, its module slots) with `items`.
+local function mark_upgrade(surface, name, target, x, y, items, modules)
+	local entity = surface.create_entity{name = name, position = {x, y}, force = "player"}
+	if not entity then
+		out("SETUP could not create " .. name .. " at " .. x .. "," .. y)
+		return nil
+	end
+	if items then
+		entity.get_inventory(defines.inventory.chest).insert(items)
+	end
+	if modules then
+		entity.get_module_inventory().insert(modules)
+	end
+	local ordered = entity.order_upgrade{force = "player", target = target}
+	out("SETUP " .. name .. " -> " .. target .. " ordered=" .. tostring(ordered) .. " marked=" .. tostring(entity.to_be_upgraded()))
+	table.insert(T.marked, entity)
+	return entity
+end
+
+-- Total of an item in every player entity of the surface (chests, machines, cars).
+local function count_item_everywhere(item_name)
+	local total = 0
+	for _, entity in pairs(T.surface.find_entities_filtered{force = "player"}) do
+		for index = 1, entity.get_max_inventory_index() do
+			local inventory = entity.get_inventory(index)
+			if inventory then
+				total = total + inventory.get_item_count(item_name)
+			end
+		end
+	end
+	return total
+end
+
+local function report_upgrade(label)
+	local replaced = 0
+	for _, entity in pairs(T.marked) do
+		if not entity.valid then
+			replaced = replaced + 1
+		end
+	end
+	local function count(name)
+		return #T.surface.find_entities_filtered{name = name, force = "player"}
+	end
+	local modules_in_machines = 0
+	for _, machine in pairs(T.surface.find_entities_filtered{name = "assembling-machine-2"}) do
+		modules_in_machines = modules_in_machines + machine.get_module_inventory().get_item_count("speed-module-3")
+	end
+	out("EVENT " .. label .. ": " .. replaced .. "/" .. #T.marked .. " replaced; iron-chest=" .. count("iron-chest")
+		.. " wooden-chest=" .. count("wooden-chest") .. " steel-chest=" .. count("steel-chest")
+		.. " assembling-machine-2=" .. count("assembling-machine-2") .. " assembling-machine-3=" .. count("assembling-machine-3")
+		.. "; iron-plate in the world=" .. count_item_everywhere("iron-plate") .. " (3720 at the start)"
+		.. ", speed-module-3 in the world=" .. count_item_everywhere("speed-module-3") .. " (8 at the start), in the machines=" .. modules_in_machines)
+end
+
+-- Entities marked for upgrade, far from any robot network: wooden chests to iron
+-- chests, a full steel chest to a smaller iron chest (the overflow must end in the
+-- trunk, then in the supply chest), assembling machines 3 holding four speed
+-- modules to machines 2 (two slots). Nothing may be lost: the plates and modules
+-- of the world are counted at the end.
+scenarios["upgrade"] = {
+	ticks = 9000,
+	category = "construction",
+	setup = function()
+		T.marked = {}
+		local s = new_surface({{0, 0}}, 6)
+		make(s, names.charger, 0, 0)
+		make(s, names.garage, 20, -10)
+		T.chest = make(s, names.chest, 0.5, 30.5)
+		fill(T.chest, {["iron-chest"] = 10, ["assembling-machine-2"] = 5})
+		T.cars = {make_car(s, 10, 10, 0.1)}
+		for i = 0, 3 do
+			mark_upgrade(s, "wooden-chest", "iron-chest", 60.5 + 2 * i, 60.5, {name = "iron-plate", count = 30})
+		end
+		mark_upgrade(s, "steel-chest", "iron-chest", 60.5, 70.5, {name = "iron-plate", count = 3600})
+		for i = 0, 1 do
+			mark_upgrade(s, "assembling-machine-3", "assembling-machine-2", 61.5 + 4 * i, 80.5, nil, {name = "speed-module-3", count = 4})
+		end
+		out("EVENT start: plates=" .. count_item_everywhere("iron-plate") .. " modules=" .. count_item_everywhere("speed-module-3"))
+	end,
+	events = function(t)
+		if t == 200 then
+			select_all(50, 50, 100, 100)
+		end
+		watch_batches()
+		if t == 8500 then
+			report_upgrade("end")
+		end
+	end,
+}
+
 -- Builds the world of the mixed scenarios: ghosts to build and entities to mine,
 -- `overlap` or not. Apart: wooden chests on the east side, marked trees on the
 -- west side, 120 tiles from each other. Overlapping: stone furnace ghosts on
