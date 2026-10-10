@@ -289,8 +289,9 @@ end
 
 -- Finds a car for a cluster: the closest waiting car without a batch and with
 -- an empty trunk (one still carrying leftovers first unloads them, see
--- end_wait in control.lua), otherwise a car released from the closest garage
--- that holds one. Returns nil if there is none, or if the cluster has no valid
+-- end_wait in control.lua) and whose fuel is not critical (a car stopped for
+-- lack of a charger would keep the batch without being able to move), otherwise
+-- a car released from the closest garage that holds one. Returns nil if there is none, or if the cluster has no valid
 -- ghost left.
 function ghost_control.find_available_car(cluster)
 	local centroid = ghost_control.compute_centroid(cluster.ghosts)
@@ -303,6 +304,7 @@ function ghost_control.find_available_car(cluster)
 		local car_data = storage.car_data[id]
 		return car_data.waiting.active and not car_data.construction
 			and car.get_inventory(defines.inventory.car_trunk).is_empty()
+			and not travel.is_fuel_critical(car)
 	end, nil, surface)
 	if car then
 		return car
@@ -320,7 +322,8 @@ end
 -- true if the car got one.
 function ghost_control.try_assign_pending(car)
 	if storage.car_data[car.unit_number].construction
-		or not car.get_inventory(defines.inventory.car_trunk).is_empty() then
+		or not car.get_inventory(defines.inventory.car_trunk).is_empty()
+		or travel.is_fuel_critical(car) then
 		return false
 	end
 

@@ -79,10 +79,11 @@ end
 -- ============================================================
 
 -- True on the ticks when a car does its slow measurements (nearby cars, closest
--- charger): every config.slow_check_interval ticks, offset by the id of the car
--- so that the cars do not all measure on the same tick.
-function _utils.is_slow_check_due(car, tick)
-	return (tick + car.unit_number) % config.slow_check_interval == 0
+-- charger): every config.slow_check_interval ticks (or every `interval`, for a
+-- measure that can wait longer), offset by the id of the car so that the cars do
+-- not all measure on the same tick.
+function _utils.is_slow_check_due(car, tick, interval)
+	return (tick + car.unit_number) % (interval or config.slow_check_interval) == 0
 end
 
 -- ============================================================

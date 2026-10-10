@@ -242,13 +242,32 @@ end
 
 -- Fuel below which a car drops everything to recharge: what it takes to reach
 -- the closest charger from where it is, plus the critical level
--- (config.critical_fuel_ratio). Measured every config.slow_check_interval
--- ticks and kept in car_data.
-local function get_critical_fuel(car, car_data, tick)
-	if not car_data.critical_fuel or _utils.is_slow_check_due(car, tick) then
-		car_data.critical_fuel = charger_control.compute_fuel_reserve(car, car.position)
+-- (config.critical_fuel_ratio). Not measured at all above
+-- config.critical_check_fuel_ratio of a full tank. Below it, measured every
+-- config.slow_check_interval ticks, or every config.short_delay while the tank
+-- holds more than twice the last level measured, and kept in car_data.
+-- Returns whether the fuel of the car is below it.
+local function measure_critical_fuel(car, car_data, tick)
+	local fuel = _utils.get_fuel(car)
+	if fuel >= config.critical_check_fuel_ratio * _utils.get_fuel_capacity(car) then
+		return false
 	end
-	return car_data.critical_fuel
+	local reserve = car_data.critical_fuel
+	local interval = (reserve and fuel > 2 * reserve) and config.short_delay or config.slow_check_interval
+	if not reserve or _utils.is_slow_check_due(car, tick, interval) then
+		reserve = charger_control.compute_fuel_reserve(car, car.position)
+		car_data.critical_fuel = reserve
+	end
+	return fuel < reserve
+end
+
+-- Whether the fuel of a car is below its critical level, by the last measure
+-- (see measure_critical_fuel): a car that is, and has no charger to go to, must
+-- not be given a batch.
+function travel.is_fuel_critical(car)
+	local reserve = storage.car_data[car.unit_number].critical_fuel
+	local fuel = _utils.get_fuel(car)
+	return fuel < config.critical_check_fuel_ratio * _utils.get_fuel_capacity(car) and reserve ~= nil and fuel < reserve
 end
 
 -- Runs for every car, every tick, right after travel.handle_empty. Below the
@@ -261,7 +280,7 @@ function travel.handle_critical_fuel(car, tick)
 		return false
 	end
 
-	if _utils.get_fuel(car) >= get_critical_fuel(car, car_data, tick) then
+	if not measure_critical_fuel(car, car_data, tick) then
 		return false
 	end
 
@@ -282,7 +301,7 @@ function travel.handle_critical_fuel(car, tick)
 		travel.stop_car(car)
 		-- The car must keep an active state: its fuel can stop being critical
 		-- without a charge (a charger built closer lowers the level, see
-		-- get_critical_fuel), and the waiting loop then decides what it does.
+		-- measure_critical_fuel), and the waiting loop then decides what it does.
 		_utils.start_waiting(car_data)
 	end
 	return true
