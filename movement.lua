@@ -426,7 +426,7 @@ end
 
 -- The six arcs of a maneuver: forward or backward, steering left (-1),
 -- straight (0) or right (1). The car follows one arc for
--- config.maneuver_arc_duration, then picks the next.
+-- config.short_delay, then picks the next.
 local ARCS = {
 	{reverse = false, turn = 0}, {reverse = false, turn = -1}, {reverse = false, turn = 1},
 	{reverse = true, turn = 0}, {reverse = true, turn = -1}, {reverse = true, turn = 1},
@@ -819,7 +819,7 @@ end
 
 -- Drives a car that is in a maneuver, at the slow speed that update_mode's
 -- friction gives. It first picks a heading (see choose_heading) and keeps it
--- for config.short_delay; every config.maneuver_arc_duration it checks whether
+-- for config.short_delay; every config.short_delay it checks whether
 -- the maneuver is done, then picks the arc that brings the car closer to that
 -- heading (see choose_arc), forwards or backwards. The steering is only ever
 -- set through riding_state, never the orientation. It does not aim for the
@@ -890,7 +890,7 @@ function movement.maneuver_tick(car, tick)
 		else
 			maneuver.stall_since = nil
 		end
-		if tick - maneuver.arc_since < config.maneuver_arc_duration then
+		if tick - maneuver.arc_since < config.short_delay then
 			return false -- the arc goes on
 		end
 	end

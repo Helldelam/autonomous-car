@@ -106,7 +106,6 @@ config.friction_emergency_factor = 100 -- emergency braking, on top of the mode 
 -- arcs (forward or backward, each straight, left or right) at a time to turn
 -- toward it. A maneuver lasts at most idle_delay.
 
-config.maneuver_arc_duration = 6 -- the car follows one arc this long before the room around it is measured again
 
 -- Free room is measured with probes the size of the car, placed along a heading
 -- half a car length apart (see config.car_size): they overlap, so even a thin
@@ -137,11 +136,11 @@ config.precision_lookahead_length = 2 -- replaces lookahead_length
 -- delays, grouped by time scale. Reuse the closest one instead of adding a
 -- constant, and list the new usage here.
 
-config.short_delay = 60 -- (1s)
+config.short_delay = 30 -- (0.5s)
 	-- travel.handle_critical_fuel: pause between two charger searches when none is reachable
 	-- movement.update_mode: cooldown before emergency braking can trigger again after a stop
 	-- movement.drive_tick: a car that stands still this long after a leg began or a maneuver ended has hit an obstacle
-	-- movement.maneuver_tick: a car that drives but does not move this long backs off; the heading is looked for again this often
+	-- movement.maneuver_tick: a car that drives but does not move this long backs off; the car follows one arc this long, and the heading is looked for again this often
 	-- control.lua: period at which an open window of missing items is refreshed (gui.refresh_all)
 config.medium_delay = 180 -- (3s)
 	-- ghost_control.attempt_one_ghost: cooldown of a ghost that failed to revive

@@ -807,6 +807,68 @@ scenarios["forest"] = {
 	events = select_courses,
 }
 
+-- Cars that have just driven into the edge of a forest: a few tiles in, boxed in by trees
+-- on all sides but a small clearing. Three go on across the forest (facing in, or
+-- turned away), three have their supply chest behind them, outside.
+scenarios["forest-edge"] = {
+	ticks = 9000,
+	setup = function()
+		local function edge(spacing, depth, orientation, behind)
+			return {
+				obstacles = function(s, cx, cy)
+					plant(s, cx + 10, cy - 20, cx + 70, cy + 20, spacing)
+					for _, tree in pairs(s.find_entities_filtered{type = "tree", position = {cx + 10 + depth, cy}, radius = 2.4}) do
+						tree.destroy()
+					end
+				end,
+				car = {10 + depth, 0, orientation}, chest = {behind and -30 or 90, 0},
+			}
+		end
+		build_courses{edge(3, 2, 0.25, false), edge(2, 2, 0.25, false), edge(1.5, 2, 0.25, false),
+			edge(2, 2, 0.25, true), edge(1.5, 5, 0.25, false), edge(1.5, 2, 0.75, true)}
+	end,
+	events = select_courses,
+}
+
+-- The same deeper in the forest (4 to 12 tiles) and at more realistic densities, facing
+-- the forest, sideways to it, or turned away.
+scenarios["forest-depth"] = {
+	ticks = 9000,
+	setup = function()
+		local function edge(spacing, depth, orientation, behind)
+			return {
+				obstacles = function(s, cx, cy)
+					plant(s, cx + 10, cy - 20, cx + 70, cy + 20, spacing)
+					for _, tree in pairs(s.find_entities_filtered{type = "tree", position = {cx + 10 + depth, cy}, radius = 2.4}) do
+						tree.destroy()
+					end
+				end,
+				car = {10 + depth, 0, orientation}, chest = {behind and -30 or 90, 0},
+			}
+		end
+		build_courses{edge(2, 4, 0, false), edge(2, 8, 0.25, false), edge(2, 8, 0.75, true),
+			edge(2.5, 8, 0.25, false), edge(3, 12, 0.25, false), edge(2, 12, 0.75, true)}
+	end,
+	events = select_courses,
+}
+
+-- A copse of 30 x 30 tiles on the straight way between the car and its chest, with open
+-- ground all around: the car should go round it rather than into it. Three densities,
+-- facing the copse or turned away.
+scenarios["copse"] = {
+	ticks = 9000,
+	setup = function()
+		local function copse(spacing, orientation)
+			return {
+				obstacles = function(s, cx, cy) plant(s, cx + 30, cy - 15, cx + 60, cy + 15, spacing) end,
+				car = {0, 0, orientation}, chest = {90, 0},
+			}
+		end
+		build_courses{copse(3, 0.25), copse(3, 0.75), copse(2, 0.25), copse(2, 0.75), copse(1.5, 0.25), copse(1.5, 0.75)}
+	end,
+	events = select_courses,
+}
+
 -- A field of furnaces with lanes between them to cross, from outside and from inside.
 scenarios["factory"] = {
 	ticks = 9000,
