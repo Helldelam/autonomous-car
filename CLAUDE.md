@@ -210,5 +210,5 @@ Idées et tâches retenues par le propriétaire, pas encore commencées. Chacune
 
 ### Corrigés, à valider
 
-- **Batch donné à une voiture en panne de charge** (ancien problème 12). `find_available_car` et `try_assign_pending` écartent une voiture dont la charge est sous son seuil critique (`travel.is_fuel_critical`). Scénario `critical-no-batch` (catégorie `energy`, pas encore lancé) : une voiture à 14 % de charge, chargeur à 800 tiles, et une voiture pleine à côté ; la pleine reçoit le batch, l'autre non (lignes `EVENT` à 1500 ticks).
+- **Batch donné à une voiture en panne de charge** (ancien problème 12). `find_available_car` et `try_assign_pending` écartent une voiture dont la charge est sous son seuil critique (`travel.is_fuel_critical`). Scénario `critical-no-batch` (catégorie `energy`, lancé le 2026-10-10 : la voiture pleine a reçu le batch, l'autre non) : une voiture à 14 % de charge, chargeur à 800 tiles, et une voiture pleine à côté ; la pleine reçoit le batch, l'autre non (lignes `EVENT` à 1500 ticks).
 - **Coût de la mesure du seuil critique** (ancien problème 11), sans effet visible : plus de mesure au-dessus de 80 % de charge, mesure espacée (`short_delay`) tant que la charge dépasse le double du dernier seuil. À vérifier en jeu qu'une voiture qui passe sous le seuil part toujours se recharger à temps.
