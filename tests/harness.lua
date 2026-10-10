@@ -701,7 +701,11 @@ local function random()
 end
 
 -- `T.spread`: two columns of three, 250 tiles apart, for courses longer than 100 tiles.
+-- `T.grid`: columns of six courses, 200 tiles apart, a charger at the top of each.
 local function course_origin(index)
+	if T.grid then
+		return 60 + 200 * math.floor((index - 1) / 6), ((index - 1) % 6) * 100 - 250
+	end
 	if T.spread then
 		return 60 + 160 * ((index - 1) % 2), math.floor((index - 1) / 2) * 250 - 250
 	end
@@ -724,8 +728,13 @@ end
 -- `course`: {obstacles = function(s, cx, cy), car = {dx, dy, orientation}, chest = {dx, dy}};
 -- the ghost is by default 4 tiles east and 3 south of the chest (`ghost = {dx, dy}`).
 local function build_courses(courses, chunks)
-	local s = new_surface({{0, 0}}, chunks or 11)
+	local s = new_surface(T.grid and {{60, 0}, {260, 0}, {460, 0}, {660, 0}} or {{0, 0}}, chunks or 11)
 	make(s, names.charger, 0, 0)
+	if T.grid then
+		for column = 0, 3 do
+			make(s, names.charger, 40 + 200 * column, 0)
+		end
+	end
 	T.courses = courses
 	for index, course in ipairs(courses) do
 		local cx, cy = course_origin(index)
@@ -746,6 +755,18 @@ local function select_courses(t)
 			local x, y = cx + course.chest[1] + 0.5 + ghost[1], cy + course.chest[2] + 0.5 + ghost[2]
 			select_ghosts(x - 2, y - 2, x + 2, y + 2)
 		end
+	end
+	if t == 3800 or t == 8800 then -- which courses did not end with their ghost built
+		local left = {}
+		for index, course in ipairs(T.courses) do
+			local cx, cy = course_origin(index)
+			local ghost = course.ghost or {4, 3}
+			local x, y = cx + course.chest[1] + 0.5 + ghost[1], cy + course.chest[2] + 0.5 + ghost[2]
+			if #T.surface.find_entities_filtered{type = "entity-ghost", area = {{x - 1, y - 1}, {x + 1, y + 1}}} > 0 then
+				left[#left + 1] = index
+			end
+		end
+		out("EVENT courses with their ghost left: " .. table.concat(left, ","))
 	end
 end
 
@@ -811,12 +832,22 @@ local function build_maze(s, x0, y0, n, pitch)
 	end
 end
 
--- Trees between the car and its chest, 60 tiles of forest to cross; three cars start
--- before it, three inside it. Three densities.
-scenarios["forest"] = {
+-- Forests, 24 courses on a large map (four columns of six):
+--  1-6   trees between the car and its chest, 60 tiles of forest to cross; three cars start
+--        before it, three inside it, three densities
+--  7-12  cars that have just driven into the edge of a forest: a few tiles in, boxed in by
+--        trees on all sides but a small clearing; three go on across the forest (facing in,
+--        or turned away), three have their supply chest behind them, outside
+--  13-18 the same deeper in the forest (4 to 12 tiles) and at more realistic densities,
+--        facing the forest, sideways to it, or turned away
+--  19-24 a copse of 30 x 30 tiles on the straight way between the car and its chest, with
+--        open ground all around: the car should go round it rather than into it; three
+--        densities, facing the copse or turned away
+scenarios["forests"] = {
 	ticks = 9000,
 	category = "movement",
 	setup = function()
+		T.grid = true
 		local function forest(spacing, inside)
 			return {
 				obstacles = function(s, cx, cy)
@@ -830,18 +861,6 @@ scenarios["forest"] = {
 				car = {inside and 35 or 0, 0, 0}, chest = {90, 0},
 			}
 		end
-		build_courses{forest(3, false), forest(3, true), forest(2, false), forest(2, true), forest(1.5, false), forest(1.5, true)}
-	end,
-	events = select_courses,
-}
-
--- Cars that have just driven into the edge of a forest: a few tiles in, boxed in by trees
--- on all sides but a small clearing. Three go on across the forest (facing in, or
--- turned away), three have their supply chest behind them, outside.
-scenarios["forest-edge"] = {
-	ticks = 9000,
-	category = "movement",
-	setup = function()
 		local function edge(spacing, depth, orientation, behind)
 			return {
 				obstacles = function(s, cx, cy)
@@ -853,49 +872,20 @@ scenarios["forest-edge"] = {
 				car = {10 + depth, 0, orientation}, chest = {behind and -30 or 90, 0},
 			}
 		end
-		build_courses{edge(3, 2, 0.25, false), edge(2, 2, 0.25, false), edge(1.5, 2, 0.25, false),
-			edge(2, 2, 0.25, true), edge(1.5, 5, 0.25, false), edge(1.5, 2, 0.75, true)}
-	end,
-	events = select_courses,
-}
-
--- The same deeper in the forest (4 to 12 tiles) and at more realistic densities, facing
--- the forest, sideways to it, or turned away.
-scenarios["forest-depth"] = {
-	ticks = 9000,
-	category = "movement",
-	setup = function()
-		local function edge(spacing, depth, orientation, behind)
-			return {
-				obstacles = function(s, cx, cy)
-					plant(s, cx + 10, cy - 20, cx + 70, cy + 20, spacing)
-					for _, tree in pairs(s.find_entities_filtered{type = "tree", position = {cx + 10 + depth, cy}, radius = 2.4}) do
-						tree.destroy()
-					end
-				end,
-				car = {10 + depth, 0, orientation}, chest = {behind and -30 or 90, 0},
-			}
-		end
-		build_courses{edge(2, 4, 0, false), edge(2, 8, 0.25, false), edge(2, 8, 0.75, true),
-			edge(2.5, 8, 0.25, false), edge(3, 12, 0.25, false), edge(2, 12, 0.75, true)}
-	end,
-	events = select_courses,
-}
-
--- A copse of 30 x 30 tiles on the straight way between the car and its chest, with open
--- ground all around: the car should go round it rather than into it. Three densities,
--- facing the copse or turned away.
-scenarios["copse"] = {
-	ticks = 9000,
-	category = "movement",
-	setup = function()
 		local function copse(spacing, orientation)
 			return {
 				obstacles = function(s, cx, cy) plant(s, cx + 30, cy - 15, cx + 60, cy + 15, spacing) end,
 				car = {0, 0, orientation}, chest = {90, 0},
 			}
 		end
-		build_courses{copse(3, 0.25), copse(3, 0.75), copse(2, 0.25), copse(2, 0.75), copse(1.5, 0.25), copse(1.5, 0.75)}
+		build_courses{
+			forest(3, false), forest(3, true), forest(2, false), forest(2, true), forest(1.5, false), forest(1.5, true),
+			edge(3, 2, 0.25, false), edge(2, 2, 0.25, false), edge(1.5, 2, 0.25, false),
+			edge(2, 2, 0.25, true), edge(1.5, 5, 0.25, false), edge(1.5, 2, 0.75, true),
+			edge(2, 4, 0, false), edge(2, 8, 0.25, false), edge(2, 8, 0.75, true),
+			edge(2.5, 8, 0.25, false), edge(3, 12, 0.25, false), edge(2, 12, 0.75, true),
+			copse(3, 0.25), copse(3, 0.75), copse(2, 0.25), copse(2, 0.75), copse(1.5, 0.25), copse(1.5, 0.75),
+		}
 	end,
 	events = select_courses,
 }
@@ -1127,7 +1117,7 @@ local function describe_batch(car)
 	local ghosts, marked = 0, 0
 	for _, ghost in pairs(construction.ghosts) do
 		if ghost.valid then
-			if ghost.type == "entity-ghost" then
+			if (ghost.type == "entity-ghost" or ghost.type == "tile-ghost") then
 				ghosts = ghosts + 1
 			else
 				marked = marked + 1
@@ -1161,42 +1151,6 @@ local function report_supply(label)
 		.. table.concat(parts, ", "))
 end
 
--- Marked trees, rocks and buildings (with contents) far from any robot network:
--- the car mines them all and unloads the yield in the supply chest. Setup lines
--- tell whether trees and rocks have a unit_number.
-scenarios["deconstruct"] = {
-	ticks = 9000,
-	category = "construction",
-	setup = function()
-		T.marked = {}
-		local s = new_surface({{0, 0}}, 6)
-		make(s, names.charger, 0, 0)
-		make(s, names.garage, 20, -10)
-		T.chest = make(s, names.chest, 0.5, 30.5)
-		T.cars = {make_car(s, 10, 10, 0.1)}
-		for i = 0, 3 do
-			for j = 0, 2 do
-				mark(s, "tree-01", 60 + 3 * i, 60 + 3 * j)
-			end
-		end
-		mark(s, "big-rock", 80, 60)
-		mark(s, "huge-rock", 86, 68)
-		for i = 0, 4 do
-			mark(s, "wooden-chest", 60.5 + 2 * i, 80.5, {name = "iron-plate", count = 50})
-		end
-		mark(s, "stone-furnace", 71, 91, {name = "coal", count = 20})
-	end,
-	events = function(t)
-		if t == 200 then
-			select_all(50, 50, 100, 100)
-		end
-		watch_batches()
-		if t == 8500 then
-			report_supply("end")
-		end
-	end,
-}
-
 -- Marks an entity for upgrade to `target`, after filling its first inventory (or,
 -- for a machine, its module slots) with `items`.
 local function mark_upgrade(surface, name, target, x, y, items, modules)
@@ -1212,7 +1166,7 @@ local function mark_upgrade(surface, name, target, x, y, items, modules)
 		entity.get_module_inventory().insert(modules)
 	end
 	local ordered = entity.order_upgrade{force = "player", target = target}
-	out("SETUP " .. name .. " -> " .. target .. " ordered=" .. tostring(ordered) .. " marked=" .. tostring(entity.to_be_upgraded()))
+	out("SETUP " .. name .. " -> " .. (type(target) == "table" and (target.name .. "/" .. target.quality) or target) .. " ordered=" .. tostring(ordered) .. " marked=" .. tostring(entity.to_be_upgraded()))
 	table.insert(T.marked, entity)
 	return entity
 end
@@ -1231,13 +1185,158 @@ local function count_item_everywhere(item_name)
 	return total
 end
 
-local function report_upgrade(label)
-	local replaced = 0
-	for _, entity in pairs(T.marked) do
-		if not entity.valid then
-			replaced = replaced + 1
+-- The order of the work. Groups, in phase order: entities to mine, then ghosts
+-- and entities to upgrade, last the roboport ghosts (network mode). Logs each
+-- change of a group, and PHASE VIOLATION when a group makes progress while an
+-- earlier one is not finished.
+local function watch_phases(groups)
+	T.group_left = T.group_left or {}
+	for index, list in ipairs(groups) do
+		local left = count_valid(list)
+		local before = T.group_left[index]
+		if before ~= left then
+			if before and left < before then
+				for earlier = 1, index - 1 do
+					if count_valid(groups[earlier]) > 0 then
+						out("EVENT PHASE VIOLATION t=" .. game.tick .. ": group " .. index .. " progressed, group " .. earlier .. " not done")
+						break
+					end
+				end
+			end
+			if before == nil or left == 0 or before == #list then
+				out("EVENT t=" .. game.tick .. " group " .. index .. ": " .. left .. "/" .. #list .. " left")
+			end
+			T.group_left[index] = left
 		end
 	end
+end
+
+-- Everything the cars can do, at once, on one large map (three cars, five
+-- chargers), in separate areas:
+--   east,  y 50..100   to mine: trees, rocks, chests holding plates, a furnace
+--   west,  y 50..100   to upgrade: chests, a full steel chest to a smaller
+--                      iron chest, machines 3 with four modules to machines 2
+--   east,  y -100..-50 ghosts on top of entities to mine (furnaces over chests,
+--                      chests over trees)
+--   west,  y -100..-50 plain ghosts: wooden chests, concrete tiles, roboports
+--   north, y -45..-25  two ponds: landfill ghosts across the first one (40 tiles, the shore
+--                      is next to some of them; wooden chest ghosts on two of them wait for
+--                      the fill), landfill ghosts only in the middle of the second one
+--                      (out of reach: the batch must be abandoned with an alert)
+-- Order of the work (see PHASE in ghost.lua): the groups below are in phase
+-- order and a group must not progress while an earlier one is not finished
+-- (PHASE VIOLATION). Nothing may be lost either: plates and modules are counted
+-- in the world at the end.
+local function build_work()
+	local s = new_surface({{0, 0}}, 8)
+	for _, x in pairs({-100, 0, 100}) do
+		make(s, names.charger, x, 0)
+	end
+	make(s, names.charger, 0, 60)
+	make(s, names.charger, 0, -60)
+	make(s, names.garage, 20, -10)
+	T.chest = make(s, names.chest, 0.5, 30.5)
+	fill(T.chest, {["wooden-chest"] = 60, ["stone-furnace"] = 20, ["iron-chest"] = 10, ["assembling-machine-2"] = 5,
+		["roboport"] = 4, ["concrete"] = 100, ["landfill"] = 100})
+	T.cars = {}
+	for index = 1, 3 do
+		T.cars[index] = make_car(s, 10 + 6 * index, 10, 0.1)
+	end
+
+	-- Phase 1: to mine.
+	T.marked = {}
+	for i = 0, 3 do
+		for j = 0, 2 do
+			mark(s, "tree-01", 60 + 3 * i, 60 + 3 * j)
+		end
+	end
+	mark(s, "big-rock", 80, 60)
+	mark(s, "huge-rock", 86, 68)
+	for i = 0, 4 do
+		mark(s, "wooden-chest", 60.5 + 2 * i, 80.5, {name = "iron-plate", count = 50})
+	end
+	mark(s, "stone-furnace", 71, 91, {name = "coal", count = 20})
+	for i = 0, 5 do
+		mark(s, "wooden-chest", 60.5 + 4 * i, -60.5, {name = "iron-plate", count = 10})
+	end
+	for i = 0, 3 do
+		mark(s, "tree-01", 60.5 + 4 * i, -80.5)
+	end
+	T.mine = T.marked
+
+	-- Phase 2: water to fill in.
+	local water = {}
+	for x = 40, 51 do
+		for y = -45, -34 do
+			water[#water + 1] = {name = "water", position = {x, y}}
+		end
+	end
+	for x = 70, 85 do
+		for y = -45, -30 do
+			water[#water + 1] = {name = "water", position = {x, y}}
+		end
+	end
+	s.set_tiles(water, false)
+	T.landfill = {}
+	for x = 40, 46 do
+		for y = -42, -38 do
+			T.landfill[#T.landfill + 1] = s.create_entity{name = "tile-ghost", inner_name = "landfill", position = {x, y},
+				force = "player", expires = false}
+		end
+	end
+	T.stranded = {}
+	for x = 76, 79 do
+		for y = -40, -36 do
+			T.stranded[#T.stranded + 1] = s.create_entity{name = "tile-ghost", inner_name = "landfill", position = {x, y},
+				force = "player", expires = false}
+		end
+	end
+
+	-- Phase 3: to build and to upgrade.
+	T.build = {}
+	for i = 0, 1 do -- on tiles that are still water
+		local ghost = make_ghost(s, "wooden-chest", 43.5 + i, -39.5)
+		if ghost then
+			T.build[#T.build + 1] = ghost
+		end
+	end
+	for i = 0, 5 do
+		T.build[#T.build + 1] = make_ghost(s, "stone-furnace", 61 + 4 * i, -60)
+	end
+	for i = 0, 3 do
+		T.build[#T.build + 1] = make_ghost(s, "wooden-chest", 60.5 + 4 * i, -80.5)
+	end
+	for i = 0, 7 do
+		T.build[#T.build + 1] = make_ghost(s, "wooden-chest", -140.5 + 2 * i, -60.5)
+	end
+	for i = 0, 7 do
+		for j = 0, 3 do
+			T.build[#T.build + 1] = s.create_entity{name = "tile-ghost", inner_name = "concrete", position = {-140 + i, -70 + j},
+				force = "player", expires = false}
+		end
+	end
+	T.marked = {}
+	for i = 0, 3 do
+		mark_upgrade(s, "wooden-chest", "iron-chest", -140.5 + 2 * i, 60.5, {name = "iron-plate", count = 30})
+	end
+	mark_upgrade(s, "steel-chest", "iron-chest", -140.5, 70.5, {name = "iron-plate", count = 3600})
+	for i = 0, 1 do
+		mark_upgrade(s, "assembling-machine-3", "assembling-machine-2", -139.5 + 4 * i, 80.5, nil, {name = "speed-module-3", count = 4})
+	end
+	T.upgrades = T.marked
+	for _, entity in pairs(T.upgrades) do
+		T.build[#T.build + 1] = entity
+	end
+
+	-- Phase 4: roboports.
+	T.network = {}
+	for i = 0, 1 do
+		T.network[#T.network + 1] = make_ghost(s, "roboport", -140 + 8 * i, -90)
+	end
+	out("EVENT start: plates=" .. count_item_everywhere("iron-plate") .. " modules=" .. count_item_everywhere("speed-module-3"))
+end
+
+local function report_work(label)
 	local function count(name)
 		return #T.surface.find_entities_filtered{name = name, force = "player"}
 	end
@@ -1245,152 +1344,96 @@ local function report_upgrade(label)
 	for _, machine in pairs(T.surface.find_entities_filtered{name = "assembling-machine-2"}) do
 		modules_in_machines = modules_in_machines + machine.get_module_inventory().get_item_count("speed-module-3")
 	end
-	out("EVENT " .. label .. ": " .. replaced .. "/" .. #T.marked .. " replaced; iron-chest=" .. count("iron-chest")
-		.. " wooden-chest=" .. count("wooden-chest") .. " steel-chest=" .. count("steel-chest")
-		.. " assembling-machine-2=" .. count("assembling-machine-2") .. " assembling-machine-3=" .. count("assembling-machine-3")
-		.. "; iron-plate in the world=" .. count_item_everywhere("iron-plate") .. " (3720 at the start)"
-		.. ", speed-module-3 in the world=" .. count_item_everywhere("speed-module-3") .. " (8 at the start), in the machines=" .. modules_in_machines)
+	local replaced = 0
+	for _, entity in pairs(T.upgrades) do
+		if not entity.valid then
+			replaced = replaced + 1
+		end
+	end
+	local tiles = T.surface.count_tiles_filtered{name = "concrete", area = {{-150, -80}, {-130, -60}}}
+	out("EVENT " .. label .. ": mine " .. count_valid(T.mine) .. "/" .. #T.mine .. " left, build+upgrade "
+		.. count_valid(T.build) .. "/" .. #T.build .. " left, network " .. count_valid(T.network) .. "/" .. #T.network .. " left")
+	out("EVENT " .. label .. ": " .. replaced .. "/" .. #T.upgrades .. " replaced; iron-chest=" .. count("iron-chest")
+		.. " steel-chest=" .. count("steel-chest") .. " assembling-machine-2=" .. count("assembling-machine-2")
+		.. " assembling-machine-3=" .. count("assembling-machine-3") .. " wooden-chest=" .. count("wooden-chest")
+		.. " stone-furnace=" .. count("stone-furnace") .. " roboport=" .. count("roboport") .. " concrete tiles=" .. tiles .. " (32 expected)")
+	out("EVENT " .. label .. ": landfill tiles in the first pond=" .. T.surface.count_tiles_filtered{name = "landfill", area = {{40, -45}, {52, -34}}}
+		.. " (35 expected), in the second=" .. T.surface.count_tiles_filtered{name = "landfill", area = {{70, -45}, {86, -30}}}
+		.. " (0 expected, batch abandoned)")
+	out("EVENT " .. label .. ": iron-plate in the world=" .. count_item_everywhere("iron-plate")
+		.. " (start value above, plus 250+60 from the chests mined), speed-module-3=" .. count_item_everywhere("speed-module-3")
+		.. " (8 at the start), in the machines=" .. modules_in_machines)
+	report_supply(label)
 end
 
--- Entities marked for upgrade, far from any robot network: wooden chests to iron
--- chests, a full steel chest to a smaller iron chest (the overflow must end in the
--- trunk, then in the supply chest), assembling machines 3 holding four speed
--- modules to machines 2 (two slots). Nothing may be lost: the plates and modules
--- of the world are counted at the end.
-scenarios["upgrade"] = {
-	ticks = 9000,
+scenarios["work"] = {
+	ticks = 22000,
 	category = "construction",
 	setup = function()
-		T.marked = {}
-		local s = new_surface({{0, 0}}, 6)
-		make(s, names.charger, 0, 0)
-		make(s, names.garage, 20, -10)
-		T.chest = make(s, names.chest, 0.5, 30.5)
-		fill(T.chest, {["iron-chest"] = 10, ["assembling-machine-2"] = 5})
-		T.cars = {make_car(s, 10, 10, 0.1)}
-		for i = 0, 3 do
-			mark_upgrade(s, "wooden-chest", "iron-chest", 60.5 + 2 * i, 60.5, {name = "iron-plate", count = 30})
-		end
-		mark_upgrade(s, "steel-chest", "iron-chest", 60.5, 70.5, {name = "iron-plate", count = 3600})
-		for i = 0, 1 do
-			mark_upgrade(s, "assembling-machine-3", "assembling-machine-2", 61.5 + 4 * i, 80.5, nil, {name = "speed-module-3", count = 4})
-		end
-		out("EVENT start: plates=" .. count_item_everywhere("iron-plate") .. " modules=" .. count_item_everywhere("speed-module-3"))
+		build_work()
 	end,
 	events = function(t)
 		if t == 200 then
-			select_all(50, 50, 100, 100)
+			select_all(-160, -110, 110, 110)
 		end
 		watch_batches()
-		if t == 8500 then
-			report_upgrade("end")
+		watch_phases({T.mine, T.landfill, T.build, T.network})
+		if t == 21500 then
+			report_work("end")
 		end
 	end,
 }
 
--- Builds the world of the mixed scenarios: ghosts to build and entities to mine,
--- `overlap` or not. Apart: wooden chests on the east side, marked trees on the
--- west side, 120 tiles from each other. Overlapping: stone furnace ghosts on
--- marked wooden chests, and wooden chest ghosts on marked trees.
-local function build_mixed(car_count, overlap)
-	T.marked = {}
-	T.ghosts = {}
+-- World of phases-single: a car, trees to mine, ghosts to build.
+local function build_single_car()
 	local s = new_surface({{0, 0}}, 6)
 	make(s, names.charger, 0, 0)
 	make(s, names.charger, 0, 60)
 	make(s, names.garage, 20, -10)
 	T.chest = make(s, names.chest, 0.5, 30.5)
-	fill(T.chest, {["wooden-chest"] = 40, ["stone-furnace"] = 20})
-	T.cars = {}
-	for index = 1, car_count do
-		T.cars[index] = make_car(s, 10 + 6 * index, 10, 0.1)
+	T.cars = {make_car(s, 16, 10, 0.1)}
+	T.marked = {}
+	for i = 0, 5 do
+		mark(s, "tree-01", -60 - 3 * i, 60)
 	end
-	if overlap then
-		for i = 0, 5 do
-			mark(s, "wooden-chest", 60.5 + 4 * i, 60.5, {name = "iron-plate", count = 10})
-			T.ghosts[#T.ghosts + 1] = make_ghost(s, "stone-furnace", 61 + 4 * i, 61)
-		end
-		for i = 0, 3 do
-			mark(s, "tree-01", 60.5 + 4 * i, 80.5)
-			T.ghosts[#T.ghosts + 1] = make_ghost(s, "wooden-chest", 60.5 + 4 * i, 80.5)
-		end
-		-- More to mine, 120 tiles away: the car that takes the marked entities stays busy
-		-- there while the other one tries the ghosts, which are still covered.
-		for i = 0, 9 do
-			mark(s, "tree-01", -60 - 3 * i, 60)
-		end
-	else
-		for i = 0, 7 do
-			T.ghosts[#T.ghosts + 1] = make_ghost(s, "wooden-chest", 60.5 + 2 * i, 60.5)
-		end
-		for i = 0, 5 do
-			mark(s, "tree-01", -60 - 3 * i, 60)
-		end
+	T.mine = T.marked
+	T.build = {}
+	for i = 0, 7 do
+		T.build[#T.build + 1] = make_ghost(s, "wooden-chest", 60.5 + 2 * i, 60.5)
 	end
+	T.network = {}
 end
 
-local function report_mixed(label)
-	out("EVENT " .. label .. ": " .. count_valid(T.ghosts) .. "/" .. #T.ghosts .. " ghosts left, "
-		.. count_valid(T.marked) .. "/" .. #T.marked .. " marked entities left")
+local function report_phases(label)
+	out("EVENT " .. label .. ": mine " .. count_valid(T.mine) .. "/" .. #T.mine .. " left, build+upgrade "
+		.. count_valid(T.build) .. "/" .. #T.build .. " left")
 end
 
--- Ghosts and marked entities selected together, far apart, one car then two:
--- a batch never mixes both (EVENT lines say MIXED if it does), and everything
--- gets done, one mode after the other when there is a single car.
-scenarios["mixed-apart-single"] = {
-	ticks = 14000,
-	category = "construction",
-	setup = function()
-		build_mixed(1, false)
-	end,
-	events = function(t)
-		if t == 200 then
-			select_all(-100, 40, 100, 80)
-		end
-		watch_batches()
-		if t == 13500 then
-			report_mixed("end")
-		end
-	end,
-}
-
-scenarios["mixed-apart"] = {
-	ticks = 14000,
-	category = "construction",
-	setup = function()
-		build_mixed(2, false)
-	end,
-	events = function(t)
-		if t == 200 then
-			select_all(-100, 40, 100, 80)
-		end
-		watch_batches()
-		if t == 13500 then
-			report_mixed("end")
-		end
-	end,
-}
-
--- Ghosts on top of the entities that must go first (furnaces over marked
--- chests, chests over marked trees), two cars. Without an ordering rule the
--- ghosts fail to revive until the cars have mined what is in the way, then go
--- through the retry cycle (alert, back to the pending pool).
-scenarios["mixed-overlap"] = {
+-- One car, busy with a batch that lacks its items, when the trees are selected:
+-- no car is free for them. Once the batch has its items it must wait for the
+-- trees, and after long_delay give its batch back so that the car mines them
+-- first (EVENT lines of the batches), then builds the ghosts.
+scenarios["phases-single"] = {
 	ticks = 16000,
 	category = "construction",
 	setup = function()
-		build_mixed(2, true)
+		build_single_car()
 	end,
 	events = function(t)
-		if t == 200 then
-			select_all(-100, 50, 100, 100)
+		if t == 1500 then
+			select_all(50, 50, 100, 70)
+		end
+		if t == 1800 then
+			select_all(-100, 50, -50, 70)
+		end
+		if t == 4000 then
+			fill(T.chest, {["wooden-chest"] = 40})
+			out("EVENT supply chest filled")
 		end
 		watch_batches()
-		if t == 3000 or t == 8000 then
-			report_mixed("t=" .. t)
-		end
+		watch_phases({T.mine, T.build})
 		if t == 15500 then
-			report_mixed("end")
+			report_phases("end")
 		end
 	end,
 }

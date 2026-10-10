@@ -7,9 +7,16 @@ local travel = require("travel")
 -- Construction: tracking ghosts, grouping them into clusters, assigning the
 -- clusters to cars, and running a batch on a car.
 --
--- A "ghost" here is any target a car works on: an entity ghost to build, an
+-- A "ghost" here is any target a car works on: an entity ghost or a tile ghost to build, an
 -- entity marked for deconstruction to mine, or an entity marked for upgrade to
--- replace. A batch does one of the three, never two (get_mode). Targets are keyed by get_id: trees and rocks have no unit_number.
+-- replace. A batch does one thing, never two (get_mode). Targets are keyed by get_id: trees and rocks have no unit_number.
+--
+-- Work has an order (PHASE): first entities are mined, then water is filled in
+-- (the "landfill" mode: tile ghosts on water), then entities are built and
+-- replaced, last the ghosts that extend the logistic network (the "network"
+-- mode: roboports). A batch fetches its items at once, but waits
+-- before driving to its site until nothing of an earlier phase is left on its
+-- surface (is_waiting_for_phase).
 --
 -- A cluster is a group of ghosts of one type (or of entities to mine) that fits in a single car trunk:
 --   {ghosts = {ghost, ...}}
@@ -30,7 +37,8 @@ local travel = require("travel")
 --   missing_since   tick the batch began waiting for items no supply chest holds, or nil
 --   alerted_items   alert_once flags of the missing-item alerts
 --   failed_attempts [id] = {count, retry_tick} of a ghost that failed to revive
---   mode            "build", "deconstruct" or "upgrade": what the whole batch does
+--   mode            "build", "landfill", "deconstruct", "upgrade" or "network": what the whole batch does
+--   blocked_since   tick the batch began waiting for an earlier phase, or nil
 --
 -- control.lua enters through register_ghost, on_ghost_destroyed, build_clusters,
 -- is_any_car_present, retry_pending_clusters, try_assign_pending, proceed,
@@ -51,21 +59,51 @@ function ghost_control.get_id(ghost)
 	return ghost.unit_number or (ghost.surface.index .. ":" .. ghost.name .. "@" .. ghost.position.x .. "," .. ghost.position.y)
 end
 
--- What a car does with a tracked entity: "build" a ghost, "deconstruct" an entity
--- marked for deconstruction, otherwise "upgrade" it (a mark that the player
--- cancelled does not change the mode of the batch it is in).
+-- True if the tile under the entity cannot be walked on: water, to be filled in.
+local function is_on_water(entity)
+	return entity.surface.get_tile(entity.position).collides_with("player")
+end
+
+-- True if one of the eight tiles around a tile ghost is land: the car can stop
+-- there and build the ghost, which needs no reach.
+local function is_next_to_land(ghost)
+	local surface, position = ghost.surface, ghost.position
+	for dx = -1, 1 do
+		for dy = -1, 1 do
+			if (dx ~= 0 or dy ~= 0) and not surface.get_tile(position.x + dx, position.y + dy).collides_with("player") then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+-- What a car does with a tracked entity: "build" a ghost ("landfill" for a tile
+-- ghost on water, "network" for a ghost that extends the logistic network, built
+-- last), "deconstruct" an entity marked for deconstruction, otherwise "upgrade"
+-- it (a mark that the player cancelled does not change the mode of the batch it is in).
 function ghost_control.get_target_mode(entity)
-	if entity.type == "entity-ghost" then
-		return "build"
+	if entity.type == "tile-ghost" then
+		return is_on_water(entity) and "landfill" or "build"
+	elseif entity.type == "entity-ghost" then
+		return entity.ghost_type == "roboport" and "network" or "build"
 	end
 	return entity.to_be_deconstructed() and "deconstruct" or "upgrade"
 end
 
+-- The order of the work: a mode waits for every mode of a lower number.
+local PHASE = {deconstruct = 1, landfill = 2, upgrade = 3, build = 3, network = 4}
+
+-- The modes whose targets are ghosts that a car revives with an item.
+local REVIVES = {build = true, landfill = true, network = true}
+
+-- TODO: mine cliffs by consuming the cliff explosives they need, as native robots do (a cliff is
+-- not minable). See "À faire" in CLAUDE.md.
 -- True if cars can work on the entity: a ghost, an entity marked for
 -- deconstruction that can be mined (a cliff cannot), or an entity marked for an
 -- upgrade to another entity (or quality) that an item places.
 function ghost_control.is_target(entity)
-	if entity.type == "entity-ghost" then
+	if entity.type == "entity-ghost" or entity.type == "tile-ghost" then
 		return true
 	elseif entity.to_be_deconstructed() then
 		return entity.minable
@@ -204,7 +242,8 @@ end
 
 -- Key and count of the item that builds a ghost, or nil if no item places it.
 function ghost_control.get_ghost_item(ghost)
-	return ghost_control.get_place_item(ghost.ghost_prototype, ghost.quality)
+	-- A tile ghost has no quality.
+	return ghost_control.get_place_item(ghost.ghost_prototype, ghost.type == "entity-ghost" and ghost.quality or nil)
 end
 
 -- What an entity marked for deconstruction puts in the trunk when mined
@@ -241,7 +280,7 @@ end
 function ghost_control.compute_needs(ghost)
 	local key, count
 	local mode = ghost_control.get_target_mode(ghost)
-	if mode == "build" then
+	if REVIVES[mode] then
 		key, count = ghost_control.get_ghost_item(ghost)
 	elseif mode == "upgrade" then
 		local target, quality = ghost.get_upgrade_target()
@@ -255,8 +294,7 @@ end
 -- What a ghost puts in the trunk ([item key] = count), to reserve its slots:
 -- the needs, plus what mining the entity or replacing it gives back.
 function ghost_control.compute_load(ghost)
-	local mode = ghost_control.get_target_mode(ghost)
-	if mode == "build" then
+	if REVIVES[ghost_control.get_target_mode(ghost)] then
 		return ghost_control.compute_needs(ghost)
 	end
 	local load = compute_yield(ghost)
@@ -301,9 +339,8 @@ local function remove_value(list, value)
 	return false
 end
 
--- TODO: build last the ghosts that extend the native construction network. See "À faire" in CLAUDE.md.
 -- Splits ghosts into clusters: one ghost type per cluster (all the entities to
--- mine, or to upgrade, together), small enough for a car trunk (config.car_inventory_size slots). A cluster grows breadth-first
+-- mine, or to upgrade, or the ghosts that extend the logistic network, together), small enough for a car trunk (config.car_inventory_size slots). A cluster grows breadth-first
 -- from a seed ghost, nearest neighbours first, so it stays compact. The first
 -- ghost that no longer fits becomes the seed of the next cluster, so clusters
 -- tile the selected area.
@@ -311,7 +348,7 @@ function ghost_control.build_clusters(ghosts)
 	local by_name = {}
 	for _, ghost in pairs(ghosts) do
 		local mode = ghost_control.get_target_mode(ghost)
-		local name = mode == "build" and ("ghost " .. ghost.ghost_name) or mode
+		local name = (mode == "build" or mode == "landfill") and ("ghost " .. ghost.ghost_name) or mode
 		by_name[name] = by_name[name] or {}
 		table.insert(by_name[name], ghost)
 	end
@@ -412,6 +449,12 @@ function ghost_control.is_any_car_present()
 	return false
 end
 
+-- Phase (see PHASE) of a cluster, or nil if it holds no valid ghost.
+local function get_cluster_phase(cluster)
+	local mode = get_mode(cluster.ghosts)
+	return mode and PHASE[mode]
+end
+
 -- Surface of a cluster (its ghosts are all on one), or nil if it holds no ghost.
 local function get_cluster_surface(cluster)
 	local _, ghost = next(cluster.ghosts)
@@ -449,8 +492,8 @@ function ghost_control.find_available_car(cluster)
 	return nil
 end
 
--- Gives the closest pending cluster to a car that just became free. Returns
--- true if the car got one.
+-- Gives the pending cluster of the earliest phase, and the closest in it, to a
+-- car that just became free. Returns true if the car got one.
 function ghost_control.try_assign_pending(car)
 	if storage.car_data[car.unit_number].construction
 		or not car.get_inventory(defines.inventory.car_trunk).is_empty()
@@ -458,14 +501,16 @@ function ghost_control.try_assign_pending(car)
 		return false
 	end
 
-	local best_index, best_distance
+	local best_index, best_distance, best_phase
 	for index, cluster in pairs(storage.pending_clusters) do
 		local centroid = ghost_control.compute_centroid(cluster.ghosts)
 		if centroid and get_cluster_surface(cluster) == car.surface then
 			local distance = util.distance(car.position, centroid)
-			if not best_index or distance < best_distance then
+			local phase = get_cluster_phase(cluster)
+			if not best_index or phase < best_phase or (phase == best_phase and distance < best_distance) then
 				best_index = index
 				best_distance = distance
+				best_phase = phase
 			end
 		end
 	end
@@ -477,29 +522,33 @@ function ghost_control.try_assign_pending(car)
 	return true
 end
 
--- Offers every pending cluster to the available cars, in order, until one finds
--- none. A car takes other pending clusters along (see fill_batch), so the scan
+-- Offers every pending cluster to the available cars, earliest phase first,
+-- until one finds none. A car takes other pending clusters along (see fill_batch), so the scan
 -- starts over after each assignment. Clusters with no valid ghost left are
 -- dropped. Called when the player selects ghosts and every config.long_delay as
 -- a fallback: that also notices a car that a player put in a garage by hand,
 -- for which there is no event. Returns the number of cars that got a batch.
 function ghost_control.retry_pending_clusters()
 	local assigned = 0
-	local index = 1
-	while index <= #storage.pending_clusters do
-		local cluster = storage.pending_clusters[index]
-		local _, count = ghost_control.compute_centroid(cluster.ghosts)
-		if count == 0 then
-			table.remove(storage.pending_clusters, index)
-		else
-			local car = ghost_control.find_available_car(cluster)
-			if car then
+	for phase = 1, 3 do
+		local index = 1
+		while index <= #storage.pending_clusters do
+			local cluster = storage.pending_clusters[index]
+			local _, count = ghost_control.compute_centroid(cluster.ghosts)
+			if count == 0 then
 				table.remove(storage.pending_clusters, index)
-				ghost_control.assign_cluster(car, cluster)
-				assigned = assigned + 1
-				index = 1
+			elseif get_cluster_phase(cluster) ~= phase then
+				index = index + 1
 			else
-				index = index + 1 -- another cluster may be on a surface that has a car
+				local car = ghost_control.find_available_car(cluster)
+				if car then
+					table.remove(storage.pending_clusters, index)
+					ghost_control.assign_cluster(car, cluster)
+					assigned = assigned + 1
+					index = 1
+				else
+					index = index + 1 -- another cluster may be on a surface that has a car
+				end
 			end
 		end
 	end
@@ -605,13 +654,13 @@ end
 -- Supply chests
 -- ============================================================
 
--- A chest and every supply chest within config.chest_group_radius of it:
+-- A chest and every supply chest on its surface within config.chest_group_radius of it:
 -- reaching one of them gives access to all.
 function ghost_control.find_chest_group(chest)
 	local group = {chest}
 	for id, other in pairs(storage.supply_chests) do
 		if other.valid then
-			if other ~= chest and util.distance(chest.position, other.position) <= config.chest_group_radius then
+			if other ~= chest and other.surface == chest.surface and util.distance(chest.position, other.position) <= config.chest_group_radius then
 				table.insert(group, other)
 			end
 		else
@@ -717,9 +766,43 @@ local function release_unsupplied_clusters(construction)
 	return true
 end
 
+-- True if a target of an earlier phase than the batch is left on the surface of
+-- the car, in a batch or in the pending pool. A target whose mark was cancelled
+-- (is_target) does not count.
+local function is_waiting_for_phase(car, construction)
+	local phase = PHASE[construction.mode]
+	for _, target in pairs(storage.ghosts) do
+		if target.valid and target.surface == car.surface and ghost_control.is_target(target)
+			and PHASE[ghost_control.get_target_mode(target)] < phase then
+			return true
+		end
+	end
+	return false
+end
+
+-- The batch has its items but must wait for an earlier phase. If it has waited
+-- config.long_delay and an earlier cluster is pending (no car was free for it),
+-- the batch goes back to the pending pool, and the car, free again, can take that
+-- cluster after unloading.
+local function wait_for_phase(car, car_data)
+	local construction = car_data.construction
+	construction.blocked_since = construction.blocked_since or game.tick
+	if game.tick - construction.blocked_since >= config.long_delay then
+		for _, cluster in pairs(storage.pending_clusters) do
+			local phase = get_cluster_phase(cluster)
+			if phase and phase < PHASE[construction.mode] and get_cluster_surface(cluster) == car.surface then
+				travel.requeue_construction(car_data)
+				break
+			end
+		end
+	end
+	_utils.start_waiting(car_data)
+end
+
 -- Decides the next step of a car's batch: end it if no ghost is left, drive to
--- the site once every item is on board, otherwise fetch items from a supply
--- chest, or wait with an alert if no chest holds any. After config.long_delay
+-- the site once every item is on board and no earlier phase is left (wait
+-- otherwise), otherwise fetch items from a supply chest, or wait with an alert
+-- if no chest holds any. After config.long_delay
 -- of that wait the clusters still lacking items go back to the pending pool and
 -- the car builds the others. Called on assignment, after each chest stop, and
 -- by the waiting loop of control.lua.
@@ -734,7 +817,12 @@ function ghost_control.proceed(car)
 		ghost_control.finish(car)
 	elseif next(construction.items_needed) == nil then
 		construction.missing_since = nil
-		ghost_control.go_to_site(car)
+		if is_waiting_for_phase(car, construction) then
+			wait_for_phase(car, car_data)
+		else
+			construction.blocked_since = nil
+			ghost_control.go_to_site(car)
+		end
 	else
 		local chest = ghost_control.find_supply_chest(car, construction.items_needed)
 		if chest then
@@ -785,17 +873,22 @@ end
 -- a `cluster` (an entry of construction.clusters), only that cluster's ghosts
 -- are considered. Also returns whether any valid ghost is left in the batch,
 -- which tells "nothing left" from "everything left is on cooldown" (or, with a
--- cluster, "elsewhere"). Invalid ghosts are removed from the batch.
+-- cluster, "elsewhere"). Invalid ghosts are removed from the batch. Without a
+-- cluster (choosing where to go), a landfill batch only considers the tile
+-- ghosts next to land: the car stops there, and builds the whole cluster from
+-- that stop.
 function ghost_control.find_nearest_ready_ghost(car, cluster)
 	local construction = storage.car_data[car.unit_number].construction
 	local best, best_distance
 	local any_valid = false
+	local needs_land = not cluster and construction.mode == "landfill"
 
 	for id, ghost in pairs(construction.ghosts) do
 		if ghost.valid then
 			any_valid = true
 			local attempt = construction.failed_attempts[id]
-			if (not cluster or cluster.ghosts[id]) and (not attempt or game.tick >= attempt.retry_tick) then
+			if (not cluster or cluster.ghosts[id]) and (not attempt or game.tick >= attempt.retry_tick)
+					and (not needs_land or is_next_to_land(ghost)) then
 				local distance = util.distance(car.position, ghost.position)
 				if not best or distance < best_distance then
 					best = ghost
@@ -812,7 +905,6 @@ function ghost_control.find_nearest_ready_ghost(car, cluster)
 	return best, any_valid
 end
 
--- TODO: let cars build over an entity that is in the way (order of the batch). See "À faire" in CLAUDE.md.
 -- Builds a ghost with an item from the car trunk. Returns false if the revive
 -- failed, usually because something - often the car itself - is in the way.
 function ghost_control.revive_ghost(car, ghost)
@@ -934,7 +1026,7 @@ function ghost_control.attempt_one_ghost(car)
 
 	local id = ghost_control.get_id(ghost)
 	local done
-	if construction.mode == "build" then
+	if REVIVES[construction.mode] then
 		done = ghost_control.revive_ghost(car, ghost)
 	elseif construction.mode == "deconstruct" then
 		done = ghost_control.deconstruct_entity(car, ghost)
@@ -977,6 +1069,20 @@ function ghost_control.step_back(car)
 	travel.begin_leg(car, waypoint)
 end
 
+-- True if the batch fills water in and none of its tile ghosts is next to land:
+-- the car has nowhere to stop.
+local function is_stranded(construction)
+	if construction.mode ~= "landfill" then
+		return false
+	end
+	for _, ghost in pairs(construction.ghosts) do
+		if ghost.valid and is_next_to_land(ghost) then
+			return false
+		end
+	end
+	return true
+end
+
 -- Sends the car to the nearest ghost it can try right now, whatever its
 -- cluster: that cluster becomes the site the car builds. Building starts on
 -- arrival ("building" task), never on the way. If every ghost left is on
@@ -990,7 +1096,12 @@ function ghost_control.go_to_site(car)
 		-- is also what lets it recharge between two clusters.
 		travel.set_destination(car, ghost, {type = "building"})
 	elseif any_valid then
-		ghost_control.step_back(car)
+		if is_stranded(construction) then
+			ghost_control.abandon(car, "An autonomous car cannot reach the water to fill in: no landfill ghost of its batch is next to land. "
+				.. "Batch abandoned; select the ghosts again once the shore is reachable.")
+		else
+			ghost_control.step_back(car)
+		end
 	else
 		ghost_control.finish(car)
 	end
@@ -1105,17 +1216,19 @@ function ghost_control.finish(car)
 	end
 end
 
--- The car abandons its task after its final stuck wait (see travel.stuck_tick).
+-- The car abandons its task after its final stuck wait (see travel.stuck_tick),
+-- or because it cannot reach its batch (go_to_site); `message` replaces the alert
+-- text of the first case.
 -- Its batch is abandoned completely: the ghosts are neither queued nor assigned again, so the
 -- player has to select them again if the car can reach them now. The car then
 -- heads back to base through the usual end of a batch: it deposits its items,
 -- then waits, which sends it to charge if needed and to a garage.
-function ghost_control.abandon(car)
+function ghost_control.abandon(car, message)
 	local car_data = storage.car_data[car.unit_number]
 	local construction = car_data.construction
 
 	_utils.alert(car.force, car,
-		"An autonomous car ABANDONED its task because it stayed stuck: select the ghosts again if the way is clear now.",
+		message or "An autonomous car ABANDONED its task because it stayed stuck: select the ghosts again if the way is clear now.",
 		config.names.car)
 
 	if construction then
