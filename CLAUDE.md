@@ -193,6 +193,12 @@ Idées et tâches retenues par le propriétaire, pas encore commencées. Chacune
 - **Agrandissement du réseau de construction natif.** Un ghost qui agrandit le réseau de robots se construit en dernier, pour éviter le conflit avec les robots. (`ghost.lua`, `ghost_control.build_clusters`)
 - **Recharger une voiture vide.** Ajouter un ou plusieurs moyens ; aujourd'hui il faut la ramasser et la reposer. (`travel.handle_empty`)
 - **Réessai sans limite vers un chargeur.** Ne le garder que lorsque la voiture est sur le retour (recharge juste avant le garage, ou après un abandon complet) ; ailleurs, limiter les essais comme pour les autres trajets. Tant que ce réessai est sans limite, `release_charger_slot` dans `stuck_tick` ne libère jamais rien. (`travel.start_stuck`)
+- **Technologies.** Des technologies (`TechnologyPrototype`) pour débloquer et améliorer : l'ensemble minimal d'objets nécessaire au fonctionnement du mode (derrière Automobilism et d'autres), la vitesse de charge et de réparation, la réparation dans les garages, la capacité des garages, des chargeurs et des voitures, la vitesse de construction, la vitesse de déplacement (si possible sans perturber les trajets). (`data.lua`)
+- **Autres types de robots** (facultatif). Logistique : objets, liquides. (`ghost.lua`, `ghost_control.register_ghost`)
+- **Voiture armée.** Pouvoir armer la voiture (petite capacité) pour qu'elle se défende seule. (`prototypes/car.lua`)
+- **Fuite du danger.** La voiture fuit une force ennemie. (`movement.lua`, `movement.update_mode`)
+- **Construction automatique d'une mine.** Sans ghosts : le joueur sélectionne un gisement et les voitures posent et optimisent seules les foreuses, le réseau électrique et, quand c'est nécessaire (uranium), les tuyaux ; même chose pour le pétrole et les sources du même genre. Éventuellement une gare à proximité, les liens avec les réseaux électriques et les rails restant au joueur. Demanderait un haut niveau de recherche et peut-être un bâtiment de plus, une tour de contrôle dont la consommation d'énergie dépend de la distance du chantier et de sa taille. (`ghost.lua`, `ghost_control.register_ghost`)
+- **Secours d'une voiture coincée.** Envoyer une voiture la récupérer ou la relancer (risque de bloquer toutes les voitures) ; s'associe à « Recharger une voiture vide ». Plus tard, aller chercher un train en panne. (`travel.lua`, `travel.start_stuck`)
 - **Graphismes provisoires.** Coffre d'approvisionnement, icône du sélecteur de ghosts, icône du raccourci des objets manquants (`prototypes/missing_items.lua`), restes du garage et du chargeur (leurs images sont déjà dans `graphics/*/remnants`, pas encore utilisées). (`prototypes/`)
 
 ## Problèmes connus
@@ -204,5 +210,5 @@ Idées et tâches retenues par le propriétaire, pas encore commencées. Chacune
 
 ### Corrigés, à valider
 
-- **Batch donné à une voiture en panne de charge** (ancien problème 12). `find_available_car` et `try_assign_pending` écartent une voiture dont la charge est sous son seuil critique (`travel.is_fuel_critical`). Scénario à écrire : voiture arrêtée à 14 % de charge à 500 tiles du seul chargeur, puis un ghost sélectionné ; elle ne doit pas recevoir le batch.
+- **Batch donné à une voiture en panne de charge** (ancien problème 12). `find_available_car` et `try_assign_pending` écartent une voiture dont la charge est sous son seuil critique (`travel.is_fuel_critical`). Scénario `critical-no-batch` (catégorie `energy`, pas encore lancé) : une voiture à 14 % de charge, chargeur à 800 tiles, et une voiture pleine à côté ; la pleine reçoit le batch, l'autre non (lignes `EVENT` à 1500 ticks).
 - **Coût de la mesure du seuil critique** (ancien problème 11), sans effet visible : plus de mesure au-dessus de 80 % de charge, mesure espacée (`short_delay`) tant que la charge dépasse le double du dernier seuil. À vérifier en jeu qu'une voiture qui passe sous le seuil part toujours se recharger à temps.

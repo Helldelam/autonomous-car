@@ -35,6 +35,8 @@ local ghost_control = {}
 -- Tracking
 -- ============================================================
 
+-- TODO: other robot types (logistic: items, fluids); building a whole mine from a selected
+-- resource patch, without ghosts. See "À faire" in CLAUDE.md.
 -- Starts tracking a ghost, unless it lies inside a robot network (robots will
 -- build that one) or is tracked already: it is then with a car or in the
 -- pending pool, and must not be queued twice. Returns true if the ghost is newly
