@@ -35,17 +35,17 @@ Sous Linux (environnement cloud, sans Factorio) : `apt-get install lua5.2 lua-ch
 Scénarios de test (dossier `tests/`, temporaire : à retirer avant publication, le mod n'en charge rien) :
 
 ```powershell
-testsun.ps1                                  # tous les scénarios, quatre lancements de Factorio
-testsun.ps1 movement                         # une catégorie : movement, robustness, construction, energy
-testsun.ps1 -Changed                         # les catégories que les fichiers modifiés depuis le dernier commit peuvent affecter
-testsun.ps1 maze, garage-exit -Ticks 8000    # des scénarios précis (un lancement par catégorie concernée)
-testsun.ps1 -Reference <dossier ou zip>      # compare les traces avec une autre version du mod
+tests\run.ps1                                  # tous les scénarios, quatre lancements de Factorio
+tests\run.ps1 movement                         # une catégorie : movement, robustness, construction, energy
+tests\run.ps1 -Changed                         # les catégories que les fichiers modifiés depuis le dernier commit peuvent affecter
+tests\run.ps1 maze, garage-exit -Ticks 8000    # des scénarios précis (un lancement par catégorie concernée)
+tests\run.ps1 -Reference <dossier ou zip>      # compare les traces avec une autre version du mod
 tests\show.ps1 construction -Car 132           # changements d'état d'une voiture dans une trace
 ```
 
 Chaque scénario a une catégorie (champ `category` dans `tests/harness.lua`) ; les scénarios d'une catégorie qu'on lance tournent ensemble dans une seule partie, chacun sur sa surface et avec sa trace (`trace-<scénario>.txt`), pour ne pas lancer Factorio 24 fois : `movement` (17 scénarios, déplacements autour d'obstacles : salles, murs, forêts, labyrinthes, portes), `robustness` (voitures bloquées, pannes, batterie vide), `construction`, `energy` (chargeurs et garages). Une erreur de script arrête toute la catégorie. Un nouveau scénario prend la catégorie de ce qu'il vérifie, et une surface à lui (`new_surface`).
 
-`run.ps1` lance Factorio sans fenêtre ni joueur sur une copie du mod dans `%TEMP%utonomous-car-tests` ; rien n'est écrit dans le dossier Factorio et le jeu peut rester ouvert. Il affiche pour chaque scénario l'erreur de script éventuelle, les événements et le dernier résumé. `-Reference` sert à vérifier qu'un refactoring ne change aucun comportement : Factorio est déterministe, deux versions équivalentes donnent des traces identiques (à scénarios groupés identiques : les numéros d'entités dépendent des scénarios lancés ensemble). La version de référence tourne avec son propre `tests/harness.lua` quand elle en a un, ce qui permet de comparer deux versions dont les noms diffèrent. Les scénarios posent de l'herbe (`grass-1`, friction 1.6) sur leur surface, comme en jeu : sur les tuiles de laboratoire les voitures vont bien plus vite. Les scénarios sont décrits dans `tests/harness.lua`, qui en est la seule liste : `run.ps1` y lit leurs noms, leur durée (22 000 ticks, ou le champ `ticks`) et leur catégorie, `show.ps1` y lit les noms des drapeaux. Ce fichier est greffé à la fin de `control.lua` et utilise ses locales (`on_area_selected`, `names`, les modules) : renommer l'une d'elles impose de le mettre à jour. Un événement `NOSTATE` dans une trace signale le filet de sécurité de `update_car` (voir « Tick »).
+`run.ps1` lance Factorio sans fenêtre ni joueur sur une copie du mod dans `%TEMP%\autonomous-car-tests` ; rien n'est écrit dans le dossier Factorio et le jeu peut rester ouvert. Il affiche pour chaque scénario l'erreur de script éventuelle, les événements et le dernier résumé. `-Reference` sert à vérifier qu'un refactoring ne change aucun comportement : Factorio est déterministe, deux versions équivalentes donnent des traces identiques (à scénarios groupés identiques : les numéros d'entités dépendent des scénarios lancés ensemble). La version de référence tourne avec son propre `tests/harness.lua` quand elle en a un, ce qui permet de comparer deux versions dont les noms diffèrent. Les scénarios posent de l'herbe (`grass-1`, friction 1.6) sur leur surface, comme en jeu : sur les tuiles de laboratoire les voitures vont bien plus vite. Les scénarios sont décrits dans `tests/harness.lua`, qui en est la seule liste : `run.ps1` y lit leurs noms, leur durée (22 000 ticks, ou le champ `ticks`) et leur catégorie, `show.ps1` y lit les noms des drapeaux. Ce fichier est greffé à la fin de `control.lua` et utilise ses locales (`on_area_selected`, `names`, les modules) : renommer l'une d'elles impose de le mettre à jour. Un événement `NOSTATE` dans une trace signale le filet de sécurité de `update_car` (voir « Tick »).
 
 ## Architecture
 
