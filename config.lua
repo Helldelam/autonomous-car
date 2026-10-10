@@ -137,7 +137,7 @@ config.precision_lookahead_length = 2 -- replaces lookahead_length
 -- constant, and list the new usage here.
 
 config.short_delay = 30 -- (0.5s)
-	-- travel.handle_critical_fuel: pause between two charger searches when none is reachable
+	-- travel.handle_critical_fuel: pause between two charger searches when none is reachable; period of the critical level measure while the tank holds much more than it
 	-- movement.update_mode: cooldown before emergency braking can trigger again after a stop
 	-- movement.drive_tick: a car that stands still this long after a leg began or a maneuver ended has hit an obstacle
 	-- movement.maneuver_tick: a car that drives but does not move this long backs off; the car follows one arc this long, and the heading is looked for again this often
@@ -188,6 +188,7 @@ config.fuel_safety_margin = 1.4 -- multiplier on that estimate, to cover detours
 config.max_charge_detours = 5 -- consecutive charging detours before the destination is reported unreachable
 config.critical_fuel_ratio = 0.1 -- below this fraction of a full tank a car drops everything to recharge.
 	-- Also the charge of a new car, and the level an empty car must be back to before it resumes (see travel.handle_empty).
+config.critical_check_fuel_ratio = 0.8 -- above this fraction of a full tank a car does not look for the critical level at all: it is certainly near a charger
 config.pre_park_fuel_ratio = 0.9 -- an idle car below this fraction tops up before it parks
 config.max_charger_users = 4 -- cars that can use the same charger at once
 
@@ -231,5 +232,8 @@ assert(config.lookahead_start >= car_reach,
 	"config.lookahead_start must be above half the car length plus its half diagonal: the first sample point would overlap the car")
 assert(config.precision_lookahead_start >= car_reach,
 	"config.precision_lookahead_start must be above half the car length plus its half diagonal: the first sample point would overlap the car")
+
+assert(config.critical_fuel_ratio < config.critical_check_fuel_ratio and config.critical_check_fuel_ratio < config.pre_park_fuel_ratio,
+	"config.critical_check_fuel_ratio must lie between config.critical_fuel_ratio and config.pre_park_fuel_ratio")
 
 return config

@@ -1049,6 +1049,32 @@ scenarios["empty-battery"] = {
 	end,
 }
 
+-- Two idle cars side by side, one at 14 % charge with the only charger 800 tiles away
+-- (under its critical level, out of reach), one full. A ghost is selected at t = 200:
+-- the full car must get the batch, the low one none (EVENT lines at t = 1500).
+scenarios["critical-no-batch"] = {
+	ticks = 2000,
+	category = "energy",
+	setup = function()
+		local s = new_surface({{0, 0}, {800, 0}}, 3)
+		make(s, names.charger, 800, 0)
+		T.chest = make(s, names.chest, 0.5, 20.5)
+		fill(T.chest, {["wooden-chest"] = 20})
+		T.low = make_car(s, 5, 0, 0, 0.14)
+		T.full = make_car(s, 5, 6, 0, 1)
+		make_ghost(s, "wooden-chest", 30.5, 30.5)
+	end,
+	events = function(t)
+		if t == 200 then
+			select_ghosts(25, 25, 35, 35)
+		end
+		if t == 1500 then
+			out("EVENT low car " .. (storage.car_data[T.low.unit_number].construction and "GOT a batch (wrong)" or "has no batch (expected)"))
+			out("EVENT full car " .. (storage.car_data[T.full.unit_number].construction and "has a batch (expected)" or "has no batch (batch already built or lost)"))
+		end
+	end,
+}
+
 -- A wall with a gate on the straight way between a supply chest and a ghost: the
 -- car can only build the ghost if it gets through the gate. The car has no
 -- can_open_gates: movement.open_gates asks the gate to open as it approaches.
