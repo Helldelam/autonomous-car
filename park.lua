@@ -10,17 +10,21 @@ local function alert_parking_failed(car, garage)
 		"Unexpected error while parking an autonomous car.", config.names.car)
 end
 
+-- Drops the parking task and hands the car to the waiting loop, which looks for another garage.
+local function stop_parking(car_data)
+	car_data.parking.active = false
+	car_data.parking.garage = nil
+	_utils.start_waiting(car_data)
+end
+
+-- TODO: do not park on rails; repair kit slots in the garage. See "À faire" in CLAUDE.md.
 -- Called every tick while the car is at its garage: mines the car into the
 -- garage inventory. The trunk must be empty first.
 function garage_control.parking_tick(car, garage)
 	local car_data = storage.car_data[car.unit_number]
 
 	if not (garage and garage.valid) then
-		-- The garage is gone: go back to waiting and look for another one.
-		car_data.parking.active = false
-		car_data.parking.garage = nil
-		car_data.waiting.active = true
-		car_data.waiting.since = game.tick
+		stop_parking(car_data) -- the garage is gone
 		return
 	end
 
@@ -29,9 +33,7 @@ function garage_control.parking_tick(car, garage)
 	if inventory.is_full() then
 		_utils.alert_once(car_data.alerts, "garage_full", car.force, garage,
 			"No room left in this garage for the car trying to park.", config.names.garage)
-		-- Drop the parking task. No other state is activated here.
-		car_data.parking.active = false
-		car_data.parking.garage = nil
+		stop_parking(car_data)
 		return
 	end
 	_utils.alert_reset(car_data.alerts, "garage_full")
@@ -49,7 +51,7 @@ function garage_control.parking_tick(car, garage)
 		alert_parking_failed(car, garage)
 		return
 	end
-	storage.garage_data[garage.unit_number].fuel[slot] = _utils.remaining_fuel(car)
+	storage.garage_data[garage.unit_number].fuel[slot] = _utils.get_fuel(car)
 
 	-- Once mined the car entity is invalid: on_tick releases its state on the next tick.
 	if not car.mine{inventory = inventory} then
@@ -98,11 +100,30 @@ function garage_control.release_car(garage)
 	return car
 end
 
+-- Repairs the parked cars a little, for free: config.garage_repair_rate of their
+-- health each time it runs (every config.long_delay, see on_tick in control.lua).
+-- The health of the item carries over to the car when it is released.
+function garage_control.repair_parked_cars()
+	for id, garage in pairs(storage.garages) do
+		if garage.valid then
+			local inventory = garage.get_inventory(defines.inventory.chest)
+			for slot = 1, #inventory do
+				local stack = inventory[slot]
+				if stack.valid_for_read and stack.name == config.names.car and stack.health < 1 then
+					stack.health = math.min(1, stack.health + config.garage_repair_rate)
+				end
+			end
+		else
+			_utils.release_entity("garage", id)
+		end
+	end
+end
+
 -- Closest garage with room left, or nil.
 function garage_control.find_garage(car)
-	return _utils.closest(storage.garages, car.position, function(garage)
+	return _utils.find_closest(storage.garages, car.position, function(garage)
 		return not garage.get_inventory(defines.inventory.chest).is_full()
-	end, "garage")
+	end, "garage", car.surface)
 end
 
 function garage_control.alert_no_garage(car)

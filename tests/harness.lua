@@ -2,17 +2,20 @@
 -- ============================================================================
 -- TEST HARNESS - temporary development aid, to be removed with the tests/ folder
 -- ============================================================================
--- tests/run.ps1 appends this file to a temporary copy of control.lua, after a
--- line that defines SCENARIO, and runs the result in Factorio's benchmark
--- mode. The mod itself never loads it. Being part of the control.lua chunk, it
+-- tests/run.ps1 appends this file to a temporary copy of control.lua, after lines
+-- that define SCENARIOS (the names of the scenarios to run, separated by commas)
+-- and TICKS (a duration for all of them, or nil), and runs the result in Factorio's
+-- benchmark mode. Scenarios of the same category run together in one game, each
+-- on its own surface and with its own trace. The mod itself never loads it. Being part of the control.lua chunk, it
 -- can use that file's locals: on_area_selected, names and the modules (which
 -- a Lua language server reading this file alone would report as undefined).
 ---@diagnostic disable: undefined-global
 --
 -- Output, in script-output/:
---   trace.txt     one line per car every 10 ticks, plus SETUP, EVENT, SELECT
+--   trace-<scenario>.txt  one line per car every 10 ticks, plus SETUP, EVENT,
+--                 SELECT, BATCH (clusters of a car's batch, each time it changes)
 --                 and SUMMARY lines, and the GATE-TEST lines of gate-manual
---   coverage.txt  how many times each module function was called
+--   coverage.txt  how many times each module function was called (all scenarios)
 --
 -- Car line:
 --   tick id x y orientation speed fuel FLAGS a<acceleration> d<direction>
@@ -22,29 +25,51 @@
 -- when the car has no batch. tests/show.ps1 decodes these lines, and reads
 -- FLAG_NAMES from the line below.
 
-local FLAG_NAMES = {"moving", "charging", "parking", "building", "stuck", "waiting", "empty", "maneuver", "emergency_brake", "high_speed", "precision_mode"}
+local FLAG_NAMES = {"moving", "charging", "parking", "building", "stuck", "waiting", "empty", "maneuver", "emergency_brake", "high_speed", "precision_mode", "slowing", "path"}
 local BUILT_NAMES = {"wooden-chest", "stone-furnace", "small-electric-pole", "steel-chest", "car"}
 
-local T = {chargers = {}} -- state of the running scenario
+local T -- state of the scenario being run (see `use`): set before any of its code runs
+local states = {}
 local scenarios = {}
+
+-- Makes `name` the current scenario: its code reads and writes T.
+local function use(name)
+	if not states[name] then
+		states[name] = {name = name, chargers = {}, clusters = {}, surfaces = {}}
+	end
+	T = states[name]
+end
 
 -- ============================================================
 -- Helpers
 -- ============================================================
 
 local function out(line)
-	helpers.write_file("trace.txt", line .. "\n", true)
+	helpers.write_file("trace-" .. T.name .. ".txt", line .. "\n", true)
 end
 
--- Creates the flat test surface, generated around each chunk centre given.
+-- Creates the flat test surface, generated around each chunk centre given. Lab
+-- tiles have no friction of their own, which makes the cars much faster than on
+-- the grass they are tuned on in game: the ground is laid with grass.
 local function new_surface(centres, radius)
-	local surface = game.create_surface("test")
+	local surface = game.create_surface("test-" .. T.name)
 	surface.generate_with_lab_tiles = true
 	for _, centre in pairs(centres) do
 		surface.request_to_generate_chunks(centre, radius)
 	end
 	surface.force_generate_chunk_requests()
+	for _, centre in pairs(centres) do
+		local tiles = {}
+		local half = radius * 32 + 16
+		for x = centre[1] - half, centre[1] + half - 1 do
+			for y = centre[2] - half, centre[2] + half - 1 do
+				tiles[#tiles + 1] = {name = "grass-1", position = {x, y}}
+			end
+		end
+		surface.set_tiles(tiles, false)
+	end
 	T.surface = surface
+	T.surfaces[surface.index] = true
 	return surface
 end
 
@@ -64,7 +89,7 @@ local function make_car(surface, x, y, orientation, fuel_ratio)
 	local car = make(surface, names.car, x, y)
 	car.orientation = orientation
 	if fuel_ratio then
-		_utils.set_fuel(car, _utils.fuel_capacity(car) * fuel_ratio)
+		_utils.set_fuel(car, _utils.get_fuel_capacity(car) * fuel_ratio)
 	end
 	return car
 end
@@ -106,28 +131,33 @@ end
 -- Scenarios
 -- ============================================================
 -- Each scenario has a `setup` function, an optional `events(t)` function,
--- called every tick with the number of ticks since the setup, and an optional
--- `ticks`, the time it runs when it needs less than the default of run.ps1.
--- This file is the only list of scenarios: run.ps1 reads their names and
--- their `ticks` from the lines below. Keep the form scenarios["name"] = {,
--- with `ticks = N,` as the next line.
+-- called every tick with the number of ticks since the setup, an optional
+-- `ticks`, the time it runs when it needs less than the default of 22000, and a
+-- `category`: the scenarios of a category run together, in one game. Pick the
+-- category by what the scenario checks: movement (driving around obstacles),
+-- robustness (stuck cars, failures, empty battery), construction, energy
+-- (chargers and garages). This file is the only list of scenarios: run.ps1 reads
+-- their names, `ticks` and `category` from the lines below. Keep the form
+-- scenarios["name"] = { followed by those lines.
 
 -- Driving, charging and parking, on open ground, around obstacles and on
--- natural terrain. Also: a destination destroyed on the way, and a critically
--- low car with no charger in reach.
+-- natural terrain. Also: a destination destroyed on the way, a critically
+-- low car with no charger in reach, and cars on two surfaces (a car must only
+-- pick the chargers and garages of its own surface).
 scenarios["basics"] = {
+	category = "energy",
 	setup = function()
-		-- The flat zones sit far from the origin, away from the nauvis zone
-		-- below: cars pick chargers and garages by position only, whatever
-		-- the surface.
 		local s = new_surface({{10000, 0}, {11000, 0}, {11000, 1000}, {12000, 0}}, 6)
 
-		-- Open ground: three cars that charge, then park.
+		-- Open ground: five cars that charge, then park. Two of them start side
+		-- by side and head for the same charger: they must not collide.
 		make(s, names.charger, 10000, 0)
 		make(s, names.garage, 10040, 0)
 		make_car(s, 9920, 20, 0)
 		make_car(s, 9950, -60, 0.25)
 		make_car(s, 10020, 70, 0.6)
+		make_car(s, 9900, -2, 0.25)
+		make_car(s, 9900, 2, 0.25)
 
 		-- A wall and trees between two cars and their charger.
 		make(s, names.charger, 11000, 0)
@@ -157,6 +187,7 @@ scenarios["basics"] = {
 
 		-- Natural terrain: the starting area of nauvis.
 		local nauvis = game.surfaces.nauvis
+		T.surfaces[nauvis.index] = true
 		nauvis.request_to_generate_chunks({0, 0}, 8)
 		nauvis.force_generate_chunk_requests()
 		for _, enemy in pairs(nauvis.find_entities_filtered{force = "enemy"}) do
@@ -204,10 +235,13 @@ scenarios["basics"] = {
 	end,
 }
 
--- A full construction run with three cars: several ghost types, a batch too
--- large for one trunk, items that arrive late, a ghost destroyed during its
+-- A full construction run with three cars: several ghost types, a cluster too
+-- large for one trunk, several clusters on one car (BATCH lines), items that
+-- arrive late (the steel chest cluster goes back to the pending pool while the
+-- others are built), recharging between clusters, a ghost destroyed during its
 -- batch, and a second selection.
 scenarios["construction"] = {
+	category = "construction",
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
 		make(s, names.charger, 0, 0)
@@ -266,10 +300,12 @@ scenarios["construction"] = {
 }
 
 -- Failure paths: a destination destroyed on the way, a garage that fills up
--- before the car gets there, a car that reaches its garage with a loaded
--- trunk, a garage out of range with no charger, a car destroyed with a batch,
--- and no garage left at all.
+-- before the car gets there (the car should look for another one), a car that
+-- reaches its garage with a loaded trunk (it cannot park), a garage out of
+-- range with no charger, a car destroyed with a batch, and no garage left at
+-- all.
 scenarios["failures"] = {
+	category = "robustness",
 	setup = function()
 		local s = new_surface({{0, 0}, {3000, 3000}, {3500, 3000}}, 10)
 		make(s, names.charger, 0, 0)
@@ -339,54 +375,77 @@ scenarios["failures"] = {
 	end,
 }
 
--- One waiting car, no garage, and a ghost that cannot be built until its wall
--- is removed at t = 12000: failed revives, cooldown, step back, the ghost sent
--- back to the pending pool, and the leftover item deposited.
-scenarios["blocked-ghost"] = {
+-- One car, one garage, one supply chest, two ghosts one after the other:
+--  1. The car (damaged, to watch the slow repair in the garage: EVENT health
+--     lines) parks, is released at t = 4000 for an ordinary ghost and should build
+--     it. When this scenario was written the car stayed stuck against the garage.
+--  2. At t = 8000 a furnace ghost that cannot be built (a wall sits on it) is
+--     selected: failed revives, cooldown, step back, the ghost sent back to the
+--     pending pool. The chest is filled up while the car carries the furnace, so
+--     the leftover cannot be deposited: alert supply_full, the car keeps it and
+--     takes no new batch. The chest is emptied at t = 13000, the car deposits and
+--     the ghost goes round again until the wall is removed at t = 17000.
+scenarios["garage-exit"] = {
+	category = "energy",
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
 		make(s, names.charger, 0, 0)
+		T.garage = make(s, names.garage, 30, 0)
 		T.chest = make(s, names.chest, 0.5, 30.5)
-		fill(T.chest, {["wooden-chest"] = 20})
-		make_car(s, -20, -20, 0)
-		make_blocked_ghost(s, 80.5, 40.5)
+		fill(T.chest, {["wooden-chest"] = 20, ["stone-furnace"] = 1})
+		T.car = make_car(s, -20, -20, 0)
+		T.car.health = T.car.max_health / 2
+		make_ghost(s, "wooden-chest", 80.5, 40.5)
+		T.wall = s.create_entity{name = "stone-wall", position = {80.5, -40.5}, force = "player"}
+		make_ghost(s, "stone-furnace", 81, -41)
 	end,
 	events = function(t)
-		if t == 400 then
+		local inventory = T.chest.get_inventory(defines.inventory.chest)
+		if t == 3900 or t == 7900 then
+			local stack = T.garage.get_inventory(defines.inventory.chest).find_item_stack(names.car)
+			if stack then
+				out(string.format("EVENT parked car health %.3f at %d", stack.health, t))
+			else
+				for _, car in pairs(storage.cars) do
+					out(string.format("EVENT car health %.3f of %.3f at %d", car.health, car.max_health, t))
+				end
+			end
+		end
+		if t == 4000 then
 			select_ghosts(70, 30, 90, 50)
 		end
-		if t == 12000 and T.wall.valid then
+		if t == 8000 then
+			select_ghosts(75, -50, 90, -30)
+		end
+		if t > 8000 and not T.chest_filled then
+			for _, car in pairs(storage.cars) do
+				if car.valid and car.get_inventory(defines.inventory.car_trunk).get_item_count("stone-furnace") > 0 then
+					T.chest_filled = true
+					while inventory.insert{name = "iron-plate", count = 100} > 0 do end
+					out("EVENT chest filled at " .. t)
+				end
+			end
+		end
+		if t == 13000 then
+			local plates = inventory.get_item_count("iron-plate")
+			if plates > 0 then
+				inventory.remove{name = "iron-plate", count = plates}
+			end
+			out("EVENT chest emptied (" .. plates .. " plates)")
+		end
+		if t == 17000 and T.wall.valid then
 			T.wall.destroy()
 			out("EVENT wall removed")
 		end
 	end,
 }
 
--- A parked car is released from its garage for one ordinary ghost. The ghost
--- should get built. When this scenario was written the car stayed stuck
--- against the garage and the ghost was never built.
-scenarios["garage-exit"] = {
-	setup = function()
-		local s = new_surface({{0, 0}}, 10)
-		make(s, names.charger, 0, 0)
-		make(s, names.garage, 30, 0)
-		T.chest = make(s, names.chest, 0.5, 30.5)
-		fill(T.chest, {["wooden-chest"] = 20})
-		make_car(s, -20, -20, 0)
-		make_ghost(s, "wooden-chest", 80.5, 40.5)
-	end,
-	events = function(t)
-		if t == 2500 then
-			select_ghosts(70, 30, 90, 50)
-		end
-	end,
-}
-
 -- A car on its way to a charger is given a batch whose only ghost cannot be
--- built. Its queued "charging" task stays in the queue and is run when the
--- car arrives from its step back. When this scenario was written that ended
--- in a script error in charge.lua.
+-- built. It must not be available for a batch on its way (it used to be, and
+-- its queued "charging" task was then run on arrival from its step back, which
+-- ended in a script error in charge.lua).
 scenarios["stale-task"] = {
+	category = "robustness",
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
 		make(s, names.charger, -150, 0)
@@ -418,14 +477,20 @@ local function wall_ring(surface, cx, cy)
 	return walls
 end
 
--- Three cars walled in, for the stuck escalation (maneuvers, retries, final stop,
--- abandon):
---   car A  has a batch and is freed at t = 2600, during its first stuck wait: its retry should work
---   car B  has a batch and is never freed: stuck again and again, then the batch is abandoned
+-- Four cars walled in, for the maneuver in a closed space and the stuck escalation:
+--   car A  has a batch and an opening of 3 tiles is made in its ring at t = 600 (an opening
+--          of 1 tile is not a valid exit for a car, which needs 3 to find its way): it should
+--          get out through it and build
+--   car D  is like car A, but its opening is made at t = 300, while it is still manoeuvring
+--          (before it asks for a path): it should find the opening and build, without any stuck
+--   car B  has a batch and is never freed: it ends stuck and abandons its batch, with
+--          retries of its leg if it can still cross the room, without any once it is blocked both ways
+--          (blocked both ways at one spot, see movement.back_off)
 --   car C  is walled in with a low tank and a charger out of reach of its walls:
 --          its leg to the charger is retried without limit and never abandoned
 -- The ghosts of B are not built, and must not be assigned again after the abandon.
 scenarios["sealed"] = {
+	category = "robustness",
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
 		make(s, names.charger, 0, 0)
@@ -442,23 +507,528 @@ scenarios["sealed"] = {
 
 		wall_ring(s, -50.5, 0.5)
 		make_car(s, -50.5, 0.5, 0, 0.05)
+
+		T.ring_d = wall_ring(s, 50.5, 110.5)
+		make_car(s, 50.5, 110.5, 0, 1)
+		make_ghost(s, "wooden-chest", 90.5, 110.5)
 	end,
 	events = function(t)
 		if t == 100 then
 			select_ghosts(85, 45, 95, 55)
 			select_ghosts(85, -55, 95, -45)
+			select_ghosts(85, 105, 95, 115)
 		end
-		if t == 2600 then
-			T.ring_a["3,0"].destroy()
+		if t == 300 then
+			for dy = -1, 1 do
+				T.ring_d["3," .. dy].destroy()
+			end
+			out("EVENT wall of car D opened")
+		end
+		if t == 600 then
+			for dy = -1, 1 do
+				T.ring_a["3," .. dy].destroy()
+			end
 			out("EVENT wall of car A opened")
 		end
 	end,
+}
+
+-- Cars in a dead end made of walls: a corridor 4 tiles wide and 16 long, closed at
+-- its west end and open (4 tiles) at its east end, with the ghost and the supply
+-- chest behind the closed end. The cars have to get out of the corridor and round
+-- the walls: the maneuvers alone do not see that far, the last attempt asks the
+-- pathfinder (flag `path` in the trace). Three starts: facing the closed end,
+-- facing a side wall, and facing the opening.
+scenarios["u-corridor"] = {
+	ticks = 9000,
+	category = "movement",
+	setup = function()
+		local s = new_surface({{0, 0}}, 10)
+		make(s, names.charger, 0, 0)
+		T.starts = {{x = 2, o = 0.75}, {x = 6, o = 0}, {x = 10, o = 0.25}}
+		for index, start in ipairs(T.starts) do
+			local cx, cy = 100, index * 40 - 100
+			for x = -1, 16 do
+				s.create_entity{name = "stone-wall", position = {cx + x + 0.5, cy - 0.5}, force = "player"}
+				s.create_entity{name = "stone-wall", position = {cx + x + 0.5, cy + 4.5}, force = "player"}
+			end
+			for y = 0, 3 do
+				s.create_entity{name = "stone-wall", position = {cx - 0.5, cy + y + 0.5}, force = "player"}
+			end
+			make_car(s, cx + start.x, cy + 2, start.o, 1)
+			fill(make(s, names.chest, cx - 8.5, cy - 4.5), {["wooden-chest"] = 20})
+			make_ghost(s, "wooden-chest", cx - 8.5, cy + 2.5)
+		end
+	end,
+	events = function(t)
+		if t == 100 then
+			for index = 1, #T.starts do
+				local cy = index * 40 - 100
+				select_ghosts(88, cy, 94, cy + 5)
+			end
+		end
+	end,
+}
+
+-- Twenty cars, each in its own closed room 16 tiles long whose only exit, 3 tiles wide,
+-- is in the middle of its north wall (inside the U, not at its end): the cars start at
+-- twenty places and orientations, and have to leave the room to reach a supply chest and
+-- a ghost outside, to the north. The number of chests built is the number of cars that
+-- got out and finished (SUMMARY), BATCH lines give the tick each finished. u-side rooms
+-- are 4 tiles wide, u-narrow ones 3.
+local ROOM_STARTS = {
+	{x = 2, o = 0.75}, {x = 4, o = 0}, {x = 6, o = 0.25}, {x = 8, o = 0.5}, {x = 10, o = 0.125},
+	{x = 12, o = 0.625}, {x = 14, o = 0.875}, {x = 15, o = 0.25}, {x = 3, o = 0.5}, {x = 11, o = 0},
+	{x = 1.5, o = 0.375}, {x = 3.5, o = 0.5}, {x = 5, o = 0.125}, {x = 7, o = 0.75}, {x = 9, o = 0.875},
+	{x = 10.5, o = 0.25}, {x = 12.5, o = 0.625}, {x = 13.5, o = 0}, {x = 14.5, o = 0.5}, {x = 6.5, o = 0.75},
+}
+
+local function room_origin(index)
+	return 100 + 40 * math.floor((index - 1) / 10), ((index - 1) % 10 + 1) * 30 - 170
+end
+
+local function build_rooms(width)
+	local s = new_surface({{0, 0}}, 10)
+	make(s, names.charger, 0, 0)
+	for index, start in ipairs(ROOM_STARTS) do
+		local cx, cy = room_origin(index)
+		for x = -1, 16 do
+			if x < 7 or x > 9 then
+				s.create_entity{name = "stone-wall", position = {cx + x + 0.5, cy - 0.5}, force = "player"}
+			end
+			s.create_entity{name = "stone-wall", position = {cx + x + 0.5, cy + width + 0.5}, force = "player"}
+		end
+		for y = 0, width - 1 do
+			s.create_entity{name = "stone-wall", position = {cx - 0.5, cy + y + 0.5}, force = "player"}
+			s.create_entity{name = "stone-wall", position = {cx + 16.5, cy + y + 0.5}, force = "player"}
+		end
+		local lane = width / 2 + (index % 2 == 0 and -0.6 or 0.6) * (width - 2) / 2
+		make_car(s, cx + start.x, cy + lane, start.o, 1)
+		fill(make(s, names.chest, cx + 13.5, cy - 10.5), {["wooden-chest"] = 20})
+		make_ghost(s, "wooden-chest", cx + 3.5, cy - 10.5)
+	end
+end
+
+local function select_rooms(t)
+	if t == 100 then
+		for index = 1, #ROOM_STARTS do
+			local cx, cy = room_origin(index)
+			select_ghosts(cx + 1, cy - 12, cx + 6, cy - 9)
+		end
+	end
+end
+
+scenarios["u-side"] = {
+	ticks = 6000,
+	category = "movement",
+	setup = function() build_rooms(4) end,
+	events = select_rooms,
+}
+
+scenarios["u-narrow"] = {
+	ticks = 6000,
+	category = "movement",
+	setup = function() build_rooms(3) end,
+	events = select_rooms,
+}
+
+-- Open ground, no obstacle: twelve cars turned every 30 degrees, a supply chest and a
+-- ghost to the east of each. The cars that face away have to turn around before they
+-- drive. BATCH lines give the tick each finished.
+scenarios["turn-around"] = {
+	ticks = 4000,
+	category = "movement",
+	setup = function()
+		local s = new_surface({{0, 0}}, 10)
+		make(s, names.charger, 0, 0)
+		T.turns = 12
+		for index = 1, T.turns do
+			local cx, cy = 100, index * 20 - 140
+			make_car(s, cx, cy, (index - 1) / T.turns, 1)
+			fill(make(s, names.chest, cx + 8.5, cy - 3.5), {["wooden-chest"] = 20})
+			make_ghost(s, "wooden-chest", cx + 16.5, cy - 3.5)
+		end
+	end,
+	events = function(t)
+		if t == 100 then
+			for index = 1, T.turns do
+				local cy = index * 20 - 140
+				select_ghosts(112, cy - 6, 120, cy)
+			end
+		end
+	end,
+}
+
+-- A wall 40 tiles long between each car and its supply chest and ghost: the straight way
+-- is shut, the car has to find that it must go round, which the steering alone does not
+-- (it follows the wall or stops in front of it). Eight cars at different distances along
+-- the wall.
+scenarios["long-wall"] = {
+	ticks = 8000,
+	category = "movement",
+	setup = function()
+		local s = new_surface({{0, 0}}, 10)
+		make(s, names.charger, 0, 0)
+		T.offsets = {-15, -8, -3, 0, 3, 8, 15, 0}
+		for index, offset in ipairs(T.offsets) do
+			local cx, cy = 100 + 100 * math.floor((index - 1) / 4), ((index - 1) % 4) * 100 - 150
+			for y = -20, 20 do
+				s.create_entity{name = "stone-wall", position = {cx + 10.5, cy + y + 0.5}, force = "player"}
+			end
+			make_car(s, cx, cy + offset, 0.25, 1)
+			fill(make(s, names.chest, cx + 20.5, cy + 0.5), {["wooden-chest"] = 20})
+			make_ghost(s, "wooden-chest", cx + 24.5, cy + 3.5)
+		end
+	end,
+	events = function(t)
+		if t == 100 then
+			for index = 1, #T.offsets do
+				local cx, cy = 100 + 100 * math.floor((index - 1) / 4), ((index - 1) % 4) * 100 - 150
+				select_ghosts(cx + 22, cy, cx + 27, cy + 7)
+			end
+		end
+	end,
+}
+
+-- Obstacle courses: each course is a car, an obstacle field between it and its supply
+-- chest, and a ghost behind the chest. The number of chests built (SUMMARY) is the
+-- number of cars that got through; BATCH lines give the tick each finished.
+-- Course i sits at x = 60, y = (i - 1) * 100 - 250, so six courses fit a scenario (see T.spread).
+local seed = 12345
+local function random()
+	seed = (seed * 1103515245 + 12345) % 2147483648
+	return seed / 2147483648
+end
+
+-- `T.spread`: two columns of three, 250 tiles apart, for courses longer than 100 tiles.
+local function course_origin(index)
+	if T.spread then
+		return 60 + 160 * ((index - 1) % 2), math.floor((index - 1) / 2) * 250 - 250
+	end
+	return 60, (index - 1) * 100 - 250
+end
+
+local function wall_at(s, x, y)
+	s.create_entity{name = "stone-wall", position = {x, y}, force = "player"}
+end
+
+-- A line of wall tiles between two points (axis aligned).
+local function wall_line(s, x1, y1, x2, y2)
+	for x = x1, x2 do
+		for y = y1, y2 do
+			wall_at(s, x + 0.5, y + 0.5)
+		end
+	end
+end
+
+-- `course`: {obstacles = function(s, cx, cy), car = {dx, dy, orientation}, chest = {dx, dy}};
+-- the ghost is by default 4 tiles east and 3 south of the chest (`ghost = {dx, dy}`).
+local function build_courses(courses, chunks)
+	local s = new_surface({{0, 0}}, chunks or 11)
+	make(s, names.charger, 0, 0)
+	T.courses = courses
+	for index, course in ipairs(courses) do
+		local cx, cy = course_origin(index)
+		course.obstacles(s, cx, cy)
+		make_car(s, cx + course.car[1], cy + course.car[2], course.car[3], 1)
+		local chest_x, chest_y = cx + course.chest[1] + 0.5, cy + course.chest[2] + 0.5
+		fill(make(s, names.chest, chest_x, chest_y), {["wooden-chest"] = 20})
+		local ghost = course.ghost or {4, 3}
+		make_ghost(s, "wooden-chest", chest_x + ghost[1], chest_y + ghost[2])
+	end
+end
+
+local function select_courses(t)
+	if t == 100 then
+		for index, course in ipairs(T.courses) do
+			local cx, cy = course_origin(index)
+			local ghost = course.ghost or {4, 3}
+			local x, y = cx + course.chest[1] + 0.5 + ghost[1], cy + course.chest[2] + 0.5 + ghost[2]
+			select_ghosts(x - 2, y - 2, x + 2, y + 2)
+		end
+	end
+end
+
+-- Trees on a jittered grid of the given spacing over a rectangle.
+local function plant(s, x1, y1, x2, y2, spacing)
+	local failed = 0
+	for x = x1, x2, spacing do
+		for y = y1, y2, spacing do
+			local tree = s.create_entity{name = "tree-01", position = {x + (random() - 0.5) * spacing * 0.6,
+				y + (random() - 0.5) * spacing * 0.6}}
+			if not tree then failed = failed + 1 end
+		end
+	end
+	if failed > 0 then out("SETUP " .. failed .. " trees not created") end
+end
+
+-- Furnaces (2x2) on a grid whose lanes between them are `lane` tiles wide.
+local function build_factory(s, x1, y1, x2, y2, lane)
+	for x = x1, x2, 2 + lane do
+		for y = y1, y2, 2 + lane do
+			s.create_entity{name = "stone-furnace", position = {x + 1, y + 1}, force = "player"}
+		end
+	end
+end
+
+-- A perfect maze of n x n cells, `pitch` tiles apart (walls on the grid lines).
+local function build_maze(s, x0, y0, n, pitch)
+	local open = {} -- open["x,yE"] / open["x,yS"]: the passage east or south of a cell
+	local seen = {["1,1"] = true}
+	local stack = {{1, 1}}
+	while #stack > 0 do
+		local cx, cy = stack[#stack][1], stack[#stack][2]
+		local options = {}
+		for _, d in ipairs{{1, 0, "E", cx, cy}, {0, 1, "S", cx, cy}, {-1, 0, "E", cx - 1, cy}, {0, -1, "S", cx, cy - 1}} do
+			local nx, ny = cx + d[1], cy + d[2]
+			if nx >= 1 and ny >= 1 and nx <= n and ny <= n and not seen[nx .. "," .. ny] then
+				table.insert(options, {nx, ny, d[3], d[4], d[5]})
+			end
+		end
+		if #options == 0 then
+			table.remove(stack)
+		else
+			local o = options[math.floor(random() * #options) + 1]
+			open[o[4] .. "," .. o[5] .. o[3]] = true
+			seen[o[1] .. "," .. o[2]] = true
+			table.insert(stack, {o[1], o[2]})
+		end
+	end
+	local size = n * pitch
+	wall_line(s, x0, y0, x0 + size, y0)
+	wall_line(s, x0, y0 + size, x0 + size, y0 + size)
+	wall_line(s, x0, y0, x0, y0 + size)
+	wall_line(s, x0 + size, y0, x0 + size, y0 + size)
+	for cx = 1, n do
+		for cy = 1, n do
+			if cx < n and not open[cx .. "," .. cy .. "E"] then
+				wall_line(s, x0 + cx * pitch, y0 + (cy - 1) * pitch, x0 + cx * pitch, y0 + cy * pitch)
+			end
+			if cy < n and not open[cx .. "," .. cy .. "S"] then
+				wall_line(s, x0 + (cx - 1) * pitch, y0 + cy * pitch, x0 + cx * pitch, y0 + cy * pitch)
+			end
+		end
+	end
+end
+
+-- Trees between the car and its chest, 60 tiles of forest to cross; three cars start
+-- before it, three inside it. Three densities.
+scenarios["forest"] = {
+	ticks = 9000,
+	category = "movement",
+	setup = function()
+		local function forest(spacing, inside)
+			return {
+				obstacles = function(s, cx, cy)
+					plant(s, cx + 10, cy - 20, cx + 70, cy + 20, spacing)
+					if inside then -- room for the car where it starts
+						for _, tree in pairs(s.find_entities_filtered{type = "tree", position = {cx + 35, cy}, radius = 3}) do
+							tree.destroy()
+						end
+					end
+				end,
+				car = {inside and 35 or 0, 0, 0}, chest = {90, 0},
+			}
+		end
+		build_courses{forest(3, false), forest(3, true), forest(2, false), forest(2, true), forest(1.5, false), forest(1.5, true)}
+	end,
+	events = select_courses,
+}
+
+-- Cars that have just driven into the edge of a forest: a few tiles in, boxed in by trees
+-- on all sides but a small clearing. Three go on across the forest (facing in, or
+-- turned away), three have their supply chest behind them, outside.
+scenarios["forest-edge"] = {
+	ticks = 9000,
+	category = "movement",
+	setup = function()
+		local function edge(spacing, depth, orientation, behind)
+			return {
+				obstacles = function(s, cx, cy)
+					plant(s, cx + 10, cy - 20, cx + 70, cy + 20, spacing)
+					for _, tree in pairs(s.find_entities_filtered{type = "tree", position = {cx + 10 + depth, cy}, radius = 2.4}) do
+						tree.destroy()
+					end
+				end,
+				car = {10 + depth, 0, orientation}, chest = {behind and -30 or 90, 0},
+			}
+		end
+		build_courses{edge(3, 2, 0.25, false), edge(2, 2, 0.25, false), edge(1.5, 2, 0.25, false),
+			edge(2, 2, 0.25, true), edge(1.5, 5, 0.25, false), edge(1.5, 2, 0.75, true)}
+	end,
+	events = select_courses,
+}
+
+-- The same deeper in the forest (4 to 12 tiles) and at more realistic densities, facing
+-- the forest, sideways to it, or turned away.
+scenarios["forest-depth"] = {
+	ticks = 9000,
+	category = "movement",
+	setup = function()
+		local function edge(spacing, depth, orientation, behind)
+			return {
+				obstacles = function(s, cx, cy)
+					plant(s, cx + 10, cy - 20, cx + 70, cy + 20, spacing)
+					for _, tree in pairs(s.find_entities_filtered{type = "tree", position = {cx + 10 + depth, cy}, radius = 2.4}) do
+						tree.destroy()
+					end
+				end,
+				car = {10 + depth, 0, orientation}, chest = {behind and -30 or 90, 0},
+			}
+		end
+		build_courses{edge(2, 4, 0, false), edge(2, 8, 0.25, false), edge(2, 8, 0.75, true),
+			edge(2.5, 8, 0.25, false), edge(3, 12, 0.25, false), edge(2, 12, 0.75, true)}
+	end,
+	events = select_courses,
+}
+
+-- A copse of 30 x 30 tiles on the straight way between the car and its chest, with open
+-- ground all around: the car should go round it rather than into it. Three densities,
+-- facing the copse or turned away.
+scenarios["copse"] = {
+	ticks = 9000,
+	category = "movement",
+	setup = function()
+		local function copse(spacing, orientation)
+			return {
+				obstacles = function(s, cx, cy) plant(s, cx + 30, cy - 15, cx + 60, cy + 15, spacing) end,
+				car = {0, 0, orientation}, chest = {90, 0},
+			}
+		end
+		build_courses{copse(3, 0.25), copse(3, 0.75), copse(2, 0.25), copse(2, 0.75), copse(1.5, 0.25), copse(1.5, 0.75)}
+	end,
+	events = select_courses,
+}
+
+-- A field of furnaces with lanes between them to cross, from outside and from inside.
+scenarios["factory"] = {
+	ticks = 9000,
+	category = "movement",
+	setup = function()
+		local function factory(lane, inside)
+			-- Inside, the car starts in the lane crossing of the fourth column and row.
+			local x, y = 12 + 3 * (2 + lane) + lane / 2, -18 + 3 * (2 + lane) + lane / 2
+			return {
+				obstacles = function(s, cx, cy) build_factory(s, cx + 10, cy - 20, cx + 70, cy + 20, lane) end,
+				car = {inside and x or 0, inside and y or 0, 0}, chest = {90, 0},
+			}
+		end
+		build_courses{factory(4, false), factory(4, true), factory(3, false), factory(3, true), factory(6, false), factory(6, true)}
+	end,
+	events = select_courses,
+}
+
+-- A wall 200 tiles long with no gate across the road: the car has to go round, a hundred
+-- tiles one way or the other. Cars start facing it, along it, and away from it.
+scenarios["huge-wall"] = {
+	ticks = 14000,
+	category = "movement",
+	setup = function()
+		T.spread = true
+		local function huge(orientation)
+			return {
+				obstacles = function(s, cx, cy) wall_line(s, cx + 30, cy - 100, cx + 30, cy + 100) end,
+				car = {0, 0, orientation}, chest = {60, 0},
+			}
+		end
+		build_courses({huge(0.25), huge(0.5), huge(0.75), huge(0), huge(0.125), huge(0.375)}, 14)
+	end,
+	events = select_courses,
+}
+
+-- A wall with turrets (2x2) built along its near side: the car cannot slip along the wall,
+-- and has to go round the whole row.
+scenarios["wall-turrets"] = {
+	ticks = 12000,
+	category = "movement",
+	setup = function()
+		local function turrets(length, orientation)
+			return {
+				obstacles = function(s, cx, cy)
+					wall_line(s, cx + 30, cy - length, cx + 30, cy + length)
+					for y = -length, length - 2, 3 do
+						s.create_entity{name = "gun-turret", position = {cx + 28, cy + y + 1}, force = "player"}
+					end
+				end,
+				car = {0, 0, orientation}, chest = {60, 0},
+			}
+		end
+		build_courses({turrets(30, 0.25), turrets(30, 0.5), turrets(60, 0.25), turrets(60, 0.75), turrets(15, 0.25), turrets(15, 0)}, 12)
+	end,
+	events = select_courses,
+}
+
+-- An L-shaped corridor, 60 and 40 tiles long, with the supply chest at its end: 4, 6 and 8
+-- tiles wide, two cars each (starting inside the first leg, turned differently).
+scenarios["l-corridor"] = {
+	ticks = 9000,
+	category = "movement",
+	setup = function()
+		local function corridor(width, orientation)
+			local w = width
+			return {
+				obstacles = function(s, cx, cy)
+					wall_line(s, cx - 2, cy - 3, cx + 60 + w, cy - 3)
+					wall_line(s, cx - 2, cy - 3 + w, cx + 60, cy - 3 + w)
+					wall_line(s, cx - 2, cy - 3, cx - 2, cy - 3 + w)
+					wall_line(s, cx + 60 + w, cy - 3, cx + 60 + w, cy + 45)
+					wall_line(s, cx + 60, cy - 3 + w, cx + 60, cy + 41)
+					wall_line(s, cx + 60, cy + 41, cx + 60 + w, cy + 41)
+				end,
+				car = {2, -3 + w / 2, orientation}, chest = {60 + w / 2 - 1, 34}, ghost = {0, 3},
+			}
+		end
+		build_courses{corridor(4, 0.25), corridor(4, 0.625), corridor(6, 0.25), corridor(6, 0.625), corridor(8, 0.25), corridor(8, 0.625)}
+	end,
+	events = select_courses,
+}
+
+-- Walls thrown at random over a field 60 tiles long: three densities, two cars each.
+scenarios["scatter"] = {
+	ticks = 9000,
+	category = "movement",
+	setup = function()
+		local function scatter(count, orientation)
+			return {
+				obstacles = function(s, cx, cy)
+					for _ = 1, count do
+						local x, y = math.floor(cx + 8 + random() * 62), math.floor(cy - 25 + random() * 50)
+						wall_line(s, x, y, x + math.floor(random() * 4), y + math.floor(random() * 4))
+					end
+				end,
+				car = {0, 0, orientation}, chest = {90, 0},
+			}
+		end
+		build_courses{scatter(40, 0), scatter(40, 0.5), scatter(100, 0), scatter(100, 0.5), scatter(200, 0), scatter(200, 0.5)}
+	end,
+	events = select_courses,
+}
+
+-- Mazes, corridors 7 tiles wide: the maneuver has no chance of finding the way, only the
+-- pathfinder can. The car starts in the top left cell, chest and ghost are in the bottom
+-- right one. Sizes 3, 5 and 7 cells, two mazes each.
+scenarios["maze"] = {
+	ticks = 14000,
+	category = "movement",
+	setup = function()
+		local function maze(n)
+			local pitch = 8
+			return {
+				obstacles = function(s, cx, cy) build_maze(s, cx, cy, n, pitch) end,
+				car = {pitch / 2, pitch / 2, 0.25}, chest = {(n - 1) * pitch + 2, (n - 1) * pitch + 2},
+			}
+		end
+		build_courses{maze(3), maze(3), maze(5), maze(5), maze(7), maze(7)}
+	end,
+	events = select_courses,
 }
 
 -- A car with a completely empty battery: it does nothing and alerts the player
 -- (flag `empty`, alert battery_empty) and is not given the ghost selected at
 -- t = 200. Its battery is refilled at t = 3000: it should resume and build it.
 scenarios["empty-battery"] = {
+	ticks = 8000,
+	category = "robustness",
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
 		make(s, names.charger, 0, 0)
@@ -473,17 +1043,18 @@ scenarios["empty-battery"] = {
 			select_ghosts(35, 35, 45, 45)
 		end
 		if t == 3000 then
-			_utils.set_fuel(T.car, _utils.fuel_capacity(T.car) * 0.5)
+			_utils.set_fuel(T.car, _utils.get_fuel_capacity(T.car) * 0.5)
 			out("EVENT battery refilled")
 		end
 	end,
 }
 
 -- A wall with a gate on the straight way between a supply chest and a ghost: the
--- car can only build the ghost if it gets through the gate. When this scenario
--- was written it did not: the gate stays shut for the car (see gate-manual),
--- which follows the wall without ever heading for the gate.
+-- car can only build the ghost if it gets through the gate. The car has no
+-- can_open_gates: movement.open_gates asks the gate to open as it approaches.
 scenarios["gate"] = {
+	ticks = 4000,
+	category = "movement",
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
 		make(s, names.charger, 0, 0)
@@ -507,12 +1078,14 @@ scenarios["gate"] = {
 	end,
 }
 
--- Does a gate open for an autonomous car at all? An untracked car (the mod does
+-- Does a gate open by itself for a car? It does not (the control for the gate
+-- scenario, which the mod solves with open_gates). An untracked car (the mod does
 -- not drive it) is driven straight at a gate by the scenario itself, once with
 -- the gate on a wall and once without any gate, for comparison. Lines GATE-TEST
 -- give its x position every 10 ticks, for 400 ticks: the wall is at x = 20.5.
 scenarios["gate-manual"] = {
 	ticks = 600,
+	category = "movement",
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
 		T.test_cars = {}
@@ -534,7 +1107,7 @@ scenarios["gate-manual"] = {
 				car = s.create_entity{name = names.car, position = {14, y}, force = "player"}
 				car.orientation = 0.25
 				_utils.set_fuel_item(car)
-				_utils.set_fuel(car, _utils.fuel_capacity(car))
+				_utils.set_fuel(car, _utils.get_fuel_capacity(car))
 			end
 			T.test_cars[index] = car
 		end
@@ -560,8 +1133,16 @@ scenarios["gate-manual"] = {
 -- ============================================================
 
 local function trace_cars(tick)
+	-- A car found in no state by update_car: where it came from is in the trace just before.
+	while (T.fallbacks_reported or 0) < #storage.idle_fallbacks do
+		T.fallbacks_reported = (T.fallbacks_reported or 0) + 1
+		local fallback = storage.idle_fallbacks[T.fallbacks_reported]
+		if T.surfaces[fallback.surface] then
+			out(string.format("EVENT NOSTATE car %d had no state at tick %d", fallback.car, fallback.tick))
+		end
+	end
 	for id, car in pairs(storage.cars) do
-		if car.valid then
+		if car.valid and T.surfaces[car.surface.index] then
 			local car_data = storage.car_data[id]
 			local flags = ""
 			for _, name in ipairs(FLAG_NAMES) do
@@ -585,6 +1166,12 @@ local function trace_cars(tick)
 			end
 
 			local construction = car_data.construction
+			local clusters = construction and #construction.clusters or 0
+			if T.clusters[id] ~= clusters then
+				T.clusters[id] = clusters
+				out(string.format("BATCH %d car %d clusters=%d ghosts=%d", tick, id, clusters,
+					construction and table_size(construction.ghosts) or 0))
+			end
 			out(string.format("%d %d %.10f %.10f %.10f %.10f %.4f %s a%d d%d f%.6f t%d g%d i%d k%d,%d dst%s [%s]",
 				tick, id, car.position.x, car.position.y, car.orientation, car.speed, car.burner.remaining_burning_fuel,
 				flags, car.riding_state.acceleration, car.riding_state.direction, car.friction_modifier,
@@ -597,11 +1184,21 @@ local function trace_cars(tick)
 end
 
 local function trace_summary(tick)
-	local surface = T.surface
-	local parked = 0
+	local cars, parked, ghosts, pending = 0, 0, 0, 0
+	for _, car in pairs(storage.cars) do
+		if car.valid and T.surfaces[car.surface.index] then
+			cars = cars + 1
+		end
+	end
 	for _, garage in pairs(storage.garages) do
-		if garage.valid then
+		if garage.valid and T.surfaces[garage.surface.index] then
 			parked = parked + garage.get_inventory(defines.inventory.chest).get_item_count(names.car)
+		end
+	end
+	for _, cluster in pairs(storage.pending_clusters) do
+		local ghost = cluster.ghosts[1]
+		if ghost and ghost.valid and T.surfaces[ghost.surface.index] then
+			pending = pending + 1
 		end
 	end
 	local users = {}
@@ -610,13 +1207,23 @@ local function trace_summary(tick)
 			table.insert(users, storage.charger_data[charger.unit_number].users)
 		end
 	end
+	local built_counts = {}
+	for _, name in ipairs(BUILT_NAMES) do
+		built_counts[name] = 0
+	end
+	for index in pairs(T.surfaces) do
+		local surface = game.get_surface(index)
+		ghosts = ghosts + surface.count_entities_filtered{type = "entity-ghost"}
+		for _, name in ipairs(BUILT_NAMES) do
+			built_counts[name] = built_counts[name] + surface.count_entities_filtered{name = name}
+		end
+	end
 	local built = {}
 	for _, name in ipairs(BUILT_NAMES) do
-		table.insert(built, name .. "=" .. surface.count_entities_filtered{name = name})
+		table.insert(built, name .. "=" .. built_counts[name])
 	end
 	out(string.format("SUMMARY %d cars=%d parked=%d ghosts=%d pending=%d charger_users=%s built: %s",
-		tick, table_size(storage.cars), parked, surface.count_entities_filtered{type = "entity-ghost"},
-		#storage.pending_clusters, table.concat(users, ","), table.concat(built, " ")))
+		tick, cars, parked, ghosts, pending, table.concat(users, ","), table.concat(built, " ")))
 end
 
 -- ============================================================
@@ -628,7 +1235,7 @@ local call_counts = {}
 for module_name, module in pairs{
 	movement = movement, travel = travel, charger_control = charger_control,
 	garage_control = garage_control, ghost_control = ghost_control,
-	_utils = _utils, ["_utils.deque"] = _utils.deque,
+	_utils = _utils, ["_utils.deque"] = _utils.deque, gui = gui,
 } do
 	for name, fn in pairs(module) do
 		if type(fn) == "function" then
@@ -659,42 +1266,54 @@ end
 -- Driver
 -- ============================================================
 
-local scenario = scenarios[SCENARIO]
-if not scenario then
-	error("unknown test scenario: " .. tostring(SCENARIO))
+local running = {} -- the scenarios of this run, in the order given
+for name in string.gmatch(SCENARIOS, "[^,]+") do
+	if not scenarios[name] then
+		error("unknown test scenario: " .. name)
+	end
+	table.insert(running, name)
 end
 
 script.on_nth_tick(1, function(event)
 	local tick = event.tick
 
-	if not T.start_tick then
+	if not T or not T.start_tick then
 		-- The mod creates its storage on its first tick (see init_storage).
 		if storage.cars then
-			scenario.setup()
-			T.start_tick = tick
-			out("SETUP " .. SCENARIO .. " at tick " .. tick)
+			for _, name in ipairs(running) do
+				use(name)
+				seed = 12345 -- the same obstacles whatever the other scenarios of the run
+				scenarios[name].setup()
+				T.start_tick = tick
+				out("SETUP " .. name .. " at tick " .. tick)
+			end
 		end
 		return
 	end
 
-	local t = tick - T.start_tick
-	if t % 30 == 0 then
-		-- Chargers are not wired to any power: keep their buffer full.
-		for _, charger in pairs(T.chargers) do
-			if charger.valid then
-				charger.energy = 6e7
+	for _, name in ipairs(running) do
+		use(name)
+		local t = tick - T.start_tick
+		if t <= (TICKS or scenarios[name].ticks or 22000) then
+			if t % 30 == 0 then
+				-- Chargers are not wired to any power: keep their buffer full.
+				for _, charger in pairs(T.chargers) do
+					if charger.valid then
+						charger.energy = 6e7
+					end
+				end
+			end
+			if scenarios[name].events then
+				scenarios[name].events(t)
+			end
+
+			if tick % 10 == 0 then
+				trace_cars(tick)
+			end
+			if tick % 300 == 0 then
+				trace_summary(tick)
 			end
 		end
-	end
-	if scenario.events then
-		scenario.events(t)
-	end
-
-	if tick % 10 == 0 then
-		trace_cars(tick)
-	end
-	if tick % 300 == 0 then
-		trace_summary(tick)
 	end
 	if tick % 500 == 0 then
 		write_coverage()

@@ -8,6 +8,7 @@ local travel = require("travel")
 local charger_control = require("charge")
 local garage_control = require("park")
 local ghost_control = require("ghost")
+local gui = require("gui")
 
 local names = config.names
 
@@ -20,6 +21,7 @@ local names = config.names
 _utils.register_release_handler("car", function(id)
 	local car_data = storage.car_data[id]
 	if car_data then
+		travel.release_charger_slot(car_data) -- a car lost on its way to a charger, or at it, must not keep the slot
 		travel.requeue_construction(car_data)
 	end
 	storage.cars[id] = nil
@@ -46,14 +48,13 @@ local KIND_BY_NAME = {
 }
 
 -- Runtime state of a car, kept in storage.car_data[unit_number].
-local function new_car_data(tick)
+local function create_car_data(tick)
 	return {
 		-- Tick states: each tick runs the first active one, in the order of update_car.
 		moving = {
 			active = false,
 			destination = nil, -- entity, or waypoint table with `position` and `valid`
-			departure_tick = nil, departure_distance = nil, -- stuck detection, see travel.stuck_reason
-			last_check_position = nil, last_check_tick = nil,
+			departure_tick = nil, departure_distance = nil, -- stuck detection, see travel.is_leg_too_long
 		},
 		charging = {active = false, charger = nil},
 		parking = {active = false, garage = nil},
@@ -65,16 +66,28 @@ local function new_car_data(tick)
 
 		-- Driving flags, set by movement.lua. travel.lua only cancels a maneuver
 		-- (new leg, stuck, empty battery) and resets its counters when a leg begins.
-		-- Maneuver mode, a sub-mode of moving. `reason`: rear_turn, blocked or no_progress.
-		-- `arcs` counts the arcs of the current maneuver, `attempts` the failed maneuvers in a row,
-		-- and `ended_tick` is when the last one ended (or the leg began).
+		-- Maneuver mode, a sub-mode of moving.
+		-- `arcs` counts the arcs of the current maneuver,
+		-- and `ended_tick` is when the last one ended (or the leg began). `heading` is the orientation
+		-- the maneuver turns toward, `last_arc` the arc it drove last (the opposite one is forbidden),
+		-- `stall_since` the tick the car stopped moving while driving, `back_off_until` the end of a back-off,
+		-- `follow` the direction (reverse or not) the car follows along a wall, `blocked` where (position and
+			-- orientation) it stalled straight, per direction (see movement.back_off).
 		maneuver = {
 			active = false, reason = nil, since = nil, arc_since = nil, arcs = 0,
-			reverse = false, turn = 0, origin = nil, attempts = 0, ended_tick = tick,
+			reverse = false, turn = 0, origin = nil, ended_tick = tick,
+			heading = nil, heading_since = nil, last_arc = nil, stall_since = nil, back_off_until = nil, back_off_from = nil,
+			follow = nil, follow_orientation = nil, blocked = {},
 		},
+		-- Path from the game's pathfinder, a last resort for a car whose maneuvers failed (see movement.lua).
+		-- `tried`: the leg has had its one request; `pending`: waiting for the answer; `active`: following `waypoints`.
+		path = {active = false, pending = false, tried = false, waypoints = nil, index = 1, request = nil},
 		emergency_brake = {active = false, since = nil},
 		high_speed = false,
+		entry_speed = nil, -- speed of the car when it entered high speed
+		slowing = false, -- braking down to entry_speed after leaving high speed
 		precision_mode = false,
+		neighbours = nil, -- moving cars nearby, see movement.lua
 
 		construction = nil, -- current batch, see ghost.lua
 		tasks = _utils.deque.new(), -- what to do when the current step ends; the front task runs first
@@ -100,11 +113,11 @@ local function on_built(event)
 		entity.riding_state = {acceleration = defines.riding.acceleration.nothing, direction = defines.riding.direction.straight}
 		-- A new car starts with config.critical_fuel_ratio of a full tank.
 		_utils.set_fuel_item(entity)
-		if _utils.remaining_fuel(entity) == 0 then
-			_utils.set_fuel(entity, _utils.fuel_capacity(entity) * config.critical_fuel_ratio)
+		if _utils.get_fuel(entity) == 0 then
+			_utils.set_fuel(entity, _utils.get_fuel_capacity(entity) * config.critical_fuel_ratio)
 		end
 		storage.cars[id] = entity
-		storage.car_data[id] = new_car_data(event.tick)
+		storage.car_data[id] = create_car_data(event.tick)
 	elseif entity.name == names.charger then
 		storage.chargers[id] = entity
 		storage.charger_data[id] = {users = 0} -- cars charging here or on their way
@@ -139,34 +152,28 @@ local function on_area_selected(event)
 	local player = game.get_player(event.player_index)
 	local selected = {}
 	for _, entity in pairs(event.entities) do
-		if entity.valid and entity.type == "entity-ghost" then
-			ghost_control.register_ghost(entity)
-			if storage.ghosts[entity.unit_number] then
-				table.insert(selected, entity)
-			end
+		-- Only the ghosts that are newly tracked: one selected before is with a car
+		-- or in the pending pool already.
+		if entity.valid and entity.type == "entity-ghost" and ghost_control.register_ghost(entity) then
+			table.insert(selected, entity)
 		end
 	end
 
 	if #selected == 0 then
 		if player then
-			player.print("No ghost outside the robot network found in the selection.")
+			player.print("No new ghost outside the robot network found in the selection.")
 		end
 		return
 	end
 
-	local clusters = ghost_control.build_clusters(selected)
-	local any_car = ghost_control.any_car_exists()
-	local assigned, queued = 0, 0
-	for _, cluster in pairs(clusters) do
-		local car = ghost_control.find_available_car(cluster)
-		if car then
-			ghost_control.assign_cluster(car, cluster)
-			assigned = assigned + 1
-		else
-			table.insert(storage.pending_clusters, cluster)
-			queued = queued + 1
-		end
+	-- All the clusters go to the pending pool first, so that a car can take
+	-- several of them along (see ghost_control.fill_batch).
+	for _, cluster in pairs(ghost_control.build_clusters(selected)) do
+		table.insert(storage.pending_clusters, cluster)
 	end
+	local any_car = ghost_control.is_any_car_present()
+	local assigned = ghost_control.retry_pending_clusters()
+	local queued = #storage.pending_clusters
 
 	if player then
 		player.print(assigned .. " construction batch(es) assigned.")
@@ -187,14 +194,22 @@ end
 -- The wait of an idle car is over: it resumes its batch, takes a pending
 -- cluster, or goes to park, topping up its tank first if needed.
 local function end_wait(car, car_data, tick)
+	-- Whatever starts a leg ends the wait (travel.begin_leg), and a car that
+	-- cannot set off goes back to waiting (travel.reset_to_waiting): only the
+	-- branches that do nothing restart the wait themselves.
 	if car_data.construction then
 		-- The batch was waiting for missing items: try again.
-		car_data.waiting.active = false
 		ghost_control.proceed(car)
 	elseif _utils.deque.length(car_data.tasks) > 0 then
-		-- Tasks are still queued: only leave the waiting state.
-		car_data.waiting.active = false
+		-- Tasks are still queued but the car is idle: they belong to a leg that no
+		-- longer exists. Drop them and wait again.
+		car_data.tasks = _utils.deque.new()
 		car_data.waiting.since = tick
+	elseif not car.get_inventory(defines.inventory.car_trunk).is_empty() then
+		-- Leftovers must be unloaded before the car takes a new batch or parks.
+		if not ghost_control.deposit_leftovers(car) then
+			car_data.waiting.since = tick
+		end
 	elseif not ghost_control.try_assign_pending(car) then
 		local garage = garage_control.find_garage(car)
 		if not garage then
@@ -202,7 +217,6 @@ local function end_wait(car, car_data, tick)
 			car_data.waiting.since = tick
 		elseif not travel.top_up_before_parking(car, garage.position) then
 			_utils.alert_reset(car_data.alerts, "no_garage")
-			car_data.waiting.active = false
 			travel.set_destination(car, garage, {type = "parking"})
 		end
 	end
@@ -228,13 +242,14 @@ local function update_car(car, car_data, tick)
 				movement.drive_tick(car, tick)
 			end
 
-			-- Drive may have ended the leg (arrival): only a leg under way is checked.
-			if car_data.moving.active then
-				local reason = travel.stuck_reason(car, tick)
-				if reason == "timeout" then
-					travel.start_stuck(car, tick)
-				elseif reason == "no_progress" then
-					movement.start_maneuver(car, tick, reason)
+			-- Drive may have ended the leg (arrival): only a leg under way is checked,
+			-- and not while the car waits for its path.
+			if car_data.moving.active and not car_data.path.pending then
+				if travel.is_leg_too_long(car, tick) then
+					-- A leg that lasts too long gets its path, as a last resort, before it is stuck.
+					if not movement.request_path(car, tick) then
+						travel.start_stuck(car, tick)
+					end
 				end
 			end
 		else
@@ -256,6 +271,13 @@ local function update_car(car, car_data, tick)
 		if tick - car_data.waiting.since >= config.idle_delay then
 			end_wait(car, car_data, tick)
 		end
+	else
+		-- Safety net: a car in no state at all would do nothing for ever. Back to
+		-- waiting; the case is recorded so that the tests report it (a bug elsewhere
+		-- left the car without a state).
+		table.insert(storage.idle_fallbacks, {tick = tick, car = car.unit_number, surface = car.surface.index})
+		log("autonomous car " .. car.unit_number .. " had no state at tick " .. tick .. ", set to waiting")
+		travel.reset_to_waiting(car)
 	end
 end
 
@@ -268,17 +290,23 @@ local function on_tick(event)
 		end
 	end
 
+	if event.tick % config.short_delay == 0 then
+		gui.refresh_all()
+	end
 	if event.tick % config.long_delay == 0 then
 		ghost_control.retry_pending_clusters()
+		garage_control.repair_parked_cars()
 	end
 end
 
 -- Creates the storage tables that are missing. This is bound to on_tick instead
 -- of on_init so that it also runs on a save made before a table existed; it
--- then hands on_tick over to the real handler, so it runs once per load.
-local function init_storage()
+-- then hands on_tick over to the real handler, so it runs once per load, and
+-- runs that handler for this tick too: a player who joins a multiplayer game
+-- must not skip a tick that the others run.
+local function init_storage(event)
 	storage.cars = storage.cars or {} -- [unit_number] = car entity
-	storage.car_data = storage.car_data or {} -- [unit_number] = runtime state, see new_car_data
+	storage.car_data = storage.car_data or {} -- [unit_number] = runtime state, see create_car_data
 	storage.chargers = storage.chargers or {}
 	storage.charger_data = storage.charger_data or {}
 	storage.garages = storage.garages or {}
@@ -287,8 +315,11 @@ local function init_storage()
 	storage.ghosts = storage.ghosts or {} -- selected ghosts outside any robot network, assigned or not
 	storage.ghost_to_car = storage.ghost_to_car or {} -- [ghost unit_number] = unit_number of its car
 	storage.pending_clusters = storage.pending_clusters or {} -- clusters waiting for a free car
+	storage.path_requests = storage.path_requests or {} -- [request id] = unit_number of the car waiting for that path
+	storage.idle_fallbacks = storage.idle_fallbacks or {} -- cars found in no state, see update_car
 
 	script.on_event(defines.events.on_tick, on_tick)
+	on_tick(event)
 end
 
 -- A car finished its current step - it arrived, or its tank is full: starts
@@ -306,15 +337,26 @@ local function on_next_task(event)
 	moving.destination = nil
 
 	if _utils.deque.length(car_data.tasks) == 0 then
-		-- Nothing queued (the car arrived from a step back).
+		-- Nothing queued (the car arrived from a step back, or is charged).
 		if not ghost_control.try_assign_pending(car) then
-			car_data.waiting.active = true
-			car_data.waiting.since = event.tick
+			_utils.start_waiting(car_data)
 		end
 		return
 	end
 
 	local task = _utils.deque.pop_front(car_data.tasks)
+	if task.type ~= "charging" then
+		car_data.charge_detour_count = 0 -- the trip reached a destination of its own
+	end
+
+	-- A task that does not match what the car reached is stale: drop it and let
+	-- the waiting loop decide.
+	local reached = destination and destination.valid and destination.name
+	if (task.type == "charging" and reached ~= names.charger) or (task.type == "parking" and reached ~= names.garage) then
+		travel.reset_to_waiting(car)
+		return
+	end
+
 	if task.type == "charging" then
 		car_data.charging.active = true
 		car_data.charging.charger = destination
@@ -334,6 +376,7 @@ end
 script.on_event(defines.events.on_built_entity, on_built)
 script.on_event(defines.events.on_robot_built_entity, on_built)
 script.on_event(defines.events.script_raised_built, on_built)
+script.on_event(defines.events.script_raised_revive, on_built) -- a ghost built by a car (see ghost_control.revive_ghost)
 script.on_event(defines.events.on_entity_died, on_removed)
 script.on_event(defines.events.on_player_mined_entity, on_removed)
 script.on_event(defines.events.on_robot_mined_entity, on_removed)
@@ -341,4 +384,11 @@ script.on_event(defines.events.on_object_destroyed, on_object_destroyed)
 script.on_event(defines.events.on_player_selected_area, on_area_selected)
 script.on_event(defines.events.on_player_alt_selected_area, on_area_selected)
 script.on_event(prototypes.custom_event[names.next_task_event], on_next_task)
+script.on_event(defines.events.on_lua_shortcut, function(event)
+	if event.prototype_name == names.missing_items_shortcut then
+		gui.toggle(game.get_player(event.player_index))
+	end
+end)
+script.on_event(defines.events.on_gui_click, gui.on_click)
+script.on_event(defines.events.on_script_path_request_finished, movement.on_path_finished)
 script.on_event(defines.events.on_tick, init_storage)

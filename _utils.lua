@@ -1,8 +1,8 @@
 local util = require("util")
 local config = require("config")
 
--- Shared helpers: car fuel, closest-entity search, deque, alerts, entity
--- cleanup and the next-task event.
+-- Shared helpers: car fuel, closest-entity search, slow checks, the waiting
+-- state, deque, alerts, entity cleanup and the next-task event.
 local _utils = {}
 
 -- ============================================================
@@ -21,7 +21,7 @@ end
 
 -- Tank capacity. A burner that ran dry loses its fuel item, so this also puts
 -- it back.
-function _utils.fuel_capacity(car)
+function _utils.get_fuel_capacity(car)
 	local burner = car.burner
 	if not burner.currently_burning then
 		burner.currently_burning = config.names.fuel
@@ -30,19 +30,19 @@ function _utils.fuel_capacity(car)
 end
 
 -- Charge left in the tank.
-function _utils.remaining_fuel(car)
+function _utils.get_fuel(car)
 	return car.burner.remaining_burning_fuel
 end
 
 -- Charge left, as a fraction of the tank capacity.
-function _utils.fuel_ratio(car)
-	local capacity = _utils.fuel_capacity(car) -- read first: it puts the fuel item back
-	return _utils.remaining_fuel(car) / capacity
+function _utils.get_fuel_ratio(car)
+	local capacity = _utils.get_fuel_capacity(car) -- read first: it puts the fuel item back
+	return _utils.get_fuel(car) / capacity
 end
 
 -- Sets the charge of the tank.
 function _utils.set_fuel(car, fuel)
-	_utils.fuel_capacity(car) -- puts the fuel item back if needed: without it the write is ignored
+	_utils.get_fuel_capacity(car) -- puts the fuel item back if needed: without it the write is ignored
 	car.burner.remaining_burning_fuel = fuel
 end
 
@@ -54,12 +54,13 @@ end
 -- `accept(entity, id)`, if given, tells whether an entity may be chosen. A
 -- stale entity is released as `kind` (see "Entity cleanup") when a kind is
 -- given, and just skipped otherwise. Of two entities at the same distance, the
--- first one in the table wins.
-function _utils.closest(entities, position, accept, kind)
+-- first one in the table wins. With a `surface`, entities of other surfaces are
+-- skipped: positions of two surfaces cannot be compared.
+function _utils.find_closest(entities, position, accept, kind, surface)
 	local best, best_distance
 	for id, entity in pairs(entities) do
 		if entity.valid then
-			if not accept or accept(entity, id) then
+			if (not surface or entity.surface == surface) and (not accept or accept(entity, id)) then
 				local distance = util.distance(position, entity.position)
 				if not best or distance < best_distance then
 					best = entity
@@ -71,6 +72,30 @@ function _utils.closest(entities, position, accept, kind)
 		end
 	end
 	return best
+end
+
+-- ============================================================
+-- Slow checks
+-- ============================================================
+
+-- True on the ticks when a car does its slow measurements (nearby cars, closest
+-- charger): every config.slow_check_interval ticks, offset by the id of the car
+-- so that the cars do not all measure on the same tick.
+function _utils.is_slow_check_due(car, tick)
+	return (tick + car.unit_number) % config.slow_check_interval == 0
+end
+
+-- ============================================================
+-- Waiting state
+-- ============================================================
+
+-- Hands a car to the waiting loop of control.lua (see end_wait), which decides
+-- what it does next once config.idle_delay has passed since `since` (the
+-- current tick by default). A wait that should end on the next tick starts
+-- config.idle_delay ago.
+function _utils.start_waiting(car_data, since)
+	car_data.waiting.active = true
+	car_data.waiting.since = since or game.tick
 end
 
 -- ============================================================
