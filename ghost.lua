@@ -7,22 +7,27 @@ local travel = require("travel")
 -- Construction: tracking ghosts, grouping them into clusters, assigning the
 -- clusters to cars, and running a batch on a car.
 --
--- A cluster is a group of ghosts of one type that fits in a single car trunk:
+-- A "ghost" here is any target a car works on: an entity ghost to build, or an
+-- entity marked for deconstruction to mine. A batch does one or the other, never
+-- both (get_mode). Targets are keyed by get_id: trees and rocks have no unit_number.
+--
+-- A cluster is a group of ghosts of one type (or of entities to mine) that fits in a single car trunk:
 --   {ghosts = {ghost, ...}}
 -- Once assigned to a car it becomes the batch of that car, car_data.construction.
 -- A batch holds one cluster, or several when the trunk has room for them: their
 -- slots are counted cluster by cluster, two clusters never share a slot. The car
 -- builds one cluster at a time, from where it stops (its site), then drives to
 -- the next.
---   ghosts          [unit_number] = ghost still to build, all clusters together
---   items_needed    [item name] = count still to collect, all clusters together
---   clusters        list of {ghosts = {[unit_number] = {item = name, count = n}},
---                   items = {[item name] = count}}: the items of a ghost that has
---                   been built or has gone away stay in `ghosts`, only `items` is kept up to date
+--   ghosts          [id] = ghost still to build (or entity to mine), all clusters together
+--   items_needed    [item name] = count still to collect, all clusters together (empty when mining)
+--   clusters        list of {ghosts = {[id] = {items = {[item name] = count}}},
+--                   items = {[item name] = count}}: the load of a ghost that has
+--                   been built or has gone away stays in `ghosts`, only `items` is kept up to date.
+--                   The load of a ghost is its item; that of an entity to mine, the worst case of what it yields
 --   site            the entry of `clusters` the car is building, or nil before its first stop
 --   missing_since   tick the batch began waiting for items no supply chest holds, or nil
 --   alerted_items   alert_once flags of the missing-item alerts
---   failed_attempts [unit_number] = {count, retry_tick} of a ghost that failed to revive
+--   failed_attempts [id] = {count, retry_tick} of a ghost that failed to revive
 --
 -- control.lua enters through register_ghost, on_ghost_destroyed, build_clusters,
 -- is_any_car_present, retry_pending_clusters, try_assign_pending, proceed,
@@ -37,21 +42,52 @@ local ghost_control = {}
 
 -- TODO: other robot types (logistic: items, fluids); building a whole mine from a selected
 -- resource patch, without ghosts. See "� faire" in CLAUDE.md.
--- Starts tracking a ghost, unless it lies inside a robot network (robots will
--- build that one) or is tracked already: it is then with a car or in the
--- pending pool, and must not be queued twice. Returns true if the ghost is newly
--- tracked.
+-- Key of a ghost in the tables of this module: its unit_number, or for an entity
+-- that has none (trees, rocks) its surface, name and position.
+function ghost_control.get_id(ghost)
+	return ghost.unit_number or (ghost.surface.index .. ":" .. ghost.name .. "@" .. ghost.position.x .. "," .. ghost.position.y)
+end
+
+-- True if cars can work on the entity: a ghost, or an entity marked for
+-- deconstruction that can be mined (a cliff cannot).
+function ghost_control.is_target(entity)
+	return entity.type == "entity-ghost" or (entity.to_be_deconstructed() and entity.minable)
+end
+
+-- What a batch does with its ghosts: "build" or "deconstruct", from the first
+-- valid one. nil if there is none.
+local function get_mode(ghosts)
+	for _, ghost in pairs(ghosts) do
+		if ghost.valid then
+			return ghost.type == "entity-ghost" and "build" or "deconstruct"
+		end
+	end
+	return nil
+end
+
+-- Starts tracking a ghost or an entity marked for deconstruction, unless it lies
+-- inside a robot network (robots will do that one) or is tracked already: it is
+-- then with a car or in the pending pool, and must not be queued twice. Returns
+-- true if it is newly tracked.
 function ghost_control.register_ghost(ghost)
-	if not ghost.valid or storage.ghosts[ghost.unit_number] then
+	if not ghost.valid or not ghost_control.is_target(ghost) then
+		return false
+	end
+	local id = ghost_control.get_id(ghost)
+	if storage.ghosts[id] then
 		return false
 	end
 	if ghost.surface.find_logistic_network_by_position(ghost.position, ghost.force) then
 		return false
 	end
-	storage.ghosts[ghost.unit_number] = ghost
+	storage.ghosts[id] = ghost
 	-- A ghost can go away in many ways (built by anyone, cancelled, destroyed),
-	-- which only on_object_destroyed reports reliably.
-	script.register_on_object_destroyed(ghost)
+	-- which only on_object_destroyed reports reliably. It reports an entity
+	-- without a unit_number by its registration number only.
+	local registration = script.register_on_object_destroyed(ghost)
+	if not ghost.unit_number then
+		storage.target_by_registration[registration] = id
+	end
 	return true
 end
 
@@ -67,20 +103,19 @@ end
 
 -- A ghost of the batch that nobody built is gone: its items are no longer
 -- needed. The batch stops waiting for those it has not collected yet; those it
--- has are a surplus, deposited at the end of the batch.
+-- has are a surplus, deposited at the end of the batch. (For an entity to mine
+-- the load is only a reservation in the trunk: items_needed never held it.)
 local function drop_ghost_items(construction, id)
 	local entry = find_cluster(construction, id)
 	if not entry then
 		return
 	end
-	local record = entry.ghosts[id]
-	if not record.item then
-		return -- no item places this ghost
+	for item_name, count in pairs(entry.ghosts[id].items) do
+		local left = (entry.items[item_name] or 0) - count
+		entry.items[item_name] = left > 0 and left or nil
+		local needed = (construction.items_needed[item_name] or 0) - count
+		construction.items_needed[item_name] = needed > 0 and needed or nil
 	end
-	local left = (entry.items[record.item] or 0) - record.count
-	entry.items[record.item] = left > 0 and left or nil
-	local needed = (construction.items_needed[record.item] or 0) - record.count
-	construction.items_needed[record.item] = needed > 0 and needed or nil
 end
 
 -- A tracked ghost is gone, whatever the reason: drops it from the batch of its
@@ -118,7 +153,7 @@ end
 
 -- Puts one ghost back in the pending pool, as a cluster of its own.
 function ghost_control.requeue_ghost(ghost)
-	storage.ghost_to_car[ghost.unit_number] = nil
+	storage.ghost_to_car[ghost_control.get_id(ghost)] = nil
 	if ghost.valid then
 		table.insert(storage.pending_clusters, {ghosts = {ghost}})
 	end
@@ -137,20 +172,58 @@ function ghost_control.get_ghost_item(ghost)
 	return nil
 end
 
--- Trunk slots a ghost would add to a cluster that already needs `items`
--- ([item name] = count). Slots are rounded on the running total of each item,
--- so ghosts built from the same item share its stacks. Also returns the item
--- and count of the ghost.
-local function count_extra_slots(items, ghost)
-	local item_name, count = ghost_control.get_ghost_item(ghost)
-	if not item_name then
-		return 0, nil, 0
+-- What an entity marked for deconstruction puts in the trunk when mined
+-- ([item name] = count): the worst case of its products (a tree's wood, a
+-- rock's stone and coal) and what its inventories hold. Items on a belt are not counted.
+local function compute_yield(entity)
+	local yield = {}
+	local function add(item_name, count)
+		yield[item_name] = (yield[item_name] or 0) + count
 	end
-	local prototype = prototypes.item[item_name]
-	local stack_size = prototype and prototype.stack_size or 1
-	local before = items[item_name] or 0
-	local after = before + count
-	return math.ceil(after / stack_size) - math.ceil(before / stack_size), item_name, count
+	if entity.type == "item-entity" then
+		add(entity.stack.name, entity.stack.count)
+		return yield
+	end
+	local products = entity.prototype.mineable_properties.products
+	for _, product in pairs(products or {}) do
+		if product.type == "item" then
+			add(product.name, product.amount_max or product.amount or 0)
+		end
+	end
+	for index = 1, entity.get_max_inventory_index() do
+		local inventory = entity.get_inventory(index)
+		if inventory then
+			for _, item in pairs(inventory.get_contents()) do -- an array of {name, count, quality} records
+				add(item.name, item.count)
+			end
+		end
+	end
+	return yield
+end
+
+-- What a ghost puts in the trunk ([item name] = count): the item that builds it,
+-- or what an entity to mine yields.
+function ghost_control.compute_load(ghost)
+	if ghost.type ~= "entity-ghost" then
+		return compute_yield(ghost)
+	end
+	local item_name, count = ghost_control.get_ghost_item(ghost)
+	return item_name and {[item_name] = count} or {}
+end
+
+-- Trunk slots a ghost would add to a cluster that already holds `items`
+-- ([item name] = count). Slots are rounded on the running total of each item,
+-- so ghosts with the same item share its stacks. Also returns the load of the ghost.
+local function count_extra_slots(items, ghost)
+	local load = ghost_control.compute_load(ghost)
+	local extra = 0
+	for item_name, count in pairs(load) do
+		local prototype = prototypes.item[item_name]
+		local stack_size = prototype and prototype.stack_size or 1
+		local before = items[item_name] or 0
+		extra = extra + math.ceil((before + count) / stack_size) - math.ceil(before / stack_size)
+	end
+	return extra, load
 end
 
 local function find_neighbours(ghost, candidates)
@@ -174,15 +247,15 @@ local function remove_value(list, value)
 end
 
 -- TODO: build last the ghosts that extend the native construction network. See "À faire" in CLAUDE.md.
--- Splits ghosts into clusters: one ghost type per cluster, small enough for a
--- car trunk (config.car_inventory_size slots). A cluster grows breadth-first
+-- Splits ghosts into clusters: one ghost type per cluster (all the entities to
+-- mine together), small enough for a car trunk (config.car_inventory_size slots). A cluster grows breadth-first
 -- from a seed ghost, nearest neighbours first, so it stays compact. The first
 -- ghost that no longer fits becomes the seed of the next cluster, so clusters
 -- tile the selected area.
 function ghost_control.build_clusters(ghosts)
 	local by_name = {}
 	for _, ghost in pairs(ghosts) do
-		local name = ghost.ghost_name
+		local name = ghost.type == "entity-ghost" and ("ghost " .. ghost.ghost_name) or "deconstruct"
 		by_name[name] = by_name[name] or {}
 		table.insert(by_name[name], ghost)
 	end
@@ -205,13 +278,13 @@ function ghost_control.build_clusters(ghosts)
 			local slots = 0
 			-- Adds a ghost to the cluster if its item still fits in the trunk.
 			local function try_add(ghost)
-				local delta, item_name, count = count_extra_slots(items, ghost)
+				local delta, load = count_extra_slots(items, ghost)
 				if slots + delta > config.car_inventory_size then
 					return false
 				end
 				table.insert(cluster, ghost)
 				slots = slots + delta
-				if item_name then
+				for item_name, count in pairs(load) do
 					items[item_name] = (items[item_name] or 0) + count
 				end
 				return true
@@ -387,39 +460,42 @@ local function count_items_slots(items)
 	return slots
 end
 
--- Items ([item name] = count) that build the ghosts of a cluster.
+-- Load ([item name] = count) of the ghosts of a cluster.
 local function compute_cluster_items(cluster)
 	local items = {}
 	for _, ghost in pairs(cluster.ghosts) do
-		local item_name, count = ghost_control.get_ghost_item(ghost)
-		if item_name then
+		for item_name, count in pairs(ghost_control.compute_load(ghost)) do
 			items[item_name] = (items[item_name] or 0) + count
 		end
 	end
 	return items
 end
 
--- Adds a cluster to the batch of a car. The entry remembers the item of each
+-- Adds a cluster to the batch of a car. The entry remembers the load of each
 -- ghost: once a ghost is gone, its entity cannot tell any more (see drop_ghost_items).
+-- Only a cluster to build has items to collect.
 local function add_cluster(car_id, construction, cluster)
 	local entry = {ghosts = {}, items = compute_cluster_items(cluster)}
 	for _, ghost in pairs(cluster.ghosts) do
-		local item_name, count = ghost_control.get_ghost_item(ghost)
-		construction.ghosts[ghost.unit_number] = ghost
-		entry.ghosts[ghost.unit_number] = {item = item_name, count = count}
-		storage.ghost_to_car[ghost.unit_number] = car_id
+		local id = ghost_control.get_id(ghost)
+		construction.ghosts[id] = ghost
+		entry.ghosts[id] = {items = ghost_control.compute_load(ghost)}
+		storage.ghost_to_car[id] = car_id
 	end
-	for item_name, count in pairs(entry.items) do
-		construction.items_needed[item_name] = (construction.items_needed[item_name] or 0) + count
+	if get_mode(cluster.ghosts) == "build" then
+		for item_name, count in pairs(entry.items) do
+			construction.items_needed[item_name] = (construction.items_needed[item_name] or 0) + count
+		end
 	end
 	table.insert(construction.clusters, entry)
 end
 
--- Adds to the batch of a car the closest pending clusters that still fit in its
--- trunk. Each cluster keeps its own slots: the slots of the batch are the sum of
+-- Adds to the batch of a car the closest pending clusters of its mode that still
+-- fit in its trunk. Each cluster keeps its own slots: the slots of the batch are the sum of
 -- the slots of its clusters, never shared.
 function ghost_control.fill_batch(car)
 	local construction = storage.car_data[car.unit_number].construction
+	local mode = get_mode(construction.ghosts)
 	local reserved = 0
 	for _, entry in ipairs(construction.clusters) do
 		reserved = reserved + count_items_slots(entry.items)
@@ -434,6 +510,7 @@ function ghost_control.fill_batch(car)
 		for index, cluster in ipairs(storage.pending_clusters) do
 			local centroid = ghost_control.compute_centroid(cluster.ghosts)
 			if centroid and get_cluster_surface(cluster) == car.surface
+				and get_mode(cluster.ghosts) == mode
 				and reserved + count_items_slots(compute_cluster_items(cluster)) <= config.car_inventory_size then
 				local distance = util.distance(origin, centroid)
 				if not best_index or distance < best_distance then
@@ -518,7 +595,7 @@ end
 
 local function alert_build_failed(car, ghost)
 	_utils.alert(car.force, ghost,
-		"An autonomous car could not build an entity after " .. config.max_revive_attempts
+		"An autonomous car could not build or mine an entity after " .. config.max_revive_attempts
 			.. " attempts and gave up on it; it has been put back in the general queue.",
 		config.names.car)
 end
@@ -673,7 +750,7 @@ function ghost_control.find_nearest_ready_ghost(car, cluster)
 	return best, any_valid
 end
 
--- TODO: let cars destroy and replace entities marked for deconstruction or upgrade. See "À faire" in CLAUDE.md.
+-- TODO: let cars replace entities marked for upgrade, and build over an entity that is in the way. See "À faire" in CLAUDE.md.
 -- Builds a ghost with an item from the car trunk. Returns false if the revive
 -- failed, usually because something - often the car itself - is in the way.
 function ghost_control.revive_ghost(car, ghost)
@@ -695,9 +772,19 @@ function ghost_control.revive_ghost(car, ghost)
 	return false
 end
 
--- Tries to build one ghost: the nearest one of the cluster the car is at that is
+-- Mines an entity marked for deconstruction into the car trunk. Returns false
+-- if that failed, usually because the items do not fit in the trunk. An entity
+-- that is no longer marked counts as done.
+function ghost_control.deconstruct_entity(car, entity)
+	if not entity.to_be_deconstructed() then
+		return true
+	end
+	return entity.mine{inventory = car.get_inventory(defines.inventory.car_trunk), raise_destroyed = true}
+end
+
+-- Tries to build one ghost (or mine one entity): the nearest one of the cluster the car is at that is
 -- not on a retry cooldown. Returns:
---   "built"   the ghost was placed
+--   "built"   the ghost was placed (or the entity mined)
 --   "failed"  the revive failed: the ghost is put on cooldown for
 --             config.medium_delay, or sent back to the pending pool after
 --             config.max_revive_attempts failures
@@ -710,8 +797,14 @@ function ghost_control.attempt_one_ghost(car)
 		return any_valid and "none" or "empty"
 	end
 
-	local id = ghost.unit_number
-	if ghost_control.revive_ghost(car, ghost) then
+	local id = ghost_control.get_id(ghost)
+	local done
+	if ghost.type == "entity-ghost" then
+		done = ghost_control.revive_ghost(car, ghost)
+	else
+		done = ghost_control.deconstruct_entity(car, ghost)
+	end
+	if done then
 		construction.ghosts[id] = nil
 		construction.failed_attempts[id] = nil
 		return "built"
@@ -755,7 +848,7 @@ function ghost_control.go_to_site(car)
 	local construction = storage.car_data[car.unit_number].construction
 	local ghost, any_valid = ghost_control.find_nearest_ready_ghost(car)
 	if ghost then
-		construction.site = find_cluster(construction, ghost.unit_number)
+		construction.site = find_cluster(construction, ghost_control.get_id(ghost))
 		-- Recharges first if the car could not get back to a charger afterwards: this
 		-- is also what lets it recharge between two clusters.
 		travel.set_destination(car, ghost, {type = "building"})

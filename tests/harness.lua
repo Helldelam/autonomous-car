@@ -1075,6 +1075,235 @@ scenarios["critical-no-batch"] = {
 	end,
 }
 
+-- Entities marked for deconstruction. `name` is a tree, a rock or any building; a
+-- building gets `items` in its first inventory. The mod's get_id key is reported
+-- at setup: it tells whether trees and rocks have a unit_number.
+local function mark(surface, name, x, y, items)
+	local entity = surface.create_entity{name = name, position = {x, y}, force = "player"}
+	if not entity then
+		out("SETUP could not create " .. name .. " at " .. x .. "," .. y)
+		return nil
+	end
+	if items then
+		entity.get_inventory(1).insert(items)
+	end
+	entity.order_deconstruction("player")
+	table.insert(T.marked, entity)
+	if not T.seen_names then
+		T.seen_names = {}
+	end
+	if not T.seen_names[name] then
+		T.seen_names[name] = true
+		out("SETUP " .. name .. " unit_number=" .. tostring(entity.unit_number) .. " type=" .. entity.type
+			.. " minable=" .. tostring(entity.minable) .. " marked=" .. tostring(entity.to_be_deconstructed()))
+	end
+	return entity
+end
+
+-- Stands in for dragging the selector over an area: the game hands over every
+-- deconstructable entity there, the mod keeps the ghosts and the marked ones.
+local function select_all(x1, y1, x2, y2)
+	local entities = T.surface.find_entities_filtered{area = {{x1, y1}, {x2, y2}}}
+	out("SELECT " .. game.tick .. " " .. #entities .. " entities")
+	on_area_selected{item = names.ghost_selector, player_index = 1, entities = entities, tick = game.tick}
+end
+
+local function count_valid(list)
+	local count = 0
+	for _, entity in pairs(list) do
+		if entity.valid then
+			count = count + 1
+		end
+	end
+	return count
+end
+
+-- What the batch of a car holds: ghosts to build and marked entities to mine.
+local function describe_batch(car)
+	local construction = storage.car_data[car.unit_number].construction
+	if not construction then
+		return "no batch"
+	end
+	local ghosts, marked = 0, 0
+	for _, ghost in pairs(construction.ghosts) do
+		if ghost.valid then
+			if ghost.type == "entity-ghost" then
+				ghosts = ghosts + 1
+			else
+				marked = marked + 1
+			end
+		end
+	end
+	return ghosts .. " ghosts + " .. marked .. " marked" .. ((ghosts > 0 and marked > 0) and " (MIXED, wrong)" or "")
+end
+
+-- Logs the batch of each car of T.cars when it changes.
+local function watch_batches()
+	T.last_batch = T.last_batch or {}
+	for index, car in pairs(T.cars) do
+		if car.valid then
+			local text = describe_batch(car)
+			if T.last_batch[index] ~= text then
+				T.last_batch[index] = text
+				out("EVENT t=" .. game.tick .. " car " .. index .. " batch: " .. text)
+			end
+		end
+	end
+end
+
+local function report_supply(label)
+	local parts = {}
+	for _, item in pairs(T.chest.get_inventory(defines.inventory.chest).get_contents()) do
+		parts[#parts + 1] = item.name .. "=" .. item.count
+	end
+	table.sort(parts)
+	out("EVENT " .. label .. ": " .. count_valid(T.marked) .. "/" .. #T.marked .. " marked entities left; supply chest holds "
+		.. table.concat(parts, ", "))
+end
+
+-- Marked trees, rocks and buildings (with contents) far from any robot network:
+-- the car mines them all and unloads the yield in the supply chest. Setup lines
+-- tell whether trees and rocks have a unit_number.
+scenarios["deconstruct"] = {
+	ticks = 9000,
+	category = "construction",
+	setup = function()
+		T.marked = {}
+		local s = new_surface({{0, 0}}, 6)
+		make(s, names.charger, 0, 0)
+		make(s, names.garage, 20, -10)
+		T.chest = make(s, names.chest, 0.5, 30.5)
+		T.cars = {make_car(s, 10, 10, 0.1)}
+		for i = 0, 3 do
+			for j = 0, 2 do
+				mark(s, "tree-01", 60 + 3 * i, 60 + 3 * j)
+			end
+		end
+		mark(s, "big-rock", 80, 60)
+		mark(s, "huge-rock", 86, 68)
+		for i = 0, 4 do
+			mark(s, "wooden-chest", 60.5 + 2 * i, 80.5, {name = "iron-plate", count = 50})
+		end
+		mark(s, "stone-furnace", 71, 91, {name = "coal", count = 20})
+	end,
+	events = function(t)
+		if t == 200 then
+			select_all(50, 50, 100, 100)
+		end
+		watch_batches()
+		if t == 8500 then
+			report_supply("end")
+		end
+	end,
+}
+
+-- Builds the world of the mixed scenarios: ghosts to build and entities to mine,
+-- `overlap` or not. Apart: wooden chests on the east side, marked trees on the
+-- west side, 120 tiles from each other. Overlapping: stone furnace ghosts on
+-- marked wooden chests, and wooden chest ghosts on marked trees.
+local function build_mixed(car_count, overlap)
+	T.marked = {}
+	T.ghosts = {}
+	local s = new_surface({{0, 0}}, 6)
+	make(s, names.charger, 0, 0)
+	make(s, names.charger, 0, 60)
+	make(s, names.garage, 20, -10)
+	T.chest = make(s, names.chest, 0.5, 30.5)
+	fill(T.chest, {["wooden-chest"] = 40, ["stone-furnace"] = 20})
+	T.cars = {}
+	for index = 1, car_count do
+		T.cars[index] = make_car(s, 10 + 6 * index, 10, 0.1)
+	end
+	if overlap then
+		for i = 0, 5 do
+			mark(s, "wooden-chest", 60.5 + 4 * i, 60.5, {name = "iron-plate", count = 10})
+			T.ghosts[#T.ghosts + 1] = make_ghost(s, "stone-furnace", 61 + 4 * i, 61)
+		end
+		for i = 0, 3 do
+			mark(s, "tree-01", 60.5 + 4 * i, 80.5)
+			T.ghosts[#T.ghosts + 1] = make_ghost(s, "wooden-chest", 60.5 + 4 * i, 80.5)
+		end
+		-- More to mine, 120 tiles away: the car that takes the marked entities stays busy
+		-- there while the other one tries the ghosts, which are still covered.
+		for i = 0, 9 do
+			mark(s, "tree-01", -60 - 3 * i, 60)
+		end
+	else
+		for i = 0, 7 do
+			T.ghosts[#T.ghosts + 1] = make_ghost(s, "wooden-chest", 60.5 + 2 * i, 60.5)
+		end
+		for i = 0, 5 do
+			mark(s, "tree-01", -60 - 3 * i, 60)
+		end
+	end
+end
+
+local function report_mixed(label)
+	out("EVENT " .. label .. ": " .. count_valid(T.ghosts) .. "/" .. #T.ghosts .. " ghosts left, "
+		.. count_valid(T.marked) .. "/" .. #T.marked .. " marked entities left")
+end
+
+-- Ghosts and marked entities selected together, far apart, one car then two:
+-- a batch never mixes both (EVENT lines say MIXED if it does), and everything
+-- gets done, one mode after the other when there is a single car.
+scenarios["mixed-apart-single"] = {
+	ticks = 14000,
+	category = "construction",
+	setup = function()
+		build_mixed(1, false)
+	end,
+	events = function(t)
+		if t == 200 then
+			select_all(-100, 40, 100, 80)
+		end
+		watch_batches()
+		if t == 13500 then
+			report_mixed("end")
+		end
+	end,
+}
+
+scenarios["mixed-apart"] = {
+	ticks = 14000,
+	category = "construction",
+	setup = function()
+		build_mixed(2, false)
+	end,
+	events = function(t)
+		if t == 200 then
+			select_all(-100, 40, 100, 80)
+		end
+		watch_batches()
+		if t == 13500 then
+			report_mixed("end")
+		end
+	end,
+}
+
+-- Ghosts on top of the entities that must go first (furnaces over marked
+-- chests, chests over marked trees), two cars. Without an ordering rule the
+-- ghosts fail to revive until the cars have mined what is in the way, then go
+-- through the retry cycle (alert, back to the pending pool).
+scenarios["mixed-overlap"] = {
+	ticks = 16000,
+	category = "construction",
+	setup = function()
+		build_mixed(2, true)
+	end,
+	events = function(t)
+		if t == 200 then
+			select_all(-100, 50, 100, 100)
+		end
+		watch_batches()
+		if t == 3000 or t == 8000 then
+			report_mixed("t=" .. t)
+		end
+		if t == 15500 then
+			report_mixed("end")
+		end
+	end,
+}
+
 -- A wall with a gate on the straight way between a supply chest and a ghost: the
 -- car can only build the ghost if it gets through the gate. The car has no
 -- can_open_gates: movement.open_gates asks the gate to open as it approaches.
