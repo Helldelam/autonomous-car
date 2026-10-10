@@ -275,7 +275,7 @@ local function update_car(car, car_data, tick)
 		-- Safety net: a car in no state at all would do nothing for ever. Back to
 		-- waiting; the case is recorded so that the tests report it (a bug elsewhere
 		-- left the car without a state).
-		table.insert(storage.idle_fallbacks, {tick = tick, car = car.unit_number})
+		table.insert(storage.idle_fallbacks, {tick = tick, car = car.unit_number, surface = car.surface.index})
 		log("autonomous car " .. car.unit_number .. " had no state at tick " .. tick .. ", set to waiting")
 		travel.reset_to_waiting(car)
 	end

@@ -2,18 +2,20 @@
 -- ============================================================================
 -- TEST HARNESS - temporary development aid, to be removed with the tests/ folder
 -- ============================================================================
--- tests/run.ps1 appends this file to a temporary copy of control.lua, after a
--- line that defines SCENARIO, and runs the result in Factorio's benchmark
--- mode. The mod itself never loads it. Being part of the control.lua chunk, it
+-- tests/run.ps1 appends this file to a temporary copy of control.lua, after lines
+-- that define SCENARIOS (the names of the scenarios to run, separated by commas)
+-- and TICKS (a duration for all of them, or nil), and runs the result in Factorio's
+-- benchmark mode. Scenarios of the same category run together in one game, each
+-- on its own surface and with its own trace. The mod itself never loads it. Being part of the control.lua chunk, it
 -- can use that file's locals: on_area_selected, names and the modules (which
 -- a Lua language server reading this file alone would report as undefined).
 ---@diagnostic disable: undefined-global
 --
 -- Output, in script-output/:
---   trace.txt     one line per car every 10 ticks, plus SETUP, EVENT, SELECT,
---                 BATCH (clusters of a car's batch, each time it changes)
+--   trace-<scenario>.txt  one line per car every 10 ticks, plus SETUP, EVENT,
+--                 SELECT, BATCH (clusters of a car's batch, each time it changes)
 --                 and SUMMARY lines, and the GATE-TEST lines of gate-manual
---   coverage.txt  how many times each module function was called
+--   coverage.txt  how many times each module function was called (all scenarios)
 --
 -- Car line:
 --   tick id x y orientation speed fuel FLAGS a<acceleration> d<direction>
@@ -26,22 +28,31 @@
 local FLAG_NAMES = {"moving", "charging", "parking", "building", "stuck", "waiting", "empty", "maneuver", "emergency_brake", "high_speed", "precision_mode", "slowing", "path"}
 local BUILT_NAMES = {"wooden-chest", "stone-furnace", "small-electric-pole", "steel-chest", "car"}
 
-local T = {chargers = {}, clusters = {}} -- state of the running scenario
+local T -- state of the scenario being run (see `use`): set before any of its code runs
+local states = {}
 local scenarios = {}
+
+-- Makes `name` the current scenario: its code reads and writes T.
+local function use(name)
+	if not states[name] then
+		states[name] = {name = name, chargers = {}, clusters = {}, surfaces = {}}
+	end
+	T = states[name]
+end
 
 -- ============================================================
 -- Helpers
 -- ============================================================
 
 local function out(line)
-	helpers.write_file("trace.txt", line .. "\n", true)
+	helpers.write_file("trace-" .. T.name .. ".txt", line .. "\n", true)
 end
 
 -- Creates the flat test surface, generated around each chunk centre given. Lab
 -- tiles have no friction of their own, which makes the cars much faster than on
 -- the grass they are tuned on in game: the ground is laid with grass.
 local function new_surface(centres, radius)
-	local surface = game.create_surface("test")
+	local surface = game.create_surface("test-" .. T.name)
 	surface.generate_with_lab_tiles = true
 	for _, centre in pairs(centres) do
 		surface.request_to_generate_chunks(centre, radius)
@@ -58,6 +69,7 @@ local function new_surface(centres, radius)
 		surface.set_tiles(tiles, false)
 	end
 	T.surface = surface
+	T.surfaces[surface.index] = true
 	return surface
 end
 
@@ -119,17 +131,21 @@ end
 -- Scenarios
 -- ============================================================
 -- Each scenario has a `setup` function, an optional `events(t)` function,
--- called every tick with the number of ticks since the setup, and an optional
--- `ticks`, the time it runs when it needs less than the default of run.ps1.
--- This file is the only list of scenarios: run.ps1 reads their names and
--- their `ticks` from the lines below. Keep the form scenarios["name"] = {,
--- with `ticks = N,` as the next line.
+-- called every tick with the number of ticks since the setup, an optional
+-- `ticks`, the time it runs when it needs less than the default of 22000, and a
+-- `category`: the scenarios of a category run together, in one game. Pick the
+-- category by what the scenario checks: movement (driving around obstacles),
+-- robustness (stuck cars, failures, empty battery), construction, energy
+-- (chargers and garages). This file is the only list of scenarios: run.ps1 reads
+-- their names, `ticks` and `category` from the lines below. Keep the form
+-- scenarios["name"] = { followed by those lines.
 
 -- Driving, charging and parking, on open ground, around obstacles and on
 -- natural terrain. Also: a destination destroyed on the way, a critically
 -- low car with no charger in reach, and cars on two surfaces (a car must only
 -- pick the chargers and garages of its own surface).
 scenarios["basics"] = {
+	category = "energy",
 	setup = function()
 		local s = new_surface({{10000, 0}, {11000, 0}, {11000, 1000}, {12000, 0}}, 6)
 
@@ -171,6 +187,7 @@ scenarios["basics"] = {
 
 		-- Natural terrain: the starting area of nauvis.
 		local nauvis = game.surfaces.nauvis
+		T.surfaces[nauvis.index] = true
 		nauvis.request_to_generate_chunks({0, 0}, 8)
 		nauvis.force_generate_chunk_requests()
 		for _, enemy in pairs(nauvis.find_entities_filtered{force = "enemy"}) do
@@ -224,6 +241,7 @@ scenarios["basics"] = {
 -- others are built), recharging between clusters, a ghost destroyed during its
 -- batch, and a second selection.
 scenarios["construction"] = {
+	category = "construction",
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
 		make(s, names.charger, 0, 0)
@@ -287,6 +305,7 @@ scenarios["construction"] = {
 -- range with no charger, a car destroyed with a batch, and no garage left at
 -- all.
 scenarios["failures"] = {
+	category = "robustness",
 	setup = function()
 		local s = new_surface({{0, 0}, {3000, 3000}, {3500, 3000}}, 10)
 		make(s, names.charger, 0, 0)
@@ -367,6 +386,7 @@ scenarios["failures"] = {
 --     takes no new batch. The chest is emptied at t = 13000, the car deposits and
 --     the ghost goes round again until the wall is removed at t = 17000.
 scenarios["garage-exit"] = {
+	category = "energy",
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
 		make(s, names.charger, 0, 0)
@@ -425,6 +445,7 @@ scenarios["garage-exit"] = {
 -- its queued "charging" task was then run on arrival from its step back, which
 -- ended in a script error in charge.lua).
 scenarios["stale-task"] = {
+	category = "robustness",
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
 		make(s, names.charger, -150, 0)
@@ -469,6 +490,7 @@ end
 --          its leg to the charger is retried without limit and never abandoned
 -- The ghosts of B are not built, and must not be assigned again after the abandon.
 scenarios["sealed"] = {
+	category = "robustness",
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
 		make(s, names.charger, 0, 0)
@@ -519,6 +541,7 @@ scenarios["sealed"] = {
 -- facing a side wall, and facing the opening.
 scenarios["u-corridor"] = {
 	ticks = 9000,
+	category = "movement",
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
 		make(s, names.charger, 0, 0)
@@ -597,12 +620,14 @@ end
 
 scenarios["u-side"] = {
 	ticks = 6000,
+	category = "movement",
 	setup = function() build_rooms(4) end,
 	events = select_rooms,
 }
 
 scenarios["u-narrow"] = {
 	ticks = 6000,
+	category = "movement",
 	setup = function() build_rooms(3) end,
 	events = select_rooms,
 }
@@ -612,6 +637,7 @@ scenarios["u-narrow"] = {
 -- drive. BATCH lines give the tick each finished.
 scenarios["turn-around"] = {
 	ticks = 4000,
+	category = "movement",
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
 		make(s, names.charger, 0, 0)
@@ -639,6 +665,7 @@ scenarios["turn-around"] = {
 -- the wall.
 scenarios["long-wall"] = {
 	ticks = 8000,
+	category = "movement",
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
 		make(s, names.charger, 0, 0)
@@ -788,6 +815,7 @@ end
 -- before it, three inside it. Three densities.
 scenarios["forest"] = {
 	ticks = 9000,
+	category = "movement",
 	setup = function()
 		local function forest(spacing, inside)
 			return {
@@ -812,6 +840,7 @@ scenarios["forest"] = {
 -- turned away), three have their supply chest behind them, outside.
 scenarios["forest-edge"] = {
 	ticks = 9000,
+	category = "movement",
 	setup = function()
 		local function edge(spacing, depth, orientation, behind)
 			return {
@@ -834,6 +863,7 @@ scenarios["forest-edge"] = {
 -- the forest, sideways to it, or turned away.
 scenarios["forest-depth"] = {
 	ticks = 9000,
+	category = "movement",
 	setup = function()
 		local function edge(spacing, depth, orientation, behind)
 			return {
@@ -857,6 +887,7 @@ scenarios["forest-depth"] = {
 -- facing the copse or turned away.
 scenarios["copse"] = {
 	ticks = 9000,
+	category = "movement",
 	setup = function()
 		local function copse(spacing, orientation)
 			return {
@@ -872,6 +903,7 @@ scenarios["copse"] = {
 -- A field of furnaces with lanes between them to cross, from outside and from inside.
 scenarios["factory"] = {
 	ticks = 9000,
+	category = "movement",
 	setup = function()
 		local function factory(lane, inside)
 			-- Inside, the car starts in the lane crossing of the fourth column and row.
@@ -890,6 +922,7 @@ scenarios["factory"] = {
 -- tiles one way or the other. Cars start facing it, along it, and away from it.
 scenarios["huge-wall"] = {
 	ticks = 14000,
+	category = "movement",
 	setup = function()
 		T.spread = true
 		local function huge(orientation)
@@ -907,6 +940,7 @@ scenarios["huge-wall"] = {
 -- and has to go round the whole row.
 scenarios["wall-turrets"] = {
 	ticks = 12000,
+	category = "movement",
 	setup = function()
 		local function turrets(length, orientation)
 			return {
@@ -928,6 +962,7 @@ scenarios["wall-turrets"] = {
 -- tiles wide, two cars each (starting inside the first leg, turned differently).
 scenarios["l-corridor"] = {
 	ticks = 9000,
+	category = "movement",
 	setup = function()
 		local function corridor(width, orientation)
 			local w = width
@@ -951,6 +986,7 @@ scenarios["l-corridor"] = {
 -- Walls thrown at random over a field 60 tiles long: three densities, two cars each.
 scenarios["scatter"] = {
 	ticks = 9000,
+	category = "movement",
 	setup = function()
 		local function scatter(count, orientation)
 			return {
@@ -973,6 +1009,7 @@ scenarios["scatter"] = {
 -- right one. Sizes 3, 5 and 7 cells, two mazes each.
 scenarios["maze"] = {
 	ticks = 14000,
+	category = "movement",
 	setup = function()
 		local function maze(n)
 			local pitch = 8
@@ -991,6 +1028,7 @@ scenarios["maze"] = {
 -- t = 200. Its battery is refilled at t = 3000: it should resume and build it.
 scenarios["empty-battery"] = {
 	ticks = 8000,
+	category = "robustness",
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
 		make(s, names.charger, 0, 0)
@@ -1015,6 +1053,8 @@ scenarios["empty-battery"] = {
 -- car can only build the ghost if it gets through the gate. The car has no
 -- can_open_gates: movement.open_gates asks the gate to open as it approaches.
 scenarios["gate"] = {
+	ticks = 4000,
+	category = "movement",
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
 		make(s, names.charger, 0, 0)
@@ -1045,6 +1085,7 @@ scenarios["gate"] = {
 -- give its x position every 10 ticks, for 400 ticks: the wall is at x = 20.5.
 scenarios["gate-manual"] = {
 	ticks = 600,
+	category = "movement",
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
 		T.test_cars = {}
@@ -1096,10 +1137,12 @@ local function trace_cars(tick)
 	while (T.fallbacks_reported or 0) < #storage.idle_fallbacks do
 		T.fallbacks_reported = (T.fallbacks_reported or 0) + 1
 		local fallback = storage.idle_fallbacks[T.fallbacks_reported]
-		out(string.format("EVENT NOSTATE car %d had no state at tick %d", fallback.car, fallback.tick))
+		if T.surfaces[fallback.surface] then
+			out(string.format("EVENT NOSTATE car %d had no state at tick %d", fallback.car, fallback.tick))
+		end
 	end
 	for id, car in pairs(storage.cars) do
-		if car.valid then
+		if car.valid and T.surfaces[car.surface.index] then
 			local car_data = storage.car_data[id]
 			local flags = ""
 			for _, name in ipairs(FLAG_NAMES) do
@@ -1141,11 +1184,21 @@ local function trace_cars(tick)
 end
 
 local function trace_summary(tick)
-	local surface = T.surface
-	local parked = 0
+	local cars, parked, ghosts, pending = 0, 0, 0, 0
+	for _, car in pairs(storage.cars) do
+		if car.valid and T.surfaces[car.surface.index] then
+			cars = cars + 1
+		end
+	end
 	for _, garage in pairs(storage.garages) do
-		if garage.valid then
+		if garage.valid and T.surfaces[garage.surface.index] then
 			parked = parked + garage.get_inventory(defines.inventory.chest).get_item_count(names.car)
+		end
+	end
+	for _, cluster in pairs(storage.pending_clusters) do
+		local ghost = cluster.ghosts[1]
+		if ghost and ghost.valid and T.surfaces[ghost.surface.index] then
+			pending = pending + 1
 		end
 	end
 	local users = {}
@@ -1154,13 +1207,23 @@ local function trace_summary(tick)
 			table.insert(users, storage.charger_data[charger.unit_number].users)
 		end
 	end
+	local built_counts = {}
+	for _, name in ipairs(BUILT_NAMES) do
+		built_counts[name] = 0
+	end
+	for index in pairs(T.surfaces) do
+		local surface = game.get_surface(index)
+		ghosts = ghosts + surface.count_entities_filtered{type = "entity-ghost"}
+		for _, name in ipairs(BUILT_NAMES) do
+			built_counts[name] = built_counts[name] + surface.count_entities_filtered{name = name}
+		end
+	end
 	local built = {}
 	for _, name in ipairs(BUILT_NAMES) do
-		table.insert(built, name .. "=" .. surface.count_entities_filtered{name = name})
+		table.insert(built, name .. "=" .. built_counts[name])
 	end
 	out(string.format("SUMMARY %d cars=%d parked=%d ghosts=%d pending=%d charger_users=%s built: %s",
-		tick, table_size(storage.cars), parked, surface.count_entities_filtered{type = "entity-ghost"},
-		#storage.pending_clusters, table.concat(users, ","), table.concat(built, " ")))
+		tick, cars, parked, ghosts, pending, table.concat(users, ","), table.concat(built, " ")))
 end
 
 -- ============================================================
@@ -1203,42 +1266,54 @@ end
 -- Driver
 -- ============================================================
 
-local scenario = scenarios[SCENARIO]
-if not scenario then
-	error("unknown test scenario: " .. tostring(SCENARIO))
+local running = {} -- the scenarios of this run, in the order given
+for name in string.gmatch(SCENARIOS, "[^,]+") do
+	if not scenarios[name] then
+		error("unknown test scenario: " .. name)
+	end
+	table.insert(running, name)
 end
 
 script.on_nth_tick(1, function(event)
 	local tick = event.tick
 
-	if not T.start_tick then
+	if not T or not T.start_tick then
 		-- The mod creates its storage on its first tick (see init_storage).
 		if storage.cars then
-			scenario.setup()
-			T.start_tick = tick
-			out("SETUP " .. SCENARIO .. " at tick " .. tick)
+			for _, name in ipairs(running) do
+				use(name)
+				seed = 12345 -- the same obstacles whatever the other scenarios of the run
+				scenarios[name].setup()
+				T.start_tick = tick
+				out("SETUP " .. name .. " at tick " .. tick)
+			end
 		end
 		return
 	end
 
-	local t = tick - T.start_tick
-	if t % 30 == 0 then
-		-- Chargers are not wired to any power: keep their buffer full.
-		for _, charger in pairs(T.chargers) do
-			if charger.valid then
-				charger.energy = 6e7
+	for _, name in ipairs(running) do
+		use(name)
+		local t = tick - T.start_tick
+		if t <= (TICKS or scenarios[name].ticks or 22000) then
+			if t % 30 == 0 then
+				-- Chargers are not wired to any power: keep their buffer full.
+				for _, charger in pairs(T.chargers) do
+					if charger.valid then
+						charger.energy = 6e7
+					end
+				end
+			end
+			if scenarios[name].events then
+				scenarios[name].events(t)
+			end
+
+			if tick % 10 == 0 then
+				trace_cars(tick)
+			end
+			if tick % 300 == 0 then
+				trace_summary(tick)
 			end
 		end
-	end
-	if scenario.events then
-		scenario.events(t)
-	end
-
-	if tick % 10 == 0 then
-		trace_cars(tick)
-	end
-	if tick % 300 == 0 then
-		trace_summary(tick)
 	end
 	if tick % 500 == 0 then
 		write_coverage()

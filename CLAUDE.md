@@ -4,14 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Mod Factorio 2.0 (Lua 5.2) « Autonomous Car » : une voiture autonome qui construit des ghosts hors réseau de robots, se recharge et se gare seule. Ce fichier est la seule documentation du projet.
 
-**Version en construction : rien, à ce stade, n'est définitivement validé**, ni le comportement en jeu, ni le contenu de `main`. Tout peut encore être repris, y compris ce que ce fichier décrit comme fonctionnant.
+**Version en construction.** Le 2026-10-10 le propriétaire a jugé cette version satisfaisante pour les mécanismes en place (déplacement, manœuvre, chemin de secours, construction, recharge, garage, fenêtre des objets manquants) et l'a fusionnée dans `main` ; les problèmes ouverts plus bas et les fonctions à venir restent à traiter. Un mécanisme peut toujours être repris si un test ou le jeu le montre.
 
 ## Règles de travail
 
 - Comprendre la cause d'un bug au niveau du tick avant de corriger ; pas de correctif de symptôme.
 - Changements petits et chirurgicaux. Réutiliser les helpers et l'API Factorio existants ; pas de second système d'état.
 - Le code fonctionne globalement en jeu : une incohérence vue à la lecture n'est pas un bug tant qu'elle n'est pas confirmée en jeu, par un scénario de test ou par le propriétaire.
-- Ne lancer les tests que sur demande du propriétaire. Dans l'environnement cloud, ne pas chercher à exécuter Factorio : le propriétaire lance les scénarios en local. Une vérification statique reste possible sans Factorio (voir « Commandes »).
+- Ne lancer les tests que sur demande du propriétaire, et lui demander avant chaque lancement en indiquant la durée approximative (une catégorie de scénarios prend de 1 à 10 minutes). Dans l'environnement cloud, ne pas chercher à exécuter Factorio : le propriétaire lance les scénarios en local. Une vérification statique reste possible sans Factorio (voir « Commandes »).
 - Git : `main` est la version de référence choisie par le propriétaire, pas une version validée (voir plus haut). Tout travail se fait sur une branche à part (la créer avant la première modification si on est sur `main`). Ne jamais pousser ni fusionner dans `main` sans demande explicite du propriétaire ; proposer de committer, pousser ou fusionner quand cela semble utile (fin d'un changement cohérent, version prête à valider), puis attendre sa réponse.
 - Tenir à jour la liste « Problèmes connus » en bas de ce fichier : ajouter tout problème découvert ; un problème corrigé passe dans « Corrigés, à valider » et n'est retiré qu'après validation du propriétaire. Seul ce que le joueur voit ou peut faire y entre : un changement interne au code (renommage, refactoring sans effet visible) n'a pas à être validé.
 - Une idée ou une tâche à garder pour plus tard se note à deux endroits : une ligne dans « À faire » (plus bas) et un commentaire `-- TODO` à l'endroit du code concerné. Retirer les deux quand c'est fait.
@@ -35,13 +35,17 @@ Sous Linux (environnement cloud, sans Factorio) : `apt-get install lua5.2 lua-ch
 Scénarios de test (dossier `tests/`, temporaire : à retirer avant publication, le mod n'en charge rien) :
 
 ```powershell
-tests\run.ps1                                  # tous les scénarios, quelques minutes
-tests\run.ps1 construction -Ticks 8000         # un scénario, plus court
-tests\run.ps1 -Reference <dossier ou zip>      # compare les traces avec une autre version du mod
+testsun.ps1                                  # tous les scénarios, quatre lancements de Factorio
+testsun.ps1 movement                         # une catégorie : movement, robustness, construction, energy
+testsun.ps1 -Changed                         # les catégories que les fichiers modifiés depuis le dernier commit peuvent affecter
+testsun.ps1 maze, garage-exit -Ticks 8000    # des scénarios précis (un lancement par catégorie concernée)
+testsun.ps1 -Reference <dossier ou zip>      # compare les traces avec une autre version du mod
 tests\show.ps1 construction -Car 132           # changements d'état d'une voiture dans une trace
 ```
 
-`run.ps1` lance Factorio sans fenêtre ni joueur sur une copie du mod dans `%TEMP%\autonomous-car-tests` ; rien n'est écrit dans le dossier Factorio et le jeu peut rester ouvert. Il affiche pour chaque scénario l'erreur de script éventuelle, les événements et le dernier résumé. `-Reference` sert à vérifier qu'un refactoring ne change aucun comportement : Factorio est déterministe, deux versions équivalentes donnent des traces identiques. La version de référence tourne avec son propre `tests/harness.lua` quand elle en a un, ce qui permet de comparer deux versions dont les noms diffèrent. Les scénarios posent de l'herbe (`grass-1`, friction 1.6) sur leur surface, comme en jeu : sur les tuiles de laboratoire les voitures vont bien plus vite. Les scénarios sont décrits dans `tests/harness.lua`, qui en est la seule liste : `run.ps1` y lit leurs noms et leur durée (22 000 ticks, ou le champ `ticks` du scénario), `show.ps1` y lit les noms des drapeaux. Ce fichier est greffé à la fin de `control.lua` et utilise ses locales (`on_area_selected`, `names`, les modules) : renommer l'une d'elles impose de le mettre à jour.
+Chaque scénario a une catégorie (champ `category` dans `tests/harness.lua`) ; les scénarios d'une catégorie qu'on lance tournent ensemble dans une seule partie, chacun sur sa surface et avec sa trace (`trace-<scénario>.txt`), pour ne pas lancer Factorio 24 fois : `movement` (17 scénarios, déplacements autour d'obstacles : salles, murs, forêts, labyrinthes, portes), `robustness` (voitures bloquées, pannes, batterie vide), `construction`, `energy` (chargeurs et garages). Une erreur de script arrête toute la catégorie. Un nouveau scénario prend la catégorie de ce qu'il vérifie, et une surface à lui (`new_surface`).
+
+`run.ps1` lance Factorio sans fenêtre ni joueur sur une copie du mod dans `%TEMP%utonomous-car-tests` ; rien n'est écrit dans le dossier Factorio et le jeu peut rester ouvert. Il affiche pour chaque scénario l'erreur de script éventuelle, les événements et le dernier résumé. `-Reference` sert à vérifier qu'un refactoring ne change aucun comportement : Factorio est déterministe, deux versions équivalentes donnent des traces identiques (à scénarios groupés identiques : les numéros d'entités dépendent des scénarios lancés ensemble). La version de référence tourne avec son propre `tests/harness.lua` quand elle en a un, ce qui permet de comparer deux versions dont les noms diffèrent. Les scénarios posent de l'herbe (`grass-1`, friction 1.6) sur leur surface, comme en jeu : sur les tuiles de laboratoire les voitures vont bien plus vite. Les scénarios sont décrits dans `tests/harness.lua`, qui en est la seule liste : `run.ps1` y lit leurs noms, leur durée (22 000 ticks, ou le champ `ticks`) et leur catégorie, `show.ps1` y lit les noms des drapeaux. Ce fichier est greffé à la fin de `control.lua` et utilise ses locales (`on_area_selected`, `names`, les modules) : renommer l'une d'elles impose de le mettre à jour. Un événement `NOSTATE` dans une trace signale le filet de sécurité de `update_car` (voir « Tick »).
 
 ## Architecture
 
@@ -208,6 +212,4 @@ Idées et tâches retenues par le propriétaire, pas encore commencées. Chacune
 
 ### Corrigés, à valider
 
-- **Réparation lente des voitures garées** : vérifier que la santé de l'item passe bien à la voiture (`release_car`).
-- **Filet de sécurité de `update_car`** : une voiture qu'aucune branche ne prend en charge repasse en `waiting` (`travel.reset_to_waiting`), et le cas est enregistré (`storage.idle_fallbacks`, ligne de log). Les scénarios le signalent par un événement `NOSTATE` (le harnais le lit dans `trace_cars`) : l'origine se lit dans la trace de la voiture juste avant (`tests\show.ps1`). Aucun cas dans les 24 scénarios.
-- **Icônes par défaut distinctes** : le sélecteur de ghosts (objet et raccourci) emprunte l'icône du plan, la fenêtre des objets manquants l'icône d'information du jeu, au lieu de celle du planificateur de déconstruction pour les deux. Prototype : redémarrer Factorio. Les icônes restent provisoires (voir « À faire »).
+Rien pour l'instant.
