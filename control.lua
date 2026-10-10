@@ -271,6 +271,13 @@ local function update_car(car, car_data, tick)
 		if tick - car_data.waiting.since >= config.idle_delay then
 			end_wait(car, car_data, tick)
 		end
+	else
+		-- Safety net: a car in no state at all would do nothing for ever. Back to
+		-- waiting; the case is recorded so that the tests report it (a bug elsewhere
+		-- left the car without a state).
+		table.insert(storage.idle_fallbacks, {tick = tick, car = car.unit_number})
+		log("autonomous car " .. car.unit_number .. " had no state at tick " .. tick .. ", set to waiting")
+		travel.reset_to_waiting(car)
 	end
 end
 
@@ -309,6 +316,7 @@ local function init_storage(event)
 	storage.ghost_to_car = storage.ghost_to_car or {} -- [ghost unit_number] = unit_number of its car
 	storage.pending_clusters = storage.pending_clusters or {} -- clusters waiting for a free car
 	storage.path_requests = storage.path_requests or {} -- [request id] = unit_number of the car waiting for that path
+	storage.idle_fallbacks = storage.idle_fallbacks or {} -- cars found in no state, see update_car
 
 	script.on_event(defines.events.on_tick, on_tick)
 	on_tick(event)

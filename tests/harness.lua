@@ -1092,6 +1092,12 @@ scenarios["gate-manual"] = {
 -- ============================================================
 
 local function trace_cars(tick)
+	-- A car found in no state by update_car: where it came from is in the trace just before.
+	while (T.fallbacks_reported or 0) < #storage.idle_fallbacks do
+		T.fallbacks_reported = (T.fallbacks_reported or 0) + 1
+		local fallback = storage.idle_fallbacks[T.fallbacks_reported]
+		out(string.format("EVENT NOSTATE car %d had no state at tick %d", fallback.car, fallback.tick))
+	end
 	for id, car in pairs(storage.cars) do
 		if car.valid then
 			local car_data = storage.car_data[id]
