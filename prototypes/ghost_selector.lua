@@ -18,15 +18,18 @@ data:extend{
 		order = "z[autonomous-car]-a[ghost-selector]",
 		stack_size = 1,
 		skip_fog_of_war = true,
+		-- Ghosts, and every entity: the flags "deconstruct", "upgrade" and their "cancel-" variants do not
+		-- select what is already marked (they act as filters, and with "cancel-" nothing was selected at
+		-- all), so on_area_selected keeps the marked ones itself (ghost_control.is_target).
 		select = {
 			border_color = {r = 0, g = 0.6, b = 1},
 			cursor_box_type = "entity",
-			mode = {"entity-ghost", "tile-ghost", "deconstruct", "upgrade"},
+			mode = {"entity-ghost", "tile-ghost", "any-entity"},
 		},
 		alt_select = {
 			border_color = {r = 1, g = 0.2, b = 0.2},
 			cursor_box_type = "entity",
-			mode = {"entity-ghost", "tile-ghost", "deconstruct", "upgrade"},
+			mode = {"entity-ghost", "tile-ghost", "any-entity"},
 		},
 		always_include_tiles = true,
 	},

@@ -217,12 +217,19 @@ function ghost_control.on_ghost_destroyed(id)
 	end
 end
 
--- Puts one ghost back in the pending pool, as a cluster of its own.
+-- Puts one ghost back in the pending pool, as a cluster of its own. No car takes
+-- it before config.very_long_delay (`not_before`): a ghost that failed several
+-- times would otherwise be handed at once to another car, and then to a third.
 function ghost_control.requeue_ghost(ghost)
 	storage.ghost_to_car[ghost_control.get_id(ghost)] = nil
 	if ghost.valid then
-		table.insert(storage.pending_clusters, {ghosts = {ghost}})
+		table.insert(storage.pending_clusters, {ghosts = {ghost}, not_before = game.tick + config.very_long_delay})
 	end
+end
+
+-- True if a pending cluster may be given to a car now.
+local function is_cluster_ready(cluster)
+	return not cluster.not_before or game.tick >= cluster.not_before
 end
 
 -- ============================================================
@@ -504,7 +511,7 @@ function ghost_control.try_assign_pending(car)
 	local best_index, best_distance, best_phase
 	for index, cluster in pairs(storage.pending_clusters) do
 		local centroid = ghost_control.compute_centroid(cluster.ghosts)
-		if centroid and get_cluster_surface(cluster) == car.surface then
+		if centroid and is_cluster_ready(cluster) and get_cluster_surface(cluster) == car.surface then
 			local distance = util.distance(car.position, centroid)
 			local phase = get_cluster_phase(cluster)
 			if not best_index or phase < best_phase or (phase == best_phase and distance < best_distance) then
@@ -537,7 +544,7 @@ function ghost_control.retry_pending_clusters()
 			local _, count = ghost_control.compute_centroid(cluster.ghosts)
 			if count == 0 then
 				table.remove(storage.pending_clusters, index)
-			elseif get_cluster_phase(cluster) ~= phase then
+			elseif get_cluster_phase(cluster) ~= phase or not is_cluster_ready(cluster) then
 				index = index + 1
 			else
 				local car = ghost_control.find_available_car(cluster)
@@ -617,7 +624,7 @@ function ghost_control.fill_batch(car)
 		local best_index, best_distance
 		for index, cluster in ipairs(storage.pending_clusters) do
 			local centroid = ghost_control.compute_centroid(cluster.ghosts)
-			if centroid and get_cluster_surface(cluster) == car.surface
+			if centroid and is_cluster_ready(cluster) and get_cluster_surface(cluster) == car.surface
 				and get_mode(cluster.ghosts) == mode
 				and reserved + count_items_slots(sum_cluster(cluster, ghost_control.compute_load)) <= config.car_inventory_size then
 				local distance = util.distance(origin, centroid)
@@ -1047,7 +1054,7 @@ function ghost_control.attempt_one_ghost(car)
 		construction.failed_attempts[id] = nil
 		ghost_control.requeue_ghost(ghost)
 	else
-		construction.failed_attempts[id] = {count = count, retry_tick = game.tick + config.medium_delay}
+		construction.failed_attempts[id] = {count = count, retry_tick = game.tick + count * config.medium_delay}
 	end
 	return "failed"
 end

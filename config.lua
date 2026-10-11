@@ -74,7 +74,6 @@ config.high_speed_density = {
 	enter = 0.03, -- blended density below which the car cruises at high speed
 	leave = 0.05, -- and above which it stops doing so; two thresholds, so the mode does not flicker
 }
-config.high_speed_wall_distance = 15 -- no high speed with a wall or a gate this close: slower near bases, and gates get time to open
 
 -- ============================================================
 -- Speed (see movement.lua)
@@ -97,11 +96,6 @@ config.friction_high_speed_factor = 0.1 -- cruising in an open area
 config.friction_precision_factor = 4 -- precision mode
 config.friction_maneuver_factor = 10 -- maneuver mode: much slower than precision mode
 config.friction_emergency_factor = 100 -- emergency braking, on top of the mode above
--- Cap of friction_modifier times the friction of the tile. The speed of the car
--- is multiplied by 1 - friction * 0.002 (friction of the car prototype) every
--- tick: above 1000 it flips sign and grows. Emergency braking in precision mode
--- is 400 on any tile; the cap keeps a wrong factor from throwing the car.
-config.friction_limit = 500
 
 -- ============================================================
 -- Maneuver mode (see movement.maneuver_tick)
@@ -138,7 +132,7 @@ config.precision_lookahead_length = 2 -- replaces lookahead_length
 -- ============================================================
 -- Shared delays
 -- ============================================================
--- Every "wait, then retry or re-evaluate" in the mod uses one of these four
+-- Every "wait, then retry or re-evaluate" in the mod uses one of these five
 -- delays, grouped by time scale. Reuse the closest one instead of adding a
 -- constant, and list the new usage here.
 
@@ -149,7 +143,7 @@ config.short_delay = 30 -- (0.5s)
 	-- movement.maneuver_tick: a car that drives but does not move this long backs off; the car follows one arc this long, and the heading is looked for again this often
 	-- control.lua: period at which an open window of missing items is refreshed (gui.refresh_all)
 config.medium_delay = 180 -- (3s)
-	-- ghost_control.attempt_one_ghost: cooldown of a ghost that failed to revive
+	-- ghost_control.attempt_one_ghost: cooldown of a ghost that failed to revive, times the number of failures
 config.idle_delay = 300 -- (5s) long on purpose during development, so idle waits are easy to see; lower to 60-120 before release
 	-- movement.maneuver_tick: longest a maneuver may last, its single try; past it the car asks for a path (movement.request_path), then is stuck
 	-- control.lua: wait before an idle car looks for a new task or a garage
@@ -160,6 +154,9 @@ config.long_delay = 600 -- (10s)
 	-- control.lua: period of the fallback scan of pending clusters
 	-- travel.stuck_tick: wait before a stuck car tries its leg again
 	-- travel.is_leg_too_long: margin added to the expected duration of a leg
+config.very_long_delay = 3600 -- (60s)
+	-- ghost_control.requeue_ghost: a ghost given up after max_revive_attempts waits this long in the pending pool before any car may take it again,
+	-- so that the cars do not all gather on a ghost that cannot be built
 
 -- Measurements that need not happen every tick (the cars nearby, the closest
 -- charger) are repeated this often, offset per car. Raise it if the mod slows

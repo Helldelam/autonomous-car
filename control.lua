@@ -147,6 +147,7 @@ end
 
 -- The player dragged the ghost selector over an area: tracks the selected
 -- ghosts and entities marked for deconstruction or upgrade, splits them into clusters, and gives each cluster to a car or queues it.
+-- TODO: if the mod gets too costly, spread the sorting, clustering and assignment over several ticks. See "À faire" in CLAUDE.md.
 local function on_area_selected(event)
 	if event.item ~= names.ghost_selector then
 		return
