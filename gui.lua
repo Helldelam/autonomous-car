@@ -1,4 +1,5 @@
 local config = require("config")
+local _utils = require("_utils")
 
 -- The small window that lists the items the cars are waiting for: the player
 -- shows or hides it with a shortcut. It reads the batches in storage and
@@ -14,34 +15,34 @@ local CLOSE = "autonomous_car_missing_close"
 
 -- The items that cars wait for because no supply chest holds them (see
 -- construction.missing_since in ghost.lua):
--- [item name] = {count = still to collect, cars = number of cars waiting for it}.
+-- [item key, see _utils.make_item_key] = {count = still to collect, cars = number of cars waiting for it}.
 local function find_missing_items()
 	local missing = {}
 	for _, car_data in pairs(storage.car_data) do
 		local construction = car_data.construction
 		if construction and construction.missing_since then
-			for item_name, count in pairs(construction.items_needed) do
-				local entry = missing[item_name] or {count = 0, cars = 0}
+			for key, count in pairs(construction.items_needed) do
+				local entry = missing[key] or {count = 0, cars = 0}
 				entry.count = entry.count + count
 				entry.cars = entry.cars + 1
-				missing[item_name] = entry
+				missing[key] = entry
 			end
 		end
 	end
 	return missing
 end
 
--- Item names in a fixed order, and a string that changes when the content does,
+-- Item keys in a fixed order, and a string that changes when the content does,
 -- so that the window is only rebuilt when something changed.
 local function build_signature(missing)
 	local names = {}
-	for item_name in pairs(missing) do
-		table.insert(names, item_name)
+	for key in pairs(missing) do
+		table.insert(names, key)
 	end
 	table.sort(names)
 	local parts = {}
-	for _, item_name in ipairs(names) do
-		table.insert(parts, item_name .. ":" .. missing[item_name].count .. ":" .. missing[item_name].cars)
+	for _, key in ipairs(names) do
+		table.insert(parts, key .. ":" .. missing[key].count .. ":" .. missing[key].cars)
 	end
 	return names, table.concat(parts, ",")
 end
@@ -63,14 +64,17 @@ local function build_body(frame, missing, names)
 	list.add{type = "label", caption = {"autonomous-car-gui.item"}, style = "bold_label"}
 	list.add{type = "label", caption = {"autonomous-car-gui.count"}, style = "bold_label"}
 	list.add{type = "label", caption = {"autonomous-car-gui.cars"}, style = "bold_label"}
-	for _, item_name in ipairs(names) do
+	for _, key in ipairs(names) do
+		local item_name, quality = _utils.split_item_key(key)
 		local prototype = prototypes.item[item_name]
-		list.add{
-			type = "label",
-			caption = {"", "[item=" .. item_name .. "] ", prototype and prototype.localised_name or item_name},
-		}
-		list.add{type = "label", caption = tostring(missing[item_name].count)}
-		list.add{type = "label", caption = tostring(missing[item_name].cars)}
+		local icon = "[item=" .. item_name .. (quality and ",quality=" .. quality or "") .. "] "
+		local caption = {"", icon, prototype and prototype.localised_name or item_name}
+		if quality and prototypes.quality[quality] then
+			caption = {"", icon, prototype and prototype.localised_name or item_name, " (", prototypes.quality[quality].localised_name, ")"}
+		end
+		list.add{type = "label", caption = caption}
+		list.add{type = "label", caption = tostring(missing[key].count)}
+		list.add{type = "label", caption = tostring(missing[key].cars)}
 	end
 end
 

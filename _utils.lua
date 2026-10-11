@@ -2,7 +2,8 @@ local util = require("util")
 local config = require("config")
 
 -- Shared helpers: car fuel, closest-entity search, slow checks, the waiting
--- state, deque, alerts, entity cleanup and the next-task event.
+-- state, deque, item keys (name and quality), alerts, entity cleanup and the
+-- next-task event.
 local _utils = {}
 
 -- ============================================================
@@ -134,6 +135,53 @@ function _utils.deque.pop_front(deque)
 		deque.tail = 0
 	end
 	return value
+end
+
+-- ============================================================
+-- Item keys
+-- ============================================================
+-- An item is identified by its name and its quality. The key used in tables
+-- ([key] = count) is the plain name for the normal quality, so most keys read
+-- as before, and "name|quality" for any other. Quality is a name (string), a
+-- LuaQualityPrototype, or nil for normal.
+
+function _utils.make_item_key(name, quality)
+	local quality_name = type(quality) == "string" and quality or (quality and quality.name)
+	if not quality_name or quality_name == "normal" then
+		return name
+	end
+	return name .. "|" .. quality_name
+end
+
+-- Name and quality name (nil for normal) of an item key.
+function _utils.split_item_key(key)
+	local name, quality = key:match("^(.-)|(.+)$")
+	if name then
+		return name, quality
+	end
+	return key, nil
+end
+
+-- A stack definition for insert / remove / can_insert.
+function _utils.make_stack(key, count)
+	local name, quality = _utils.split_item_key(key)
+	return {name = name, quality = quality or "normal", count = count}
+end
+
+-- Items of a key in an inventory (only that quality).
+function _utils.get_item_count(inventory, key)
+	local name, quality = _utils.split_item_key(key)
+	return inventory.get_item_count{name = name, quality = quality or "normal"}
+end
+
+-- The records of LuaInventory.get_contents() as a table of [key] = count.
+function _utils.get_contents(inventory)
+	local contents = {}
+	for _, item in pairs(inventory.get_contents()) do
+		local key = _utils.make_item_key(item.name, item.quality)
+		contents[key] = (contents[key] or 0) + item.count
+	end
+	return contents
 end
 
 -- ============================================================

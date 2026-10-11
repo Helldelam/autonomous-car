@@ -59,9 +59,16 @@ function garage_control.parking_tick(car, garage)
 	end
 end
 
--- Stack and slot of a car parked in the garage, or nil if it holds none.
+-- Stack and slot of a car parked in the garage (of any quality), or nil if it holds none.
 function garage_control.find_parked_car(garage)
-	return garage.get_inventory(defines.inventory.chest).find_item_stack(config.names.car)
+	local inventory = garage.get_inventory(defines.inventory.chest)
+	for slot = 1, #inventory do
+		local stack = inventory[slot]
+		if stack.valid_for_read and stack.name == config.names.car then
+			return stack, slot
+		end
+	end
+	return nil
 end
 
 -- Takes a parked car out of the garage and restores its fuel level. Returns
@@ -83,12 +90,13 @@ function garage_control.release_car(garage)
 	_utils.alert_reset(garage_data.alerts, "no_room")
 
 	local stack, slot = garage_control.find_parked_car(garage)
-	if not stack then
+	if not (stack and slot) then
 		return nil
 	end
 
 	-- raise_built makes control.lua track the new car before create_entity returns.
-	local car = surface.create_entity{name = config.names.car, position = position, raise_built = true, item = stack, force = garage.force}
+	local car = surface.create_entity{name = config.names.car, quality = stack.quality.name, position = position,
+		raise_built = true, item = stack, force = garage.force}
 	if car and car.valid and car.burner then
 		_utils.set_fuel_item(car)
 		if garage_data.fuel[slot] then

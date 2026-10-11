@@ -132,7 +132,7 @@ config.precision_lookahead_length = 2 -- replaces lookahead_length
 -- ============================================================
 -- Shared delays
 -- ============================================================
--- Every "wait, then retry or re-evaluate" in the mod uses one of these four
+-- Every "wait, then retry or re-evaluate" in the mod uses one of these five
 -- delays, grouped by time scale. Reuse the closest one instead of adding a
 -- constant, and list the new usage here.
 
@@ -143,7 +143,7 @@ config.short_delay = 30 -- (0.5s)
 	-- movement.maneuver_tick: a car that drives but does not move this long backs off; the car follows one arc this long, and the heading is looked for again this often
 	-- control.lua: period at which an open window of missing items is refreshed (gui.refresh_all)
 config.medium_delay = 180 -- (3s)
-	-- ghost_control.attempt_one_ghost: cooldown of a ghost that failed to revive
+	-- ghost_control.attempt_one_ghost: cooldown of a ghost that failed to revive, times the number of failures
 config.idle_delay = 300 -- (5s) long on purpose during development, so idle waits are easy to see; lower to 60-120 before release
 	-- movement.maneuver_tick: longest a maneuver may last, its single try; past it the car asks for a path (movement.request_path), then is stuck
 	-- control.lua: wait before an idle car looks for a new task or a garage
@@ -154,6 +154,9 @@ config.long_delay = 600 -- (10s)
 	-- control.lua: period of the fallback scan of pending clusters
 	-- travel.stuck_tick: wait before a stuck car tries its leg again
 	-- travel.is_leg_too_long: margin added to the expected duration of a leg
+config.very_long_delay = 3600 -- (60s)
+	-- ghost_control.requeue_ghost: a ghost given up after max_revive_attempts waits this long in the pending pool before any car may take it again,
+	-- so that the cars do not all gather on a ghost that cannot be built
 
 -- Measurements that need not happen every tick (the cars nearby, the closest
 -- charger) are repeated this often, offset per car. Raise it if the mod slows

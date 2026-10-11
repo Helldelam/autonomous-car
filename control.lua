@@ -137,13 +137,17 @@ local function on_removed(event)
 	end
 end
 
--- Only ghosts are registered for this event (see ghost_control.register_ghost).
+-- Only ghosts and entities marked for deconstruction or upgrade are registered for this
+-- event (see ghost_control.register_ghost); one without a unit_number is found by its registration number.
 local function on_object_destroyed(event)
-	ghost_control.on_ghost_destroyed(event.useful_id)
+	local id = storage.target_by_registration[event.registration_number]
+	storage.target_by_registration[event.registration_number] = nil
+	ghost_control.on_ghost_destroyed(id or event.useful_id)
 end
 
 -- The player dragged the ghost selector over an area: tracks the selected
--- ghosts, splits them into clusters, and gives each cluster to a car or queues it.
+-- ghosts and entities marked for deconstruction or upgrade, splits them into clusters, and gives each cluster to a car or queues it.
+-- TODO: if the mod gets too costly, spread the sorting, clustering and assignment over several ticks. See "À faire" in CLAUDE.md.
 local function on_area_selected(event)
 	if event.item ~= names.ghost_selector then
 		return
@@ -152,16 +156,16 @@ local function on_area_selected(event)
 	local player = game.get_player(event.player_index)
 	local selected = {}
 	for _, entity in pairs(event.entities) do
-		-- Only the ghosts that are newly tracked: one selected before is with a car
+		-- Only the targets that are newly tracked: one selected before is with a car
 		-- or in the pending pool already.
-		if entity.valid and entity.type == "entity-ghost" and ghost_control.register_ghost(entity) then
+		if ghost_control.register_ghost(entity) then
 			table.insert(selected, entity)
 		end
 	end
 
 	if #selected == 0 then
 		if player then
-			player.print("No new ghost outside the robot network found in the selection.")
+			player.print("No new ghost or entity marked for deconstruction or upgrade outside the robot network found in the selection.")
 		end
 		return
 	end
@@ -312,7 +316,8 @@ local function init_storage(event)
 	storage.garages = storage.garages or {}
 	storage.garage_data = storage.garage_data or {}
 	storage.supply_chests = storage.supply_chests or {}
-	storage.ghosts = storage.ghosts or {} -- selected ghosts outside any robot network, assigned or not
+	storage.ghosts = storage.ghosts or {} -- selected ghosts and entities marked for deconstruction or upgrade outside any robot network, assigned or not
+	storage.target_by_registration = storage.target_by_registration or {} -- [registration number] = id of a tracked entity without unit_number
 	storage.ghost_to_car = storage.ghost_to_car or {} -- [ghost unit_number] = unit_number of its car
 	storage.pending_clusters = storage.pending_clusters or {} -- clusters waiting for a free car
 	storage.path_requests = storage.path_requests or {} -- [request id] = unit_number of the car waiting for that path
