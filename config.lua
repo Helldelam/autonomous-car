@@ -74,6 +74,7 @@ config.high_speed_density = {
 	enter = 0.03, -- blended density below which the car cruises at high speed
 	leave = 0.05, -- and above which it stops doing so; two thresholds, so the mode does not flicker
 }
+config.high_speed_wall_distance = 15 -- no high speed with a wall or a gate this close: slower near bases, and gates get time to open
 
 -- ============================================================
 -- Speed (see movement.lua)
@@ -96,6 +97,11 @@ config.friction_high_speed_factor = 0.1 -- cruising in an open area
 config.friction_precision_factor = 4 -- precision mode
 config.friction_maneuver_factor = 10 -- maneuver mode: much slower than precision mode
 config.friction_emergency_factor = 100 -- emergency braking, on top of the mode above
+-- Cap of friction_modifier times the friction of the tile. The speed of the car
+-- is multiplied by 1 - friction * 0.002 (friction of the car prototype) every
+-- tick: above 1000 it flips sign and grows. Emergency braking in precision mode
+-- is 400 on any tile; the cap keeps a wrong factor from throwing the car.
+config.friction_limit = 500
 
 -- ============================================================
 -- Maneuver mode (see movement.maneuver_tick)

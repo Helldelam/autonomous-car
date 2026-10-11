@@ -28,6 +28,7 @@ data:extend{
 			cursor_box_type = "entity",
 			mode = {"entity-ghost", "tile-ghost", "deconstruct", "upgrade"},
 		},
+		always_include_tiles = true,
 	},
 	{
 		type = "shortcut",

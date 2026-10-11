@@ -93,6 +93,13 @@ local function open_gates(car, tick)
 	end
 end
 
+-- True if a wall or a gate lies within config.high_speed_wall_distance of the car.
+local function measure_wall_nearby(car)
+	return #car.surface.find_entities_filtered{
+		position = car.position, radius = config.high_speed_wall_distance, type = {"wall", "gate"}, limit = 1,
+	} > 0
+end
+
 -- Obstacle density, in entities per square tile, in a disc of
 -- config.density_radius. A disc centred on the car counts the car itself (see
 -- "Obstacle density" in config.lua).
@@ -210,9 +217,14 @@ end
 -- tick to the next. `mode_friction` sets the speed of the mode: the game
 -- multiplies it by the friction of the tile under the car, so it is divided by
 -- it here and the car goes as fast on grass as on concrete. `braking_factor`
--- (emergency braking) is not: it has to brake on any tile.
+-- (emergency braking) is not: it has to brake on any tile. The game takes the
+-- friction at face value each tick: past config.friction_limit the speed changes
+-- sign and grows at every tick (a car was thrown at 50 tiles per tick), so the
+-- total friction, tile included, is capped.
 local function set_friction(car, mode_friction, braking_factor)
-	car.friction_modifier = mode_friction / get_tile_friction(car) * (braking_factor or 1)
+	local tile_friction = get_tile_friction(car)
+	local modifier = mode_friction / tile_friction * (braking_factor or 1)
+	car.friction_modifier = math.min(modifier, config.friction_limit / tile_friction)
 end
 
 -- ============================================================
@@ -250,9 +262,14 @@ function movement.update_mode(car, tick)
 	local density = 1 / 3 * (2 * measure_obstacle_density(car, x, y)
 		+ measure_obstacle_density(car, x + sx * 2 * config.density_radius, y + sy * 2 * config.density_radius))
 
+	-- Walls and gates are measured with the other slow checks and remembered between them.
+	if _utils.is_slow_check_due(car, tick) then
+		car_data.near_wall = measure_wall_nearby(car)
+	end
+
 	-- Two thresholds, so the flag does not flicker when the density hovers around one value.
 	local was_high_speed = car_data.high_speed
-	if distance < car.speed * config.braking_duration or density > config.high_speed_density.leave then
+	if distance < car.speed * config.braking_duration or density > config.high_speed_density.leave or car_data.near_wall then
 		car_data.high_speed = false
 	elseif density < config.high_speed_density.enter then
 		car_data.high_speed = true

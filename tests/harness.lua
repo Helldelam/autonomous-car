@@ -136,7 +136,7 @@ end
 -- `category`: the scenarios of a category run together, in one game. Pick the
 -- category by what the scenario checks: movement (driving around obstacles),
 -- robustness (stuck cars, failures, empty battery), construction, energy
--- (chargers and garages). This file is the only list of scenarios: run.ps1 reads
+-- (chargers and garages), doors (walls and gates). This file is the only list of scenarios: run.ps1 reads
 -- their names, `ticks` and `category` from the lines below. Keep the form
 -- scenarios["name"] = { followed by those lines.
 
@@ -725,8 +725,24 @@ local function wall_line(s, x1, y1, x2, y2)
 	end
 end
 
--- `course`: {obstacles = function(s, cx, cy), car = {dx, dy, orientation}, chest = {dx, dy}};
+-- `course`: {obstacles = function(s, cx, cy), car = {dx, dy, orientation, fuel_ratio}, chest = {dx, dy}};
 -- the ghost is by default 4 tiles east and 3 south of the chest (`ghost = {dx, dy}`).
+-- A course with several of them has `cars`, `chests` and `ghosts` lists instead (all offsets
+-- from the course origin, ghosts included): then it counts as done when all its ghosts are built.
+local function get_course_ghosts(index, course)
+	local cx, cy = course_origin(index)
+	local list = {}
+	if course.ghosts then
+		for _, g in ipairs(course.ghosts) do
+			list[#list + 1] = {cx + g[1] + 0.5, cy + g[2] + 0.5}
+		end
+	else
+		local ghost = course.ghost or {4, 3}
+		list[1] = {cx + course.chest[1] + 0.5 + ghost[1], cy + course.chest[2] + 0.5 + ghost[2]}
+	end
+	return list
+end
+
 local function build_courses(courses, chunks)
 	local s = new_surface(T.grid and {{60, 0}, {260, 0}, {460, 0}, {660, 0}} or {{0, 0}}, chunks or 11)
 	make(s, names.charger, 0, 0)
@@ -736,33 +752,50 @@ local function build_courses(courses, chunks)
 		end
 	end
 	T.courses = courses
+	T.done = {}
 	for index, course in ipairs(courses) do
 		local cx, cy = course_origin(index)
 		course.obstacles(s, cx, cy)
-		make_car(s, cx + course.car[1], cy + course.car[2], course.car[3], 1)
-		local chest_x, chest_y = cx + course.chest[1] + 0.5, cy + course.chest[2] + 0.5
-		fill(make(s, names.chest, chest_x, chest_y), {["wooden-chest"] = 20})
-		local ghost = course.ghost or {4, 3}
-		make_ghost(s, "wooden-chest", chest_x + ghost[1], chest_y + ghost[2])
+		for _, car in ipairs(course.cars or {course.car}) do
+			make_car(s, cx + car[1], cy + car[2], car[3], car[4] or 1)
+		end
+		for _, chest in ipairs(course.chests or {course.chest}) do
+			fill(make(s, names.chest, cx + chest[1] + 0.5, cy + chest[2] + 0.5), {["wooden-chest"] = 20})
+		end
+		for _, g in ipairs(get_course_ghosts(index, course)) do
+			make_ghost(s, "wooden-chest", g[1], g[2])
+		end
 	end
+end
+
+local function count_course_ghosts(index, course)
+	local number = 0
+	for _, g in ipairs(get_course_ghosts(index, course)) do
+		number = number + #T.surface.find_entities_filtered{type = "entity-ghost", area = {{g[1] - 1, g[2] - 1}, {g[1] + 1, g[2] + 1}}}
+	end
+	return number
 end
 
 local function select_courses(t)
 	if t == 100 then
 		for index, course in ipairs(T.courses) do
-			local cx, cy = course_origin(index)
-			local ghost = course.ghost or {4, 3}
-			local x, y = cx + course.chest[1] + 0.5 + ghost[1], cy + course.chest[2] + 0.5 + ghost[2]
-			select_ghosts(x - 2, y - 2, x + 2, y + 2)
+			for _, g in ipairs(get_course_ghosts(index, course)) do
+				select_ghosts(g[1] - 2, g[2] - 2, g[1] + 2, g[2] + 2)
+			end
 		end
 	end
-	if t == 3800 or t == 8800 then -- which courses did not end with their ghost built
+	if t > 100 and t % 100 == 0 then -- the tick each course had all its ghosts built
+		for index, course in ipairs(T.courses) do
+			if not T.done[index] and count_course_ghosts(index, course) == 0 then
+				T.done[index] = t
+				out("DONE " .. index .. " " .. t)
+			end
+		end
+	end
+	if t == 3800 or t == 8800 then -- which courses did not end with their ghosts built
 		local left = {}
 		for index, course in ipairs(T.courses) do
-			local cx, cy = course_origin(index)
-			local ghost = course.ghost or {4, 3}
-			local x, y = cx + course.chest[1] + 0.5 + ghost[1], cy + course.chest[2] + 0.5 + ghost[2]
-			if #T.surface.find_entities_filtered{type = "entity-ghost", area = {{x - 1, y - 1}, {x + 1, y + 1}}} > 0 then
+			if count_course_ghosts(index, course) > 0 then
 				left[#left + 1] = index
 			end
 		end
@@ -1256,6 +1289,9 @@ local function build_work()
 		mark(s, "wooden-chest", 60.5 + 2 * i, 80.5, {name = "iron-plate", count = 50})
 	end
 	mark(s, "stone-furnace", 71, 91, {name = "coal", count = 20})
+	for i = 0, 7 do -- a wall
+		mark(s, "stone-wall", 90.5 + i, 95.5)
+	end
 	for i = 0, 5 do
 		mark(s, "wooden-chest", 60.5 + 4 * i, -60.5, {name = "iron-plate", count = 10})
 	end
@@ -1438,33 +1474,458 @@ scenarios["phases-single"] = {
 	end,
 }
 
--- A wall with a gate on the straight way between a supply chest and a ghost: the
--- car can only build the ghost if it gets through the gate. The car has no
--- can_open_gates: movement.open_gates asks the gate to open as it approaches.
-scenarios["gate"] = {
-	ticks = 4000,
-	category = "movement",
+-- ============================================================
+-- Doors: walls with gates (category "doors")
+-- ============================================================
+-- Every course has a car, a supply chest and a ghost, as the obstacle courses above, and
+-- the car has to get through a gate to reach them. The walls of one column of courses
+-- join into a single wall 600 tiles long: the way round is far, the gate is the way.
+-- Lines DONE <course> <tick> of the trace give the tick each course had its ghosts built.
+
+-- Gates are 1 tile wide; an opening of 3 tiles is three gates side by side ("wide").
+-- An opening of 1 tile is too small for a car (owner's decision, 2026-10-11, see
+-- "Problèmes connus" in CLAUDE.md): the scenarios build only 3-tile openings unless
+-- this is true, which brings back the 1-tile variants for a new try.
+local ONE_TILE_DOORS = false
+local door_widths = ONE_TILE_DOORS and {false, true} or {true}
+local function make_gate(s, tx, ty, direction, force)
+	local gate = s.create_entity{name = "gate", position = {tx + 0.5, ty + 0.5},
+		direction = direction or defines.direction.east, force = force or "player"}
+	if not gate then
+		out("SETUP gate NOT created at " .. tx .. "," .. ty)
+	end
+	return gate
+end
+
+-- Replaces the wall at tile (tx, ty) by a gate.
+local function wall_to_gate(s, tx, ty, direction, force)
+	for _, wall in pairs(s.find_entities_filtered{name = "stone-wall", position = {tx + 0.5, ty + 0.5}, radius = 0.4}) do
+		wall.destroy()
+	end
+	return make_gate(s, tx, ty, direction, force)
+end
+
+-- A door at row ty of a wall that runs north-south in column tx, crossed from west to east.
+local function door_ns(s, tx, ty, wide, force)
+	wide = wide or not ONE_TILE_DOORS
+	for dy = wide and -1 or 0, wide and 1 or 0 do
+		wall_to_gate(s, tx, ty + dy, defines.direction.east, force)
+	end
+end
+
+-- A door at column tx of a wall that runs east-west in row ty.
+local function door_ew(s, tx, ty, wide, force)
+	wide = wide or not ONE_TILE_DOORS
+	for dx = wide and -1 or 0, wide and 1 or 0 do
+		wall_to_gate(s, tx + dx, ty, defines.direction.north, force)
+	end
+end
+
+-- Puts up to `count` entities at random places of a box, none within `clear` tiles (on both axes)
+-- of the point (kx, ky). `size` is 2 for a furnace (placed on a tile corner), 1 otherwise.
+local function scatter_entities(s, name, size, count, x1, y1, x2, y2, kx, ky, clear)
+	local made, tries = 0, 0
+	while made < count and tries < count * 30 do
+		tries = tries + 1
+		local x, y = x1 + random() * (x2 - x1), y1 + random() * (y2 - y1)
+		if not (math.abs(x - kx) < clear and math.abs(y - ky) < clear) then
+			local shift = size == 2 and 0 or 0.5
+			if s.create_entity{name = name, position = {math.floor(x) + shift, math.floor(y) + shift}, force = "player"} then
+				made = made + 1
+			end
+		end
+	end
+end
+
+-- Trees removed around a point.
+local function clear_trees(s, x, y, radius)
+	for _, tree in pairs(s.find_entities_filtered{type = "tree", position = {x, y}, radius = radius}) do
+		tree.destroy()
+	end
+end
+
+-- The wall of a course: 100 tiles, joined to the walls of the courses above and below.
+local function course_wall(s, cx, cy, offset_x)
+	wall_line(s, cx + offset_x, cy - 50, cx + offset_x, cy + 49)
+end
+
+-- A wall 40 tiles east of the car, a gate `offset` tiles off the line to the chest.
+local function wall_course(offset, wide)
+	return {
+		obstacles = function(s, cx, cy)
+			course_wall(s, cx, cy, 40)
+			door_ns(s, cx + 40, cy + offset, wide)
+		end,
+		car = {0, 0, 0.25}, chest = {90, 0},
+	}
+end
+
+-- The car in a walled room of 24 x 24 tiles whose only exit is a gate in the east wall.
+local function room_course(offset, orientation, wide)
+	return {
+		obstacles = function(s, cx, cy)
+			wall_line(s, cx - 12, cy - 12, cx + 12, cy - 12)
+			wall_line(s, cx - 12, cy + 12, cx + 12, cy + 12)
+			wall_line(s, cx - 12, cy - 11, cx - 12, cy + 11)
+			wall_line(s, cx + 12, cy - 11, cx + 12, cy + 11)
+			door_ns(s, cx + 12, cy + offset, wide)
+		end,
+		car = {0, 0, orientation}, chest = {90, 0},
+	}
+end
+
+-- Crossing walls through gates, 24 courses (four columns of six); 13-24 repeat 1-12 with
+-- an opening of three gates side by side (the 3 tiles advised to the player) instead of one.
+--  1-6   a straight wall 40 tiles east of the car, with the gate at 0, 3, -3, 8, -8 and 15
+--        tiles off the line to the chest; the car faces the wall
+--  7-12  the car in a walled room of 24 x 24 tiles whose only exit is the gate in the east
+--        wall (at 0, 0, 0, 0, 8 and -8 tiles off the centre), starting facing east, west,
+--        north, south, west and east: the exit is behind or beside the car in half of them
+scenarios["gates"] = {
+	ticks = 9000,
+	category = "doors",
 	setup = function()
-		local s = new_surface({{0, 0}}, 10)
+		T.grid = true
+		local courses = {}
+		for _, wide in ipairs(door_widths) do
+			for _, offset in ipairs{0, 3, -3, 8, -8, 15} do
+				courses[#courses + 1] = wall_course(offset, wide)
+			end
+			for _, room in ipairs{{0, 0.25}, {0, 0.75}, {0, 0}, {0, 0.5}, {8, 0.75}, {-8, 0.25}} do
+				courses[#courses + 1] = room_course(room[1], room[2], wide)
+			end
+		end
+		build_courses(courses)
+	end,
+	events = select_courses,
+}
+
+-- A wall with a gate on the straight way between a supply chest and a ghost, and no other way:
+-- the wall is 600 tiles long. The car can only build the ghost if it gets through the gate.
+-- The car has no can_open_gates: movement.open_gates asks the gate to open as it approaches.
+scenarios["gate"] = {
+	ticks = 9000,
+	category = "doors",
+	setup = function()
+		local s = new_surface({{0, 0}}, 14)
 		make(s, names.charger, 0, 0)
 		make(s, names.garage, 20, -10)
 		T.chest = make(s, names.chest, 0.5, 30.5)
 		fill(T.chest, {["wooden-chest"] = 20})
 		make_car(s, -20, -20, 0)
-		for y = -60, 140 do
-			if y ~= 38 then
-				s.create_entity{name = "stone-wall", position = {60.5, y + 0.5}, force = "player"}
-			end
-		end
-		T.gate = s.create_entity{name = "gate", position = {60.5, 38.5}, direction = defines.direction.east, force = "player"}
-		out("SETUP gate " .. (T.gate and "created" or "NOT created"))
+		wall_line(s, 60, -300, 60, 299)
+		door_ns(s, 60, 38) -- 3 tiles wide, see ONE_TILE_DOORS
+		out("SETUP gate")
 		make_ghost(s, "wooden-chest", 80.5, 40.5)
 	end,
 	events = function(t)
 		if t == 100 then
 			select_ghosts(70, 30, 90, 50)
 		end
+		if t > 100 and t % 100 == 0 and not T.done and #T.surface.find_entities_filtered{type = "entity-ghost", area = {{70, 30}, {90, 50}}} == 0 then
+			T.done = t
+			out("DONE 1 " .. t)
+		end
 	end,
+}
+
+-- Things standing about near the gate: scattered buildings, poles, a sparse forest, a dense patch
+-- of trees 4 tiles past the gate or 1.5 tiles past it ("patch-near": the car has to turn at once, along
+-- the wall), two rows of furnaces, a bit of everything.
+-- Courses 1-7, then the same seven with a 3-tile opening (8-14), the gate off the line to the chest
+-- by 0, 6, -6, 3, -3, 9 and -9 tiles.
+local function clutter_course(kind, offset, wide)
+	return {
+		obstacles = function(s, cx, cy)
+			course_wall(s, cx, cy, 40)
+			door_ns(s, cx + 40, cy + offset, wide)
+			local gx, gy = cx + 40.5, cy + offset + 0.5
+			if kind == "furnaces" then
+				scatter_entities(s, "stone-furnace", 2, 8, gx - 20, gy - 20, gx - 2, gy + 20, gx, gy, 3)
+				scatter_entities(s, "stone-furnace", 2, 8, gx + 2, gy - 20, gx + 20, gy + 20, gx, gy, 3)
+			elseif kind == "poles" then
+				scatter_entities(s, "small-electric-pole", 1, 16, gx - 12, gy - 12, gx - 1, gy + 12, gx, gy, 2)
+				scatter_entities(s, "small-electric-pole", 1, 16, gx + 1, gy - 12, gx + 12, gy + 12, gx, gy, 2)
+			elseif kind == "trees" then
+				plant(s, gx - 18, gy - 18, gx + 18, gy + 18, 5)
+				clear_trees(s, gx, gy, 3)
+			elseif kind == "patch" then
+				plant(s, gx + 4, gy - 4, gx + 11, gy + 4, 1.6)
+			elseif kind == "patch-near" then
+				plant(s, gx + 1.5, gy - 4, gx + 8.5, gy + 4, 1.6)
+			elseif kind == "rows" then
+				for y = gy - 16, gy + 16, 4 do
+					if math.abs(y - gy) > 2.5 then
+						s.create_entity{name = "stone-furnace", position = {gx - 8, math.floor(y)}, force = "player"}
+						s.create_entity{name = "stone-furnace", position = {gx + 8, math.floor(y)}, force = "player"}
+					end
+				end
+			else -- mixed
+				scatter_entities(s, "wooden-chest", 1, 6, gx - 15, gy - 15, gx + 15, gy + 15, gx, gy, 2.5)
+				scatter_entities(s, "small-electric-pole", 1, 10, gx - 15, gy - 15, gx + 15, gy + 15, gx, gy, 2.5)
+				plant(s, gx - 15, gy - 15, gx + 15, gy + 15, 6)
+				clear_trees(s, gx, gy, 3)
+			end
+		end,
+		car = {0, 0, 0.25}, chest = {90, 0},
+	}
+end
+
+scenarios["doors-clutter"] = {
+	ticks = 9000,
+	category = "doors",
+	setup = function()
+		T.grid = true
+		local courses = {}
+		for _, wide in ipairs(door_widths) do
+			for index, kind in ipairs{"furnaces", "poles", "trees", "patch", "patch-near", "rows", "mixed"} do
+				courses[#courses + 1] = clutter_course(kind, ({0, 6, -6, 3, -3, 9, -9})[index], wide)
+			end
+		end
+		build_courses(courses)
+	end,
+	events = select_courses,
+}
+
+-- Several cars through the same gate, one after the other and in both directions. Each car has
+-- a ghost of its own, more than a cluster radius from the others (so each is a batch of its
+-- own), 12 tiles apart along the wall; the cars start 2.5 tiles apart, all facing east.
+--  1-2  4 and 8 cars, one gate    3-4  4 and 8 cars, three gates
+--  5-6  4 cars on each side of the wall, each side with its own ghosts and its supply chest on
+--       the other side, so that the cars cross in both directions: one gate, three gates
+local function traffic_course(count, wide, both_ways)
+	local cars, ghosts, chests = {}, {}, {{90, 0}}
+	for i = 1, count do
+		cars[#cars + 1] = {0, (i - (count + 1) / 2) * 2.5, 0.25}
+		ghosts[#ghosts + 1] = {95, (i - (count + 1) / 2) * 12}
+	end
+	if both_ways then
+		for i = 1, count do
+			cars[#cars + 1] = {80, (i - (count + 1) / 2) * 2.5, 0.75}
+			ghosts[#ghosts + 1] = {-15, (i - (count + 1) / 2) * 12}
+		end
+		chests = {{90, 0}, {-30, 0}}
+	end
+	return {
+		obstacles = function(s, cx, cy)
+			course_wall(s, cx, cy, 40)
+			door_ns(s, cx + 40, cy, wide)
+		end,
+		cars = cars, chests = chests, ghosts = ghosts,
+	}
+end
+
+scenarios["doors-traffic"] = {
+	ticks = 12000,
+	category = "doors",
+	setup = function()
+		T.grid = true
+		local courses = {
+			traffic_course(4, true), traffic_course(8, true), traffic_course(4, true, true),
+		}
+		if ONE_TILE_DOORS then
+			table.insert(courses, traffic_course(4, false))
+			table.insert(courses, traffic_course(8, false))
+			table.insert(courses, traffic_course(4, false, true))
+		end
+		build_courses(courses)
+	end,
+	events = select_courses,
+}
+
+-- A walled base of 80 x 48 tiles split in two rooms by a wall with a door, with doors to the
+-- outside west, east and north. Supply chest, garage and charger in different places, the car
+-- inside or outside, a few buildings about (not many). `spec`:
+--   wide    all doors 3 tiles wide, otherwise 1 tile
+--   cars, chests, ghosts   as courses (from the corner of the course: x 0 is the west wall,
+--           x 80 the east wall, y 0 the middle)
+--   garage, charger        {dx, dy}
+--   buildings   number of furnaces, chests and poles scattered inside
+local function base_course(spec)
+	return {
+		obstacles = function(s, cx, cy)
+			wall_line(s, cx, cy - 24, cx + 80, cy - 24)
+			wall_line(s, cx, cy + 24, cx + 80, cy + 24)
+			wall_line(s, cx, cy - 23, cx, cy + 23)
+			wall_line(s, cx + 80, cy - 23, cx + 80, cy + 23)
+			wall_line(s, cx + 40, cy - 23, cx + 40, cy + 23)
+			door_ns(s, cx, cy - 8, spec.wide or not ONE_TILE_DOORS)
+			door_ns(s, cx + 80, cy + 10, spec.wide or not ONE_TILE_DOORS)
+			door_ns(s, cx + 40, cy + 2, spec.wide or not ONE_TILE_DOORS)
+			door_ew(s, cx + 20, cy - 24, spec.wide or not ONE_TILE_DOORS)
+			if spec.buildings then
+				scatter_entities(s, "stone-furnace", 2, spec.buildings, cx + 3, cy - 21, cx + 77, cy + 21, cx + 40, cy + 2, 3)
+				scatter_entities(s, "wooden-chest", 1, spec.buildings, cx + 3, cy - 21, cx + 77, cy + 21, cx + 40, cy + 2, 3)
+				scatter_entities(s, "small-electric-pole", 1, spec.buildings, cx + 3, cy - 21, cx + 77, cy + 21, cx + 40, cy + 2, 3)
+			end
+			if spec.garage then
+				make(s, names.garage, cx + spec.garage[1], cy + spec.garage[2])
+			end
+			if spec.charger then
+				make(s, names.charger, cx + spec.charger[1], cy + spec.charger[2])
+			end
+		end,
+		cars = spec.cars, chests = spec.chests, ghosts = spec.ghosts,
+	}
+end
+
+-- One base per scenario (a car may go anywhere on its surface, so bases would take each other's work):
+--  1-2  car and garage in the west room, chest and charger in the east room, ghost outside east
+--       (3-tile doors, then 1-tile doors)
+--  3    car outside west, chest in the east room, ghost in the west room (1-tile doors)
+--  4    a car nearly out of charge in the east room, the charger in the west room (3-tile doors)
+--  5    1-tile doors, four buildings of each kind about, a car at 40 % charge, ghost north outside
+--  6    two cars (one at 30 % charge), two ghosts (north and south outside), 3-tile doors, buildings
+local base_specs = {
+	{wide = true, cars = {{10, 5, 0.25}}, chests = {{60, -10}}, garage = {10, -15}, charger = {70, 15}, ghosts = {{95, 0}}},
+	{wide = false, cars = {{10, 5, 0.25}}, chests = {{60, -10}}, garage = {10, -15}, charger = {70, 15}, ghosts = {{95, 0}}},
+	{wide = false, cars = {{-15, 0, 0.25}}, chests = {{65, 0}}, garage = {-12, 14}, charger = {-10, -12}, ghosts = {{15, 10}}},
+	{wide = true, cars = {{60, 0, 0.75, 0.12}}, chests = {{8, 0}}, charger = {8, -12}, ghosts = {{95, 10}}},
+	{wide = false, cars = {{10, 0, 0.25, 0.4}}, chests = {{65, -8}}, garage = {10, 18}, charger = {30, -15}, ghosts = {{20, -40}},
+		buildings = 4},
+	{wide = true, cars = {{10, 5, 0.25}, {65, 5, 0.75, 0.3}}, chests = {{60, -10}, {15, 10}}, garage = {10, -18}, charger = {70, 15},
+		ghosts = {{20, -40}, {60, 40}}, buildings = 4},
+}
+
+scenarios["doors-base-1"] = {
+	ticks = 9000,
+	category = "doors",
+	setup = function()
+		build_courses{base_course(base_specs[1])}
+	end,
+	events = select_courses,
+}
+
+scenarios["doors-base-2"] = {
+	ticks = 9000,
+	category = "doors",
+	setup = function()
+		build_courses{base_course(base_specs[2])}
+	end,
+	events = select_courses,
+}
+
+scenarios["doors-base-3"] = {
+	ticks = 9000,
+	category = "doors",
+	setup = function()
+		build_courses{base_course(base_specs[3])}
+	end,
+	events = select_courses,
+}
+
+scenarios["doors-base-4"] = {
+	ticks = 9000,
+	category = "doors",
+	setup = function()
+		build_courses{base_course(base_specs[4])}
+	end,
+	events = select_courses,
+}
+
+scenarios["doors-base-5"] = {
+	ticks = 9000,
+	category = "doors",
+	setup = function()
+		build_courses{base_course(base_specs[5])}
+	end,
+	events = select_courses,
+}
+
+scenarios["doors-base-6"] = {
+	ticks = 9000,
+	category = "doors",
+	setup = function()
+		build_courses{base_course(base_specs[6])}
+	end,
+	events = select_courses,
+}
+
+-- Rare situations at a door.
+--  1    a gate two tiles from the corner of a room
+--  2-3  two walls 6 tiles apart, a gate in each, 8 tiles off one another: 1 tile, then 3 tiles
+--       (the walls are 600 tiles long: the 40-tile wall of every course is joined to the others)
+--  4    a chest right against the exit of a 1-tile gate: no way out, nothing to build (EXPECTED NOT BUILT)
+--  5    the same chest in front of the middle one of three gates: the side gates are free
+--  6    a corridor of 3 tiles, 30 long, ends at the gate
+--  7-8  the car 4 tiles from the gate, facing away from it: 1 tile, then 3 tiles
+--  9    the nearest gate belongs to the enemy force (it never opens), a gate of the player 30 tiles off
+--  10   the car 2 tiles from the wall, facing along it, the gate behind it
+--  11   two gates 3 tiles apart
+--  12-13  the gate 40 tiles off the line to the chest, along the wall: 1 tile, then 3 tiles
+--  14   a lane 5 tiles wide and 20 long between two rows of furnaces, ending at a gate 3 tiles wide
+local function odd_course(kind)
+	local course = {car = {0, 0, 0.25}, chest = {90, 0}}
+	course.obstacles = function(s, cx, cy)
+		if kind == "corner" then
+			wall_line(s, cx - 12, cy - 12, cx + 12, cy - 12)
+			wall_line(s, cx - 12, cy + 12, cx + 12, cy + 12)
+			wall_line(s, cx - 12, cy - 11, cx - 12, cy + 11)
+			wall_line(s, cx + 12, cy - 11, cx + 12, cy + 11)
+			door_ns(s, cx + 12, cy + 9, false)
+		elseif kind == "airlock" or kind == "airlock-wide" then
+			course_wall(s, cx, cy, 34)
+			course_wall(s, cx, cy, 40)
+			door_ns(s, cx + 34, cy, kind == "airlock-wide")
+			door_ns(s, cx + 40, cy + 8, kind == "airlock-wide")
+		elseif kind == "blocked" or kind == "blocked-side" then
+			course_wall(s, cx, cy, 40)
+			door_ns(s, cx + 40, cy, kind == "blocked-side")
+			make(s, "wooden-chest", cx + 41.5, cy + 0.5)
+		elseif kind == "corridor" then
+			course_wall(s, cx, cy, 40)
+			wall_line(s, cx + 10, cy - 2, cx + 39, cy - 2)
+			wall_line(s, cx + 10, cy + 2, cx + 39, cy + 2)
+			door_ns(s, cx + 40, cy, false)
+		elseif kind == "behind" or kind == "behind-wide" then
+			course_wall(s, cx, cy, 40)
+			door_ns(s, cx + 40, cy, kind == "behind-wide")
+			course.car = {36, 0, 0.75}
+		elseif kind == "enemy" then
+			course_wall(s, cx, cy, 40)
+			door_ns(s, cx + 40, cy, false, "enemy")
+			door_ns(s, cx + 40, cy + 30, false)
+		elseif kind == "alongside" then
+			course_wall(s, cx, cy, 40)
+			door_ns(s, cx + 40, cy + 10, false)
+			course.car = {37.8, 0, 0}
+		elseif kind == "far" or kind == "far-wide" then
+			course_wall(s, cx, cy, 40)
+			door_ns(s, cx + 40, cy + 40, kind == "far-wide")
+		elseif kind == "lane" then
+			course_wall(s, cx, cy, 40)
+			door_ns(s, cx + 40, cy, true)
+			for x = cx + 20, cx + 38, 2 do
+				make(s, "stone-furnace", x + 1, cy - 3)
+				make(s, "stone-furnace", x + 1, cy + 3)
+			end
+		else -- "double"
+			course_wall(s, cx, cy, 40)
+			door_ns(s, cx + 40, cy, false)
+			door_ns(s, cx + 40, cy + 3, false)
+		end
+	end
+	return course
+end
+
+scenarios["doors-odd"] = {
+	ticks = 9000,
+	category = "doors",
+	setup = function()
+		T.grid = true
+		local courses = {}
+		for _, kind in ipairs{"corner", "airlock", "airlock-wide", "blocked", "blocked-side", "corridor", "behind", "behind-wide",
+			"enemy", "alongside", "double", "far", "far-wide", "lane"} do
+			if ONE_TILE_DOORS or kind == "airlock-wide" or not (kind == "airlock" or kind == "behind" or kind == "far") then
+				courses[#courses + 1] = odd_course(kind)
+			end
+		end
+		build_courses(courses)
+		for _, x in ipairs{100, 300, 500} do -- the wall of every course joined into one, without a way round
+			wall_line(T.surface, x, -300, x, 299)
+		end
+	end,
+	events = select_courses,
 }
 
 -- Does a gate open by itself for a car? It does not (the control for the gate

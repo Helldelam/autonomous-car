@@ -58,6 +58,7 @@ param(
 	[string[]]$Scenario = @("all"),
 	[switch]$Changed,
 	[int]$Ticks,
+	[string[]]$Set = @(),
 	[string]$Reference,
 	[string]$Factorio = "C:\Program Files (x86)\Steam\steamapps\common\Factorio\bin\x64\factorio.exe",
 	[string]$Output = (Join-Path $env:TEMP "autonomous-car-tests")
@@ -86,7 +87,7 @@ $categories = @($info.Values | ForEach-Object { $_.Category } | Select-Object -U
 function Get-ChangedCategories {
 	$files = @(git -C $modFolder diff --name-only HEAD) + @(git -C $modFolder ls-files --others --exclude-standard)
 	$affected = @{
-		"movement.lua" = @("movement", "robustness", "energy")
+		"movement.lua" = @("movement", "robustness", "energy", "doors")
 		"travel.lua" = $categories
 		"ghost.lua" = @("construction", "robustness")
 		"charge.lua" = @("energy", "robustness")
@@ -183,6 +184,10 @@ function Invoke-Group($mod, [string]$variant, [string]$label, [string[]]$names, 
 	$control = [IO.File]::ReadAllText($mod.Source)
 	$tickOverride = if ($Ticks -gt 0) { "$Ticks" } else { "nil" }
 	$header = "`nlocal SCENARIOS = `"$($names -join ',')`"`nlocal TICKS = $tickOverride`n"
+	# -Set "gate_slow.speed=0.15": a config value changed for this run (only values the scripts read while running)
+	foreach ($assignment in $Set) {
+		$header += "require(`"config`").$assignment`n"
+	}
 	[IO.File]::WriteAllText($mod.Control, $control + $header + $mod.Harness)
 
 	foreach ($stale in Get-ChildItem $scriptOutput -Filter "*.txt" -ErrorAction SilentlyContinue) {
