@@ -79,14 +79,15 @@ local function create_car_data(tick)
 			heading = nil, heading_since = nil, last_arc = nil, stall_since = nil, back_off_until = nil, back_off_from = nil,
 			follow = nil, follow_orientation = nil, blocked = {},
 		},
-		-- Path from the game's pathfinder, a last resort for a car whose maneuvers failed (see movement.lua).
-		-- `tried`: the leg has had its one request; `pending`: waiting for the answer; `active`: following `waypoints`.
-		path = {active = false, pending = false, tried = false, waypoints = nil, index = 1, request = nil},
+		-- Path from the game's pathfinder (see movement.lua, "Path"). `count`, `guided_count`: requests of this leg,
+		-- after a failure or guided; `pending`: waiting for the answer; `active`: following `waypoints`.
+		path = {active = false, pending = false, count = 0, guided_count = 0, waypoints = nil, index = 1, request = nil},
 		emergency_brake = {active = false, since = nil},
-		high_speed = false,
-		entry_speed = nil, -- speed of the car when it entered high speed
-		slowing = false, -- braking down to entry_speed after leaving high speed
-		precision_mode = false,
+		mode = "normal", -- "fast", "normal" or "slow", see movement.update_mode
+		slow_until = nil, -- tick until which the mode stays slow (after an emergency stop, a maneuver, a path)
+		near_built = false, -- something built lies near the car, see movement.lua
+		entry_speed = nil, -- speed of the car when it entered fast mode
+		slowing = false, -- braking down to entry_speed after leaving fast mode
 		neighbours = nil, -- moving cars nearby, see movement.lua
 
 		construction = nil, -- current batch, see ghost.lua

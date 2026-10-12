@@ -5,9 +5,12 @@ local _utils = require("_utils")
 -- Chargers: finding one a car can reach, and filling the car's tank from it.
 local charger_control = {}
 
--- Rough fuel cost of driving `distance` tiles (see config.fuel_per_tile).
+-- High estimate of the fuel burnt driving `distance` tiles in a straight line (see "Carburant" in
+-- CLAUDE.md): a fixed part, a steep rate over the first tiles (detours, manoeuvres, slow zones) and
+-- a gentle one beyond, where the car mostly drives fast on open ground.
 local function compute_fuel_for_distance(distance)
-	return distance * config.fuel_per_tile * config.fuel_safety_margin
+	local near = math.min(distance, config.fuel_near_distance)
+	return config.fuel_fixed + near * config.fuel_per_tile + (distance - near) * config.fuel_far_per_tile
 end
 
 -- Rough fuel cost of driving from the car to `position`.

@@ -70,10 +70,37 @@ config.emergency_brake_lookahead = 3 -- an obstacle this far straight ahead trig
 
 config.density_radius = 3 -- radius of the discs
 config.density_lookahead_steps = 5 -- steering measures density in discs 0 to N ahead of the car, laid end to end
-config.high_speed_density = {
+config.high_speed_density = { -- fast mode
 	enter = 0.03, -- blended density below which the car cruises at high speed
 	leave = 0.05, -- and above which it stops doing so; two thresholds, so the mode does not flicker
 }
+config.built_zone_distance = 6 -- tiles: a car within this of anything built by its force (walls, gates, buildings) is in a built zone,
+	-- where it drives slowly (see "Driving modes" below)
+
+-- ============================================================
+-- Driving modes (see movement.update_mode)
+-- ============================================================
+-- Three modes of speed: fast (low density, far from anything built), slow (built
+-- or very dense areas, and a moment after an emergency stop or a maneuver) and
+-- normal (otherwise). In a built or very dense area a destination out of the cone
+-- ahead of the car (half_angle, in turns, on each side) makes it ask for a path.
+config.path_trigger = {
+	half_angle = 0.2, -- 72 degrees on each side: a cone of 144 degrees
+	min_distance = 10, -- no path request when the destination is this close
+	range = 40, -- a destination further than this is not the goal: a low-density point at this distance in its direction is
+	sectors = 3, -- directions tried on each side of the bearing of the destination, lookahead_angle apart, for that point
+	angle_cost = 0.02, -- density equivalent of one such step away from the destination
+	max_requests = 10, -- per leg
+}
+config.path_margin = 0.1 -- tiles added around the car's box in a path request: the path keeps that much further off the walls
+config.gate_waypoints = { -- how a path is reshaped where it crosses a gate (see movement.add_gate_waypoints)
+	clear = 3.5, -- tiles: the path points that run along the wall are pushed out to this distance from it, opposite the gate
+	ramp = 12, -- tiles along the wall over which that push fades out
+	near = 3, -- the point in front of the gate, on its axis
+	exit = 3, -- the point past the gate
+}
+config.path_pass_radius = 8 -- tiles: a waypoint is also passed when the car is past its plane within this distance: a car that cannot turn to it in time would drive by and circle back
+config.max_path_requests = 3 -- per leg, when the maneuvers fail or the leg lasts too long (see movement.lua, "Path")
 
 -- ============================================================
 -- Speed (see movement.lua)
@@ -93,8 +120,8 @@ config.braking_duration = 30 -- (0.5s) the car brakes, and leaves high speed, on
 -- friction, except the emergency one, so a mode has the same speed on any tile.
 config.friction_base = 1
 config.friction_high_speed_factor = 0.1 -- cruising in an open area
-config.friction_precision_factor = 4 -- precision mode
-config.friction_maneuver_factor = 10 -- maneuver mode: much slower than precision mode
+config.friction_slow_factor = 4 -- slow mode
+config.friction_maneuver_factor = 10 -- maneuver: much slower than slow mode
 config.friction_emergency_factor = 100 -- emergency braking, on top of the mode above
 
 -- ============================================================
@@ -120,14 +147,14 @@ config.maneuver_exit_density = 0.08 -- a maneuver cannot end while the density a
 config.maneuver_min_travel = 2 -- a maneuver ends only once the car has moved this far
 
 -- ============================================================
--- Precision mode (work in progress)
+-- Slow mode
 -- ============================================================
--- Slow driving with a finer look-ahead. For now it is on in dense areas only.
+-- Slow driving with a finer look-ahead, in built and very dense areas.
 
-config.dense_area_threshold = 0.12 -- blended density above which precision mode turns on (see "Obstacle density")
-config.precision_lookahead_side_offset = config.lookahead_side_offset
-config.precision_lookahead_start = 1.2 -- replaces lookahead_start; same minimum, see there and the checks at the end
-config.precision_lookahead_length = 2 -- replaces lookahead_length
+config.dense_area_threshold = 0.12 -- blended density above which the area is very dense and the car drives slowly (see "Obstacle density")
+config.slow_lookahead_side_offset = config.lookahead_side_offset
+config.slow_lookahead_start = 1.6 -- replaces lookahead_start; above its minimum (see there and the checks at the end): closer, a sample on a side heading overlaps the car itself when the car is turned, and the car stops steering that way
+config.slow_lookahead_length = 2 -- replaces lookahead_length
 
 -- ============================================================
 -- Shared delays
@@ -144,6 +171,8 @@ config.short_delay = 30 -- (0.5s)
 	-- control.lua: period at which an open window of missing items is refreshed (gui.refresh_all)
 config.medium_delay = 180 -- (3s)
 	-- ghost_control.attempt_one_ghost: cooldown of a ghost that failed to revive, times the number of failures
+	-- movement.update_mode: slow mode lasts this long after an emergency stop, a maneuver or the end of a path
+	-- movement.request_path: wait between two path requests
 config.idle_delay = 300 -- (5s) long on purpose during development, so idle waits are easy to see; lower to 60-120 before release
 	-- movement.maneuver_tick: longest a maneuver may last, its single try; past it the car asks for a path (movement.request_path), then is stuck
 	-- control.lua: wait before an idle car looks for a new task or a garage
@@ -185,9 +214,14 @@ config.chest_group_radius = 1.5 -- supply chests this close to each other form o
 -- ============================================================
 
 config.full_charge_duration = 900 -- (15s) time to fill an empty tank; the transfer per tick is derived from it and the tank capacity
-config.fuel_per_tile = 1500 -- rough cost of driving one tile, only used to decide whether a trip needs a charging detour.
-	-- This is not the game's consumption model: calibrate it in game.
-config.fuel_safety_margin = 1.4 -- multiplier on that estimate, to cover detours and estimation error
+-- High estimate of the fuel a trip burns, used to decide whether it needs a charging detour and where the
+-- critical level lies (see charge.lua; measured on 364 trips of 5 to 11000 tiles, `range-*` scenarios):
+-- fuel(d) = fuel_fixed + fuel_per_tile * min(d, fuel_near_distance) + fuel_far_per_tile * the rest.
+-- Covers about 90% of the short trips of the test scenarios (traps included) and all the long ones.
+config.fuel_fixed = 50000 -- J, the fixed margin of a trip
+config.fuel_per_tile = 2500 -- J per tile over the first fuel_near_distance tiles
+config.fuel_near_distance = 100 -- tiles
+config.fuel_far_per_tile = 450 -- J per tile beyond (measured 165 to 315 on long trips, at most 490)
 config.max_charge_detours = 5 -- consecutive charging detours before the destination is reported unreachable
 config.critical_fuel_ratio = 0.1 -- below this fraction of a full tank a car drops everything to recharge.
 	-- Also the charge of a new car, and the level an empty car must be back to before it resumes (see travel.handle_empty).
@@ -233,8 +267,8 @@ assert(config.step_back_distance > config.arrival_distance,
 local car_reach = config.car_size.length / 2 + math.sqrt((config.car_size.length / 2) ^ 2 + (config.car_size.width / 2) ^ 2)
 assert(config.lookahead_start >= car_reach,
 	"config.lookahead_start must be above half the car length plus its half diagonal: the first sample point would overlap the car")
-assert(config.precision_lookahead_start >= car_reach,
-	"config.precision_lookahead_start must be above half the car length plus its half diagonal: the first sample point would overlap the car")
+assert(config.slow_lookahead_start >= car_reach,
+	"config.slow_lookahead_start must be above half the car length plus its half diagonal: the first sample point would overlap the car")
 
 assert(config.critical_fuel_ratio < config.critical_check_fuel_ratio and config.critical_check_fuel_ratio < config.pre_park_fuel_ratio,
 	"config.critical_check_fuel_ratio must lie between config.critical_fuel_ratio and config.pre_park_fuel_ratio")

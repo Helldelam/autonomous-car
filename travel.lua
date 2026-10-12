@@ -64,7 +64,7 @@ function travel.cancel_trip(car_data)
 	car_data.parking.garage = nil
 	car_data.building.active = false
 	car_data.maneuver.active = false
-	car_data.path = {active = false, pending = false, tried = false}
+	car_data.path = {active = false, pending = false, count = 0, guided_count = 0}
 	car_data.stuck.active = false
 	car_data.stuck.destination = nil
 	car_data.moving.active = false
@@ -99,7 +99,7 @@ function travel.begin_leg(car, destination, next_task)
 	-- departure is not blocked (see movement.drive_tick).
 	car_data.maneuver.active = false
 	car_data.maneuver.ended_tick = game.tick
-	car_data.path = {active = false, pending = false, tried = false} -- one path per leg, see movement.lua
+	car_data.path = {active = false, pending = false, count = 0, guided_count = 0} -- path requests are counted per leg, see movement.lua
 	car_data.slowing = false
 
 	-- stuck_retry_count is not reset here: a retry is a new leg too. It is reset on arrival.
