@@ -338,8 +338,6 @@ end
 
 -- TODO: send another car to rescue a stuck car (shares the empty-car recharge work, and could
 -- later fetch a broken-down train). See "À faire" in CLAUDE.md.
--- TODO: a stuck car could free itself by mining natural obstacles (trees, rocks) around it, as
--- cars do for marked entities. See "Ã€ faire" in CLAUDE.md.
 -- Stops a stuck car and alerts the player. The car waits for the player to free
 -- it, then tries its leg again (see travel.stuck_tick). It tries again only
 -- while it has retries left and fuel for the leg: otherwise it waits longer, then

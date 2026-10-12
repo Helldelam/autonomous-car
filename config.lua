@@ -53,8 +53,10 @@ config.lookahead_speed_bonus = 2 -- extra look-ahead length above config.speed.f
 config.steering_cost = {
 	blocked = 3, -- added for a sample point where the car would not fit
 	density = 1.5, -- weight of the obstacle density summed further along the heading
+	path_deviation = 1, -- added, per car width, for a sample point further than config.path_corridor from the segment of the path being followed
 	margin = 0.5, -- added, per side, for a sample point with an obstacle about a car width beside it: keeps the car off the walls
 }
+config.path_corridor = 2.5 -- tiles: distance to the followed segment of the path within which steering has no deviation cost
 config.arrival_distance = 6 -- a car this close to its destination has arrived and can act on it
 config.emergency_brake_lookahead = 3 -- an obstacle this far straight ahead triggers emergency braking, and keeps a maneuver from ending
 
@@ -76,6 +78,8 @@ config.high_speed_density = { -- fast mode
 }
 config.built_zone_distance = 6 -- tiles: a car within this of anything built by its force (walls, gates, buildings) is in a built zone,
 	-- where it drives slowly (see "Driving modes" below)
+config.normal_beside_built = true -- but only in normal mode, not slow, while its target (waypoint or destination) is ahead and the straight line to it is free
+config.normal_beside_built_distance = 6 -- tiles: and further than this (nearer, the car stays slow)
 
 -- ============================================================
 -- Driving modes (see movement.update_mode)
@@ -141,6 +145,16 @@ config.maneuver_probe = {
 	start = 1.5, -- distance of the first probe; must stay above the car length, or the car would detect itself
 	length = 4, -- distance covered by the probes beyond the first one
 	near_radius = 0.6, -- the gap between the car and the first probe is searched apart, in a disc of this radius
+}
+config.clearing = { -- last resort of a car no maneuver and no path frees: it destroys trees and rocks (see movement.lua, "Clearing")
+	lookahead = 8, -- tiles looked at along each heading to count the trees and rocks it would cross
+	radius = 0.8, -- radius of the discs searched along a heading to count the trees and rocks it would cross
+	clear_radius = 1.3, -- trees and rocks within this of the car, and of the points up to `reach` ahead of it, are destroyed
+	reach = 2.5, -- tiles ahead of the car where trees and rocks are destroyed
+	travel = 15, -- the clearing ends once the car has moved this far
+	obstacle_cost = 0.01, -- cost of each tree or rock on a heading, in turns of deviation from the destination
+	max_count = 10, -- clearings per leg
+	angle_cost = 1, -- cost per turn of deviation from the destination
 }
 config.maneuver_exit_density = 0.08 -- a maneuver cannot end while the density around the car is above this:
 	-- with the default radius, that is the car and one other entity at most (see "Obstacle density")
