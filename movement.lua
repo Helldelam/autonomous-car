@@ -90,6 +90,19 @@ local function advance_path(car, car_data, tick)
 	end
 end
 
+-- Whether steering left in reverse turns the orientation the other way round than
+-- going forwards. True: steering left in reverse swings the rear of the car to its
+-- left, as seen in game. Everything that depends on it goes through get_arc_rotation.
+local REVERSE_STEERING_INVERTED = true
+
+-- Turn of the orientation of an arc, as -1 (counter-clockwise), 0 or 1 (clockwise).
+local function get_arc_rotation(arc)
+	if arc.reverse and REVERSE_STEERING_INVERTED then
+		return -arc.turn
+	end
+	return arc.turn
+end
+
 -- Sides of a heading for measure_wall_margin.
 local SIDE_LEFT, SIDE_RIGHT = {-1}, {1}
 
@@ -150,13 +163,17 @@ local function measure_obstacle_density(car, x, y)
 end
 
 -- Obstacle density summed over config.density_lookahead_steps + 1 discs laid end
--- to end from the car along the heading (hx, hy): steering adds it to the cost of
--- a heading, so that the car steers away from crowded areas well before it
+-- to end from the car along the heading (hx, hy), up to `reach` (the distance to
+-- the target: what lies beyond it does not matter): steering adds it to the cost
+-- of a heading, so that the car steers away from crowded areas well before it
 -- reaches them.
-local function measure_density_ahead(car, x, y, hx, hy)
+local function measure_density_ahead(car, x, y, hx, hy, reach)
 	local radius = config.density_radius
 	local total = 0
 	for step = 0, config.density_lookahead_steps do
+		if step > 0 and 2 * step * radius >= reach then
+			break -- the disc starts beyond the target: what lies there does not matter
+		end
 		total = total + measure_obstacle_density(car, x + hx * radius * (2 * step + 1), y + hy * radius * (2 * step + 1))
 	end
 	return total
@@ -451,6 +468,38 @@ function movement.drive_tick(car, tick)
 		end
 	end
 
+	-- The first waypoint of a path is behind the car, close by: a U-turn backwards. The car backs slowly,
+	-- steering its front toward the waypoint, until the waypoint is within lookahead_angle ahead, or is
+	-- reached, or the car stalls (short_delay), or the turn lasts idle_delay. One turn per path.
+	local path = car_data.path
+	local first = path.active and path.index == 1 and path.waypoints[1]
+	if first and not first.axis_x and not first.reach then
+		local u_turn = path.u_turn
+		local angle = compute_angle_between(car.orientation, compute_orientation_to(car, first))
+		if not u_turn and not path.u_turn_done and math.abs(angle) > config.path_u_turn_angle
+			and util.distance(car.position, first) < config.path_pass_radius then
+			u_turn = {tick = tick}
+			path.u_turn = u_turn
+		end
+		if u_turn then
+			if math.abs(car.speed) < config.speed.stopped then
+				u_turn.stalled_since = u_turn.stalled_since or tick
+			else
+				u_turn.stalled_since = nil
+			end
+			if math.abs(angle) <= config.lookahead_angle or tick - u_turn.tick > config.idle_delay
+				or (u_turn.stalled_since and tick - u_turn.stalled_since > config.short_delay) then
+				path.u_turn, path.u_turn_done = nil, true
+			else
+				local rotation = angle > 0 and 1 or -1
+				local direction = get_arc_rotation{reverse = true, turn = -1} == rotation and riding.direction.left or riding.direction.right
+				set_friction(car, MANEUVER_FRICTION)
+				car.riding_state = {acceleration = riding.acceleration.reversing, direction = direction}
+				return
+			end
+		end
+	end
+
 	local side_offset = config.lookahead_side_offset
 	local lookahead_start = config.lookahead_start
 	local lookahead_length = config.lookahead_length
@@ -508,9 +557,22 @@ function movement.drive_tick(car, tick)
 
 	-- Add the obstacle density further along each heading.
 	local density_weight = config.steering_cost.density
-	straight = straight + density_weight * measure_density_ahead(car, x, y, sx, sy)
-	right = right + density_weight * measure_density_ahead(car, x, y, rx, ry)
-	left = left + density_weight * measure_density_ahead(car, x, y, lx, ly)
+	if path.active then
+		density_weight = density_weight * config.path_density_factor -- the path already avoids what is in the way
+	end
+	local straight_density = density_weight * measure_density_ahead(car, x, y, sx, sy, target_distance)
+	local right_density = density_weight * measure_density_ahead(car, x, y, rx, ry, target_distance)
+	local left_density = density_weight * measure_density_ahead(car, x, y, lx, ly, target_distance)
+	straight, right, left = straight + straight_density, right + right_density, left + left_density
+
+	-- The costs of this tick, for the debug drawing (see debug_view.lua).
+	local steering = car_data.steering
+	if not steering then
+		steering = {}
+		car_data.steering = steering
+	end
+	steering.straight, steering.right, steering.left = straight, right, left
+	steering.straight_density, steering.right_density, steering.left_density = straight_density, right_density, left_density
 
 	-- Steer to the cheapest heading; a tie between right and left goes left.
 	local direction = riding.direction.straight
@@ -529,19 +591,6 @@ end
 -- ============================================================
 -- Maneuver
 -- ============================================================
-
--- Whether steering left in reverse turns the orientation the other way round than
--- going forwards. True: steering left in reverse swings the rear of the car to its
--- left, as seen in game. Everything that depends on it goes through get_arc_rotation.
-local REVERSE_STEERING_INVERTED = true
-
--- Turn of the orientation of an arc, as -1 (counter-clockwise), 0 or 1 (clockwise).
-local function get_arc_rotation(arc)
-	if arc.reverse and REVERSE_STEERING_INVERTED then
-		return -arc.turn
-	end
-	return arc.turn
-end
 
 -- The six arcs of a maneuver: forward or backward, steering left (-1),
 -- straight (0) or right (1). The car follows one arc for
@@ -1063,9 +1112,31 @@ function movement.request_guided_path(car, tick)
 	return request_path(car, car_data, tick, true)
 end
 
--- A gate is crossed along the axis perpendicular to its wall: a gate facing
--- east or west is in a wall that runs north-south, so it is crossed along x.
+-- A gate is crossed along the axis perpendicular to its wall. The wall runs where
+-- the walls and gates beside it are (a gate built by the player does not always
+-- have the direction a scripted one has in the same wall). Alone, the gate falls
+-- back on its direction: facing east or west it is in a wall that runs
+-- north-south, so it is crossed along x.
 local function get_gate_axis(gate)
+	local along_x, along_y = 0, 0
+	for _, neighbour in pairs(gate.surface.find_entities_filtered{
+		position = gate.position, radius = 1.2, type = {"wall", "gate"}, force = gate.force,
+	}) do
+		if neighbour ~= gate then
+			local dx, dy = math.abs(neighbour.position.x - gate.position.x), math.abs(neighbour.position.y - gate.position.y)
+			if dx > 0.5 and dy < 0.5 then
+				along_x = along_x + 1
+			elseif dy > 0.5 and dx < 0.5 then
+				along_y = along_y + 1
+			end
+		end
+	end
+	if along_x ~= along_y then
+		if along_x > along_y then
+			return 0, 1 -- the wall runs east-west: crossed along y
+		end
+		return 1, 0
+	end
 	if gate.direction == defines.direction.east or gate.direction == defines.direction.west then
 		return 1, 0
 	end
@@ -1106,7 +1177,7 @@ local function add_gate_waypoints(car, raw)
 				-- the centre of the opening: the gates beside this one in the same wall
 				local sum_x, sum_y, number = 0, 0, 0
 				for _, other in pairs(surface.find_entities_filtered{position = gate.position, radius = 5, type = "gate", force = force}) do
-					if other.direction == gate.direction and math.abs((other.position.x - gx) * ax + (other.position.y - gy) * ay) < 0.1 then
+					if math.abs((other.position.x - gx) * ax + (other.position.y - gy) * ay) < 0.1 then
 						sum_x, sum_y, number = sum_x + other.position.x, sum_y + other.position.y, number + 1
 					end
 				end
@@ -1218,6 +1289,7 @@ local function wait_for_path(car, car_data, maneuver, tick)
 		path.active = true
 		path.waypoints = path.found
 		path.index = 1
+		path.u_turn, path.u_turn_done = nil, nil
 		path.origin = {x = car.position.x, y = car.position.y}
 		end_maneuver(car, maneuver, tick)
 

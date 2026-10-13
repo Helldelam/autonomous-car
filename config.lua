@@ -26,6 +26,7 @@ config.names = {
 	ghost_selector_shortcut = "autonomous_car_ghost_selector_shortcut",
 	ghost_selector_input = "autonomous_car_ghost_selector_input", -- key binding
 	missing_items_shortcut = "autonomous_car_missing_items_shortcut", -- shows or hides the window of missing items
+	debug_view_shortcut = "autonomous_car_debug_view_shortcut", -- shows or hides the debug drawing of the selected car
 	next_task_event = "autonomous_car_next_task", -- custom event, see _utils.raise_next_task
 }
 
@@ -96,7 +97,7 @@ config.path_trigger = {
 	angle_cost = 0.02, -- density equivalent of one such step away from the destination
 	max_requests = 10, -- per leg
 }
-config.path_margin = 0.1 -- tiles added around the car's box in a path request: the path keeps that much further off the walls
+config.path_margin = 0.4 -- tiles added around the car's box in a path request: the path keeps that much further off the walls, and a gap of one tile (narrower than the box) is no passage
 config.gate_waypoints = { -- how a path is reshaped where it crosses a gate (see movement.add_gate_waypoints)
 	clear = 3.5, -- tiles: the path points that run along the wall are pushed out to this distance from it, opposite the gate
 	ramp = 12, -- tiles along the wall over which that push fades out
@@ -104,6 +105,8 @@ config.gate_waypoints = { -- how a path is reshaped where it crosses a gate (see
 	exit = 3, -- the point past the gate
 }
 config.path_pass_radius = 8 -- tiles: a waypoint is also passed when the car is past its plane within this distance: a car that cannot turn to it in time would drive by and circle back
+config.path_u_turn_angle = 0.25 -- turns: a first waypoint of the path further off the car's heading than this, and nearer than path_pass_radius, makes the car back up in a U-turn (see movement.drive_tick)
+config.path_density_factor = 0.3 -- factor of steering_cost.density while the car follows a path, which already avoids what is in the way: the density ahead no longer pulls the car off it
 config.max_path_requests = 3 -- per leg, when the maneuvers fail or the leg lasts too long (see movement.lua, "Path")
 
 -- ============================================================
@@ -205,6 +208,13 @@ config.very_long_delay = 3600 -- (60s)
 -- charger) are repeated this often, offset per car. Raise it if the mod slows
 -- the game down: every player gets the same behaviour.
 config.slow_check_interval = 6 -- (0.1s)
+	-- debug_view.refresh: period of the debug drawing
+
+-- Debug drawing of the car under the cursor or opened (see debug_view.lua): its
+-- destination, path and state. Each player toggles it with a shortcut; this is
+-- the state of a player who has not touched it.
+-- TODO: off by default before release (see "À faire" in CLAUDE.md).
+config.debug_view_default = true
 
 -- The two ways a car abandons its task, each with its own delay:
 config.unreachable_abandon_delay = 3600 -- (60s) a car that has found no way to recharge for this long abandons its task:

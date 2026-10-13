@@ -4,7 +4,7 @@ local names = require("config").names
 
 -- TODO: technologies (TechnologyPrototype) that unlock the mod's items and improve charge and
 -- repair speed, garage repair, garage/charger/car capacity, build speed and driving speed.
--- See "À faire" in CLAUDE.md.
+-- See "ï¿½ faire" in CLAUDE.md.
 data:extend{
 	{
 		type = "fuel-category",
@@ -41,3 +41,4 @@ require("prototypes/garage.lua")
 require("prototypes/chest.lua")
 require("prototypes/ghost_selector.lua")
 require("prototypes/missing_items.lua")
+require("prototypes/debug_view.lua")
