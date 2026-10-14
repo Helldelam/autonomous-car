@@ -470,9 +470,10 @@ function movement.drive_tick(car, tick)
 
 	-- The first waypoint of a path is behind the car, close by: a U-turn backwards. The car backs slowly,
 	-- steering its front toward the waypoint, until the waypoint is within lookahead_angle ahead, or is
-	-- reached, or the car stalls (short_delay), or the turn lasts idle_delay. One turn per path.
+	-- reached, or the car stalls (short_delay), or the turn lasts idle_delay. One turn per path. The path
+	-- starts at the car: its first waypoint is often passed at once (advance_path), so the second counts too.
 	local path = car_data.path
-	local first = path.active and path.index == 1 and path.waypoints[1]
+	local first = path.active and path.index <= 2 and path.waypoints[path.index]
 	if first and not first.axis_x and not first.reach then
 		local u_turn = path.u_turn
 		local angle = compute_angle_between(car.orientation, compute_orientation_to(car, first))
@@ -1042,10 +1043,9 @@ local function choose_path_goal(car, car_data)
 		return destination
 	end
 	local bearing = compute_orientation_to(car, destination)
-	local sectors = math.floor(1 / config.lookahead_angle + 0.5)
 	local best, best_cost
 	for step = -config.path_trigger.sectors, config.path_trigger.sectors do
-		local orientation = bearing + step / sectors
+		local orientation = bearing + step * config.path_trigger.step
 		local vx, vy = get_heading_vector(orientation)
 		local x, y = car.position.x + vx * range, car.position.y + vy * range
 		if fits_at(car, x, y, orientation) then
@@ -1186,7 +1186,9 @@ local function add_gate_waypoints(car, raw)
 				ax, ay = ax * sign, ay * sign
 				local orientation = get_orientation_of(ax, ay)
 
-				-- Points before the gate: dropped when closer than `near`, pushed out otherwise.
+				-- Points before the gate: those right in front of it are dropped (the near
+				-- point takes their place); the others are pushed out where there is room,
+				-- and dropped when they are closer than `near` to the wall and cannot be.
 				local kept = #result
 				while kept > 0 do
 					local q = result[kept].position
@@ -1195,15 +1197,16 @@ local function add_gate_waypoints(car, raw)
 					if math.abs(across) > setting.ramp or along > 0 then
 						break
 					end
-					if along > -setting.near - 0.5 then
-						table.remove(result, kept) -- the near point takes its place
+					local close = along > -setting.near - 0.5
+					if close and math.abs(across) < setting.near + 0.5 then
+						table.remove(result, kept)
 					else
 						local wanted = setting.clear * (1 - math.abs(across) / setting.ramp)
-						if -along < wanted then
-							local x, y = cx + across * -ay - ax * wanted, cy + across * ax - ay * wanted
-							if fits_at(car, x, y, orientation) then
-								result[kept] = {position = {x = x, y = y}, keep = true}
-							end
+						local x, y = cx + across * -ay - ax * wanted, cy + across * ax - ay * wanted
+						if -along < wanted and fits_at(car, x, y, orientation) then
+							result[kept] = {position = {x = x, y = y}, keep = true}
+						elseif close then
+							table.remove(result, kept)
 						end
 					end
 					kept = kept - 1

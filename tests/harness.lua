@@ -2480,8 +2480,11 @@ local function trace_cars(tick)
 				for _, w in ipairs(path.waypoints) do
 					table.insert(points, string.format("%.1f,%.1f%s", w.x, w.y, w.axis_x and "G" or ""))
 				end
-				out(string.format("PATH %d car %d goal=%s n=%d %s", tick, id,
-					path.goal and string.format("%.1f,%.1f", path.goal.x, path.goal.y) or "-", #points, table.concat(points, " ")))
+				local destination = car_data.moving.destination
+				destination = destination and destination.valid and destination.position
+				out(string.format("PATH %d car %d goal=%s n=%d %s from=%.1f,%.1f to=%s", tick, id,
+					path.goal and string.format("%.1f,%.1f", path.goal.x, path.goal.y) or "-", #points, table.concat(points, " "),
+					car.position.x, car.position.y, destination and string.format("%.1f,%.1f", destination.x, destination.y) or "-"))
 			end
 
 			local health = car.health

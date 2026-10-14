@@ -93,20 +93,21 @@ config.path_trigger = {
 	half_angle = 0.2, -- 72 degrees on each side: a cone of 144 degrees
 	min_distance = 10, -- no path request when the destination is this close
 	range = 40, -- a destination further than this is not the goal: a low-density point at this distance in its direction is
-	sectors = 3, -- directions tried on each side of the bearing of the destination, lookahead_angle apart, for that point
-	angle_cost = 0.02, -- density equivalent of one such step away from the destination
+	sectors = 3, -- directions tried on each side of the bearing of the destination, `step` apart, for that point
+	step = 1 / 12, -- turns between two of these directions
+	angle_cost = 0.1, -- density equivalent of one such step away from the destination
 	max_requests = 10, -- per leg
 }
 config.path_margin = 0.4 -- tiles added around the car's box in a path request: the path keeps that much further off the walls, and a gap of one tile (narrower than the box) is no passage
 config.gate_waypoints = { -- how a path is reshaped where it crosses a gate (see movement.add_gate_waypoints)
-	clear = 3.5, -- tiles: the path points that run along the wall are pushed out to this distance from it, opposite the gate
+	clear = 7, -- tiles: the path points that run along the wall are pushed out from it, up to this distance opposite the gate (less further along: see ramp), so that the car comes at the gate on a bend, not along the wall
 	ramp = 12, -- tiles along the wall over which that push fades out
 	near = 3, -- the point in front of the gate, on its axis
 	exit = 3, -- the point past the gate
 }
 config.path_pass_radius = 8 -- tiles: a waypoint is also passed when the car is past its plane within this distance: a car that cannot turn to it in time would drive by and circle back
-config.path_u_turn_angle = 0.25 -- turns: a first waypoint of the path further off the car's heading than this, and nearer than path_pass_radius, makes the car back up in a U-turn (see movement.drive_tick)
-config.path_density_factor = 0.3 -- factor of steering_cost.density while the car follows a path, which already avoids what is in the way: the density ahead no longer pulls the car off it
+config.path_u_turn_angle = 0.35 -- turns: a first or second waypoint of the path further off the car's heading than this, and nearer than path_pass_radius, makes the car back up in a U-turn (see movement.drive_tick). 0.25 made cars back into the trees of a forest at bends of the path
+config.path_density_factor =0.3 -- factor of steering_cost.density while the car follows a path, which already avoids what is in the way: the density ahead no longer pulls the car off it
 config.max_path_requests = 3 -- per leg, when the maneuvers fail or the leg lasts too long (see movement.lua, "Path")
 
 -- ============================================================
