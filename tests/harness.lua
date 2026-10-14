@@ -1093,25 +1093,50 @@ scenarios["empty-battery"] = {
 -- Two idle cars side by side, one at 14 % charge with the only charger 800 tiles away
 -- (under its critical level, out of reach), one full. A ghost is selected at t = 200:
 -- the full car must get the batch, the low one none (EVENT lines at t = 1500).
+-- 1600 tiles away (too far for their charger checks), a car at 17 % charge
+-- with a charger beside it is given a ghost 150 tiles away at t = 300: enough
+-- for the leg to the supply chest, not for the one to the site, so it must
+-- detour to the charger in between (travel.detour_to_charger), then build it.
 scenarios["critical-no-batch"] = {
-	ticks = 2000,
+	ticks = 5000,
 	category = "energy",
 	setup = function()
-		local s = new_surface({{0, 0}, {800, 0}}, 3)
+		local s = new_surface({{0, 0}, {800, 0}, {0, 1600}, {150, 1600}}, 3)
 		make(s, names.charger, 800, 0)
 		T.chest = make(s, names.chest, 0.5, 20.5)
 		fill(T.chest, {["wooden-chest"] = 20})
 		T.low = make_car(s, 5, 0, 0, 0.14)
 		T.full = make_car(s, 5, 6, 0, 1)
 		make_ghost(s, "wooden-chest", 30.5, 30.5)
+
+		T.detour_charger = make(s, names.charger, -10, 1600)
+		fill(make(s, names.chest, 0.5, 1620.5), {["wooden-chest"] = 5})
+		T.detour = make_car(s, 0, 1600, 0, 0.17)
+		T.detour_ghost = make_ghost(s, "wooden-chest", 150.5, 1600.5)
 	end,
 	events = function(t)
 		if t == 200 then
 			select_ghosts(25, 25, 35, 35)
 		end
+		if t == 300 then
+			select_ghosts(140, 1590, 160, 1610)
+		end
 		if t == 1500 then
 			out("EVENT low car " .. (storage.car_data[T.low.unit_number].construction and "GOT a batch (wrong)" or "has no batch (expected)"))
 			out("EVENT full car " .. (storage.car_data[T.full.unit_number].construction and "has a batch (expected)" or "has no batch (batch already built or lost)"))
+		end
+		local detour_data = T.detour.valid and storage.car_data[T.detour.unit_number]
+		if detour_data and not T.detour_seen and heading_to(T.detour, T.detour_charger) and detour_data.charge_detour_count > 0 then
+			T.detour_seen = true
+			out(string.format("EVENT detour car heads for the charger at %d, fuel %.2f, %s", t, _utils.get_fuel_ratio(T.detour),
+				detour_data.construction and "batch kept (expected)" or "no batch (wrong)"))
+		end
+		if not T.detour_built and not T.detour_ghost.valid then
+			T.detour_built = true
+			out("EVENT detour ghost built at " .. t .. (T.detour_seen and " after the detour (expected)" or " without a detour (wrong)"))
+		end
+		if t == 4800 and not T.detour_built then
+			out("EVENT detour ghost not built (wrong)")
 		end
 	end,
 }
