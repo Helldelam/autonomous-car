@@ -288,8 +288,6 @@ Idées et tâches retenues par le propriétaire, pas encore commencées. Chacune
 
 6. **Mode lent plus lent que `main`** (mesuré en test, 2026-10-12). Près d'un bâti la voiture roule en mode lent même en terrain dégagé : `plain-base` et `long-wall` prennent 1,2 à 1,4 fois le temps de `main`. Acceptable tant que le résultat reste robuste. Atténué (`config.normal_beside_built`, `update_mode`, gardé) : près d'un bâti la voiture reste en mode normal (jamais rapide) quand sa cible (waypoint du chemin ou destination) est dans le cône de `half_angle`, à plus de `normal_beside_built_distance` (6) tiles, hors porte, et que la ligne droite est libre. Gain faible (`gates` 913 → 881 ticks, `plain-base` 2750 → 2670) : dans `long-wall` et `plain-base` la cible est derrière un mur, donc le mode lent y est justifié ; le surcoût sur `main` vient surtout du chemin guidé (demandé après environ 5 tiles et 45 ticks) et du suivi de chemin. Cause non vérifiée.
 
-12. **Roboports jamais construits quand toutes les voitures sont au garage** (vu en scénario d'essai, 2026-10-14). Une sélection de fantômes de roboports seuls (mode `network`) reste en attente : aucune voiture ne sort du garage pour eux, le jeu annonce « 0 construction batch(es) assigned ». Cause : `ghost_control.retry_pending_clusters` ne parcourt que les phases 1 à 3, et `PHASE.network` vaut 4 ; seule une voiture qui se libère d'un autre batch prend ces clusters (`try_assign_pending`). Mesure : fantôme sélectionné au tick 3000, voiture toujours au garage au tick 6900 ; une autre sélection au tick 7000 fait sortir la voiture, qui construit le coffre puis le roboport. Correctif probable : parcourir toutes les phases.
-
 ### Limites assumées
 
 Petites notes : choix et limites que le propriétaire a acceptés, à ne pas « corriger » sans son accord (voir aussi « Invariants »).
@@ -304,6 +302,8 @@ Petites notes : choix et limites que le propriétaire a acceptés, à ne pas « 
 _(Les essais de déplacement faits pour les portes sont retirés du code de cette branche : voir « Essais sur le déplacement ».)_
 
 ### Corrigés, à valider
+
+- **Roboports jamais construits quand toutes les voitures sont au garage** (ancien problème 12, 2026-10-14). `retry_pending_clusters` parcourt maintenant toutes les phases, `network` comprise (elle s'arrêtait à 3). Scénario `network-parked` : voiture garée, roboport sélectionné au tick 3000, batch attribué aussitôt, roboport construit. À valider en jeu : sélectionner seulement des fantômes de roboports, voitures au garage : une voiture sort et les construit.
 
 - **Oscillations et départ rapide à l'opposé de la destination au départ d'un chemin** (observé en jeu, 2026-10-14). Le demi-tour en marche arrière couvre tout waypoint du chemin (points d'approche de porte compris, un par waypoint, le deuxième sur un chemin seulement hors zone dense), avec un seuil de 0,35 tour (voir « Demi-tour du deuxième waypoint et suivants »). Cela corrige aussi les voitures qui repartaient à grande vitesse après un demi-tour sans suite (`plain-base` 34414 et 34419). À valider en jeu : la voiture se retourne au départ d'un chemin au lieu d'osciller ou de fuir ; pas de recul inutile en forêt ni dans une impasse étroite.
 
