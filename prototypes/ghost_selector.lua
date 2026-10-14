@@ -1,5 +1,6 @@
--- Ghost selector: the tool a player drags over ghosts to hand them to the cars
--- (see on_area_selected in control.lua), with its shortcut and its key binding.
+-- Ghost selector ("Autonomous car selector" in game): the tool a player drags over
+-- ghosts and marked entities to hand them to the cars (see on_area_selected in
+-- control.lua), with its shortcut and its key binding.
 -- TODO: custom icon; it borrows the blueprint's for now.
 
 local names = require("config").names

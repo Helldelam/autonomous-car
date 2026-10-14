@@ -2392,7 +2392,7 @@ scenarios["range-built"] = {
 
 -- Long fuel runs: four lanes of 1000, 1500, 2000 and 2500 tiles over one kind of ground, set by
 -- -Set "test_tiles=<n>": 0 grass-1 (friction 1.6), 1 sand-1 (1.8), 2 dirt-1 (1.4), 3 stone-path
--- (1.1), 4 concrete (0.8), 5 a mix changing every 100 tiles. Run with -Set "fuel_per_tile=100" so
+-- (1.1), 4 concrete (0.8), 5 a mix changing every 100 tiles. Run with -Set "fuel_estimate.near_per_tile=100" so
 -- that the car does not detour for a charger: only what it burns is measured. -Set "test_long=1"
 -- makes the lanes 5000, 8000 and 11000 tiles long (the fourth is a copy of the third).
 local LONG_LENGTHS = {1000, 1500, 2000, 2500}

@@ -9,8 +9,9 @@ local charger_control = {}
 -- CLAUDE.md): a fixed part, a steep rate over the first tiles (detours, manoeuvres, slow zones) and
 -- a gentle one beyond, where the car mostly drives fast on open ground.
 local function compute_fuel_for_distance(distance)
-	local near = math.min(distance, config.fuel_near_distance)
-	return config.fuel_fixed + near * config.fuel_per_tile + (distance - near) * config.fuel_far_per_tile
+	local estimate = config.fuel_estimate
+	local near = math.min(distance, estimate.near_distance)
+	return estimate.fixed + near * estimate.near_per_tile + (distance - near) * estimate.far_per_tile
 end
 
 -- Rough fuel cost of driving from the car to `position`.

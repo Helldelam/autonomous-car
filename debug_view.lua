@@ -43,7 +43,7 @@ local function describe_flags(car_data)
 	end
 	local maneuver, path = car_data.maneuver, car_data.path
 	if maneuver.active then
-		flags[#flags + 1] = "maneuver:" .. (maneuver.clearing and "clearing" or maneuver.reason or "?")
+		flags[#flags + 1] = maneuver.clearing and "maneuver:clearing" or maneuver.back_off_until and "maneuver:back off" or "maneuver"
 	end
 	if car_data.emergency_brake.active then
 		flags[#flags + 1] = "brake:" .. (car_data.emergency_brake.cause or "?")
@@ -108,7 +108,7 @@ local function draw_car(player, car, car_data)
 		local target = path.waypoints[path.index]
 		local length = util.distance(start, target)
 		if start and length > 1 then
-			local px, py = -(target.y - start.y) / length * config.path_corridor, (target.x - start.x) / length * config.path_corridor
+			local px, py = -(target.y - start.y) / length * config.path.corridor, (target.x - start.x) / length * config.path.corridor
 			for _, side in ipairs{1, -1} do
 				draw_line({start.x + px * side, start.y + py * side}, {target.x + px * side, target.y + py * side}, COLORS.corridor, 1, 0.5)
 			end

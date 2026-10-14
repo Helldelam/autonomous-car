@@ -54,6 +54,15 @@ function travel.release_charger_slot(car_data)
 	end
 end
 
+-- State of the path of a car (see movement.lua, "Path") at the start of a leg:
+-- requests and clearings are counted per leg. `count`, `guided_count`: failure
+-- and guided requests of this leg; `clear_count`: its clearings; `next_tick`: no
+-- request before it; `pending`: waiting for the answer; `active`: following
+-- `waypoints`.
+function travel.create_path_state()
+	return {active = false, pending = false, count = 0, guided_count = 0, clear_count = 0, next_tick = 0}
+end
+
 -- Drops the trip in progress: the leg or the stuck wait, a maneuver, a charge,
 -- a parking, the tasks queued for them and the charger slot they hold. The car
 -- keeps its batch: it decides again from the waiting loop (see reset_to_waiting)
@@ -64,7 +73,7 @@ function travel.cancel_trip(car_data)
 	car_data.parking.garage = nil
 	car_data.building.active = false
 	car_data.maneuver.active = false
-	car_data.path = {active = false, pending = false, count = 0, guided_count = 0}
+	car_data.path = travel.create_path_state()
 	car_data.stuck.active = false
 	car_data.stuck.destination = nil
 	car_data.moving.active = false
@@ -99,7 +108,7 @@ function travel.begin_leg(car, destination, next_task)
 	-- departure is not blocked (see movement.drive_tick).
 	car_data.maneuver.active = false
 	car_data.maneuver.ended_tick = game.tick
-	car_data.path = {active = false, pending = false, count = 0, guided_count = 0} -- path requests are counted per leg, see movement.lua
+	car_data.path = travel.create_path_state()
 	car_data.slowing = false
 
 	-- stuck_retry_count is not reset here: a retry is a new leg too. It is reset on arrival.
@@ -216,7 +225,7 @@ end
 
 -- Called when a goal keeps failing, after too many charging detours: alerts
 -- once, then sends the car back to waiting. A goal that has been failing for
--- config.unreachable_abandon_delay is abandoned: louder alert, and the
+-- config.very_long_delay is abandoned: louder alert, and the
 -- construction batch is requeued.
 function travel.mark_unreachable(car)
 	local car_data = storage.car_data[car.unit_number]
@@ -225,7 +234,7 @@ function travel.mark_unreachable(car)
 	_utils.alert_once(car_data.alerts, "unreachable", car.force, car,
 		"An autonomous car cannot find a way to recharge enough to reach its destination.", config.names.car)
 
-	if game.tick - car_data.unreachable_since >= config.unreachable_abandon_delay then
+	if game.tick - car_data.unreachable_since >= config.very_long_delay then
 		_utils.alert(car.force, car,
 			"An autonomous car has ABANDONED its current task after failing for a long time - check the area for obstructions or missing chargers.", config.names.car)
 		travel.requeue_construction(car_data)
@@ -328,16 +337,16 @@ end
 -- ============================================================
 
 -- True when the current leg has lasted much longer than its length justifies
--- (see config.stuck_min_speed): the car is stuck. A leg that lasts too long first
+-- (see config.stuck.min_speed): the car is stuck. A leg that lasts too long first
 -- gets its path (see update_car in control.lua). The car must be on a leg.
 function travel.is_leg_too_long(car, tick)
 	local moving = storage.car_data[car.unit_number].moving
-	local max_duration = moving.departure_distance / config.stuck_min_speed + config.long_delay
+	local max_duration = moving.departure_distance / config.stuck.min_speed + config.long_delay
 	return tick - moving.departure_tick > max_duration
 end
 
 -- TODO: send another car to rescue a stuck car (shares the empty-car recharge work, and could
--- later fetch a broken-down train). See "� faire" in CLAUDE.md.
+-- later fetch a broken-down train). See "À faire" in CLAUDE.md.
 -- Stops a stuck car and alerts the player. The car waits for the player to free
 -- it, then tries its leg again (see travel.stuck_tick). It tries again only
 -- while it has retries left and fuel for the leg: otherwise it waits longer, then
@@ -353,7 +362,7 @@ function travel.start_stuck(car, tick)
 	-- it like any other leg. See "À faire" in CLAUDE.md.
 	local to_charger = is_heading_to_charger(car_data)
 	car_data.stuck_retry_count = car_data.stuck_retry_count + 1
-	local can_retry = to_charger or (car_data.stuck_retry_count <= config.max_stuck_retries
+	local can_retry = to_charger or (car_data.stuck_retry_count <= config.stuck.max_retries
 		and _utils.get_fuel(car) >= charger_control.compute_fuel_to_reach(car, moving.destination.position))
 
 	if can_retry then
@@ -385,7 +394,7 @@ function travel.stuck_tick(car, tick)
 	local stuck = car_data.stuck
 
 	travel.stop_car(car)
-	if tick - stuck.since < (stuck.final and config.stuck_abandon_delay or config.long_delay) then
+	if tick - stuck.since < (stuck.final and config.stuck.abandon_delay or config.long_delay) then
 		return false
 	end
 	if stuck.final then
