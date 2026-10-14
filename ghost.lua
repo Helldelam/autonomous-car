@@ -284,9 +284,7 @@ local function compute_yield(entity)
 	for index = 1, entity.get_max_inventory_index() do
 		local inventory = entity.get_inventory(index)
 		if inventory then
-			for key, count in pairs(_utils.get_contents(inventory)) do
-				add(key, count)
-			end
+			add_counts(yield, _utils.get_contents(inventory))
 		end
 	end
 	return yield
@@ -743,9 +741,7 @@ local function release_unsupplied_clusters(construction)
 
 	local supplied, unsupplied = {}, {}
 	local left = {}
-	for key, count in pairs(on_board) do
-		left[key] = count
-	end
+	add_counts(left, on_board)
 	for _, entry in ipairs(construction.clusters) do
 		local complete = true
 		for key, count in pairs(entry.needs) do

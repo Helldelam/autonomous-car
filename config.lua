@@ -87,9 +87,9 @@ config.fast_density = { -- blended density of fast mode
 }
 config.dense_area_threshold = 0.12 -- blended density above which the area is very dense: slow mode
 config.built_zone_distance = 6 -- a car within this of anything built by its force (walls, gates, buildings) is in a built zone:
-	-- slow mode, except in normal mode while its target (waypoint or destination) is ahead, further than
-	-- normal_beside_built_distance, not a gate, and the straight line to it is free
-config.normal_beside_built_distance = 6
+	-- slow mode, unless the car may stay in normal mode beside it (see normal_beside_built_distance)
+config.normal_beside_built_distance = 6 -- in a built zone the car stays in normal mode while its target (waypoint or
+	-- destination) is ahead, further than this, not a gate, and the straight line to it is free
 
 -- ============================================================
 -- Speed and driving modes (see movement.update_mode)
@@ -223,7 +223,8 @@ config.idle_delay = 300 -- (5s) long on purpose during development, so idle wait
 	-- TODO: lower to 60-120 before release; it also bounds the maneuvers, clearings and U-turns. See "À faire" in CLAUDE.md.
 	-- control.lua: wait before an idle car looks for a new task or a garage (ghost_control.go_idle, travel.handle_empty and a
 	--   new car set it as already elapsed, so that the car decides on the next tick)
-	-- movement.maneuver_tick: longest a maneuver may last, its single try; past it the car asks for a path, then is stuck
+	-- movement.maneuver_tick: longest a maneuver may last, its single try; past it the car asks for a path, then clears its
+	--   way, then is stuck
 	-- movement: longest a clearing or a U-turn may last
 config.long_delay = 600 -- (10s)
 	-- ghost_control.proceed: a batch waits this long for missing items before the clusters lacking them go back to the pending
