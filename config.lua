@@ -138,15 +138,17 @@ config.path = {
 	density_factor = 0.3, -- factor of steering_cost.density while the car follows a path, which already avoids what is in the way:
 		-- the density ahead no longer pulls the car off it
 	max_requests = 3, -- failure requests per leg (maneuver failed or leg too long)
+	goal = { -- where a path goes, failure or guided (see movement.choose_path_goal)
+		range = 40, -- a destination further than this is not the goal: a point at this distance in its direction is,
+			-- where the density is lowest. The straight line to a target is checked over at most this (movement.is_way_open)
+		sectors = 3, -- directions tried on each side of the bearing of the destination, `step` apart, for that point
+		step = 1 / 12, -- turns between two of these directions
+		angle_cost = 0.1, -- density equivalent of one such step away from the destination
+	},
 }
 config.path_trigger = { -- guided path
 	half_angle = 0.2, -- half the cone ahead of the car: 72 degrees on each side
 	min_distance = 10, -- no guided request when the destination is this close
-	range = 40, -- the straight line to the destination is checked over at most this; a destination further than this is
-		-- not the goal of a path (failure or guided): a point at this distance in its direction is, where the density is lowest
-	sectors = 3, -- directions tried on each side of the bearing of the destination, `step` apart, for that point
-	step = 1 / 12, -- turns between two of these directions
-	angle_cost = 0.1, -- density equivalent of one such step away from the destination
 	max_requests = 10, -- guided requests per leg
 }
 config.gate_waypoints = { -- how a path is reshaped where it crosses a gate (see movement.add_gate_waypoints)

@@ -69,7 +69,7 @@ local function create_car_data(tick)
 		-- (new leg, stuck, empty battery) and resets the path when a leg begins.
 		-- Maneuver, a sub-mode of moving: movement.start_maneuver sets its other fields.
 		-- `ended_tick` is when the last one ended (or the leg began).
-		maneuver = {active = false, arcs = 0, reverse = false, turn = 0, ended_tick = tick, blocked = {}},
+		maneuver = {active = false, ended_tick = tick},
 		path = travel.create_path_state(),
 		emergency_brake = {active = false, since = nil},
 		mode = "normal", -- "fast", "normal" or "slow", see movement.update_mode

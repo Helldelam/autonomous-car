@@ -165,6 +165,21 @@ local function find_cluster(construction, id)
 	return nil
 end
 
+-- Adds `counts` ([item key] = count) to the counts `into`.
+local function add_counts(into, counts)
+	for key, count in pairs(counts) do
+		into[key] = (into[key] or 0) + count
+	end
+end
+
+-- Removes `counts` ([item key] = count) from the counts `from`; a count that reaches 0 is dropped.
+local function remove_counts(from, counts)
+	for key, count in pairs(counts) do
+		local left = (from[key] or 0) - count
+		from[key] = left > 0 and left or nil
+	end
+end
+
 -- A ghost of the batch that nobody built is gone: its items are no longer
 -- needed. The batch stops waiting for those it has not collected yet; those it
 -- has are a surplus, deposited at the end of the batch. (The load only reserves
@@ -175,16 +190,9 @@ local function drop_ghost_items(construction, id)
 		return
 	end
 	local record = entry.ghosts[id]
-	for key, count in pairs(record.items) do
-		local left = (entry.items[key] or 0) - count
-		entry.items[key] = left > 0 and left or nil
-	end
-	for key, count in pairs(record.needs) do
-		local left = (entry.needs[key] or 0) - count
-		entry.needs[key] = left > 0 and left or nil
-		local needed = (construction.items_needed[key] or 0) - count
-		construction.items_needed[key] = needed > 0 and needed or nil
-	end
+	remove_counts(entry.items, record.items)
+	remove_counts(entry.needs, record.needs)
+	remove_counts(construction.items_needed, record.needs)
 end
 
 -- A tracked ghost is gone, whatever the reason: drops it from the batch of its
@@ -254,13 +262,6 @@ end
 function ghost_control.get_ghost_item(ghost)
 	-- A tile ghost has no quality.
 	return ghost_control.get_place_item(ghost.ghost_prototype, ghost.type == "entity-ghost" and ghost.quality or nil)
-end
-
--- Adds `counts` ([item key] = count) to the counts `into`.
-local function add_counts(into, counts)
-	for key, count in pairs(counts) do
-		into[key] = (into[key] or 0) + count
-	end
 end
 
 -- What an entity marked for deconstruction puts in the trunk when mined
@@ -335,8 +336,9 @@ end
 -- The candidates within config.cluster_radius of a ghost, closest first.
 local function find_neighbours(ghost, candidates)
 	local neighbours, distances = {}, {}
+	local position = ghost.position
 	for _, candidate in pairs(candidates) do
-		local distance = util.distance(ghost.position, candidate.position)
+		local distance = util.distance(position, candidate.position)
 		if distance <= config.cluster_radius then
 			table.insert(neighbours, candidate)
 			distances[candidate] = distance
@@ -579,13 +581,13 @@ local function count_items_slots(items)
 	return slots
 end
 
--- Sum over the ghosts of a cluster of `compute` ([item key] = count).
-local function sum_cluster(cluster, compute)
-	local items = {}
+-- Trunk slots the load of a cluster takes (see compute_load).
+local function count_cluster_slots(cluster)
+	local load = {}
 	for _, ghost in pairs(cluster.ghosts) do
-		add_counts(items, compute(ghost))
+		add_counts(load, ghost_control.compute_load(ghost))
 	end
-	return items
+	return count_items_slots(load)
 end
 
 -- Adds a cluster to the batch of a car. The entry remembers the load and the
@@ -619,8 +621,8 @@ function ghost_control.fill_batch(car)
 	end
 	-- Slots of the pending clusters, counted once: nothing changes them during the call.
 	local slots_of = {}
-	local function count_cluster_slots(cluster)
-		slots_of[cluster] = slots_of[cluster] or count_items_slots(sum_cluster(cluster, ghost_control.compute_load))
+	local function get_slots(cluster)
+		slots_of[cluster] = slots_of[cluster] or count_cluster_slots(cluster)
 		return slots_of[cluster]
 	end
 
@@ -634,7 +636,7 @@ function ghost_control.fill_batch(car)
 			local centroid = ghost_control.compute_centroid(cluster.ghosts)
 			if centroid and is_cluster_ready(cluster) and get_cluster_surface(cluster) == car.surface
 				and get_mode(cluster.ghosts) == mode
-				and reserved + count_cluster_slots(cluster) <= config.car_inventory_size then
+				and reserved + get_slots(cluster) <= config.car_inventory_size then
 				local distance = util.distance(origin, centroid)
 				if not best_index or distance < best_distance then
 					best_index, best_distance = index, distance
@@ -645,7 +647,7 @@ function ghost_control.fill_batch(car)
 			return
 		end
 		local cluster = table.remove(storage.pending_clusters, best_index)
-		reserved = reserved + count_cluster_slots(cluster)
+		reserved = reserved + get_slots(cluster)
 		add_cluster(car.unit_number, construction, cluster)
 	end
 end
@@ -731,17 +733,17 @@ end
 -- meanwhile. Items are given to the clusters in order, which is also the order
 -- they were added in. Returns true if clusters went back.
 local function release_unsupplied_clusters(construction)
-	local total, on_board = {}, {}
+	-- What is on board for the needs of the clusters, and what is left of it as it is given out.
+	local on_board, left = {}, {}
 	for _, entry in ipairs(construction.clusters) do
-		add_counts(total, entry.needs)
+		add_counts(on_board, entry.needs)
 	end
-	for key, count in pairs(total) do
+	for key, count in pairs(on_board) do
 		on_board[key] = count - (construction.items_needed[key] or 0)
+		left[key] = on_board[key]
 	end
 
 	local supplied, unsupplied = {}, {}
-	local left = {}
-	add_counts(left, on_board)
 	for _, entry in ipairs(construction.clusters) do
 		local complete = true
 		for key, count in pairs(entry.needs) do
