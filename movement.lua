@@ -21,7 +21,7 @@ local SENSOR_REACH = config.lookahead.start + config.lookahead.length + config.l
 -- ============================================================
 
 -- Unit vector of an orientation (0 = north, 0.25 = east, as LuaEntity.orientation).
-local function get_heading_vector(orientation)
+local function compute_heading_vector(orientation)
 	return sin(2 * pi * orientation), -cos(2 * pi * orientation)
 end
 
@@ -31,17 +31,18 @@ local function compute_angle_between(from, to)
 	return ((to - from + 0.5) % 1) - 0.5
 end
 
--- Orientation of the direction from the car to `target`.
-local function compute_orientation_to(car, target)
-	local dx, dy = target.x - car.position.x, target.y - car.position.y
+-- Orientation of the direction (dx, dy).
+local function compute_orientation_of(dx, dy)
 	return (math.atan2(dx, -dy) / (2 * pi)) % 1
 end
 
--- Where the car steers: the next waypoint of its path (see request_path), or
--- its destination. Arrival and braking always go by the destination itself.
--- How far past the plane of a gate the car is once it has gone through.
-local GATE_PASSED = 0.3
+-- Orientation of the direction from the car to `target`.
+local function compute_orientation_to(car, target)
+	return compute_orientation_of(target.x - car.position.x, target.y - car.position.y)
+end
 
+-- Where the car steers: the next waypoint of its path (see "Path"), or its
+-- destination. Arrival and braking always go by the destination itself.
 local function get_target(car_data)
 	local path = car_data.path
 	if path.active then
@@ -57,6 +58,7 @@ end
 -- last waypoint: the car then drives to its destination as usual, in slow mode
 -- for a moment (see update_mode).
 local PATH_REACH = 2 * config.car_size.length
+local GATE_PASSED = 0.3 -- how far past the plane of a gate the car is once it has gone through
 
 local function advance_path(car, car_data, tick)
 	local path = car_data.path
@@ -100,8 +102,9 @@ local function get_arc_rotation(arc)
 	return arc.turn
 end
 
--- Sides of a heading for measure_wall_margin.
+-- Sides of a heading for measure_wall_margin, and how far to each side it looks.
 local SIDE_LEFT, SIDE_RIGHT = {-1}, {1}
+local MARGIN_OFFSET = config.car_size.width * 1.5
 
 -- True if a car turned toward `orientation` would fit at (x, y). The collision
 -- box is turned to the closest of the 16 directions: without it can_place_entity
@@ -190,7 +193,7 @@ local function refresh_neighbours(car, car_data, tick)
 		position = car.position, radius = SENSOR_REACH, name = config.names.car,
 	}) do
 		if other ~= car and math.abs(other.speed) > config.speed.stopped then
-			local hx, hy = get_heading_vector(other.orientation)
+			local hx, hy = compute_heading_vector(other.orientation)
 			local sign = other.speed < 0 and -1 or 1
 			table.insert(list, {x = other.position.x, y = other.position.y, mx = hx * sign, my = hy * sign, speed = math.abs(other.speed)})
 		end
@@ -228,10 +231,9 @@ end
 local function measure_wall_margin(car, x, y, orientation, sides)
 	local cost = 0
 	if sides then
-		local hx, hy = get_heading_vector(orientation)
-		local offset = config.car_size.width * 1.5
+		local hx, hy = compute_heading_vector(orientation)
 		for _, side in ipairs(sides) do
-			if not fits_at(car, x - hy * side * offset, y + hx * side * offset, orientation) then
+			if not fits_at(car, x - hy * side * MARGIN_OFFSET, y + hx * side * MARGIN_OFFSET, orientation) then
 				cost = cost + config.steering_cost.margin
 			end
 		end
@@ -239,14 +241,16 @@ local function measure_wall_margin(car, x, y, orientation, sides)
 	return cost
 end
 
+-- The segment of the path being followed (its start x, y and unit direction ux,
+-- uy), set by drive_tick while the car follows a path, nil otherwise.
+local path_segment
+
 -- Steering cost of a sample point: the distance left from there to the target,
 -- relative to the car's own, plus config.steering_cost.blocked if the car would
 -- not fit there, and again if it lies in front of a moving car, plus the margin
--- cost of `sides` (see measure_wall_margin) for a point where it fits.
--- The segment of the path being followed (from, to) while a car follows one, set by drive_tick;
--- sample points far from it cost config.steering_cost.path_deviation per car width.
-local path_segment
-
+-- cost of `sides` (see measure_wall_margin) for a point where it fits, plus
+-- config.steering_cost.path_deviation per car width beyond config.path.corridor
+-- from path_segment.
 local function compute_sample_cost(car, x, y, orientation, target, distance, neighbours, tick, sides)
 	local blocked = fits_at(car, x, y, orientation) and 0 or 1
 	if is_in_neighbour_zone(neighbours, tick, x, y) then
@@ -255,7 +259,7 @@ local function compute_sample_cost(car, x, y, orientation, target, distance, nei
 	local deviation = 0
 	if path_segment then
 		local seg = path_segment
-		local lateral = math.abs((x - seg.x) * seg.ny - (y - seg.y) * seg.nx) -- distance to the line
+		local lateral = math.abs((x - seg.x) * seg.uy - (y - seg.y) * seg.ux) -- distance to the line
 		deviation = config.steering_cost.path_deviation * math.max(lateral - config.path.corridor, 0) / config.car_size.width
 	end
 	return util.distance({x, y}, target) / distance + config.steering_cost.blocked * blocked + deviation
@@ -266,7 +270,7 @@ end
 -- `orientation`, one tile apart, over `length` tiles: something stands between the
 -- car and its destination.
 local function is_line_blocked(car, orientation, length)
-	local vx, vy = get_heading_vector(orientation)
+	local vx, vy = compute_heading_vector(orientation)
 	for d = config.car_size.length, length do
 		if not fits_at(car, car.position.x + vx * d, car.position.y + vy * d, orientation) then
 			return true
@@ -279,8 +283,8 @@ end
 -- Friction
 -- ============================================================
 
--- Friction modifier of the tile under the car, read each time the friction is set.
-local function get_tile_friction(car)
+-- Friction modifier of the tile under the car, measured each time the friction is set.
+local function measure_tile_friction(car)
 	local tile = car.surface.get_tile(math.floor(car.position.x), math.floor(car.position.y))
 	local friction = tile.valid and tile.prototype.vehicle_friction_modifier or 1
 	return friction > 0 and friction or 1
@@ -292,7 +296,7 @@ end
 -- it here and the car goes as fast on grass as on concrete. `braking_factor`
 -- (emergency braking) is not: it has to brake on any tile.
 local function set_friction(car, mode_friction, braking_factor)
-	car.friction_modifier = mode_friction / get_tile_friction(car) * (braking_factor or 1)
+	car.friction_modifier = mode_friction / measure_tile_friction(car) * (braking_factor or 1)
 end
 
 -- ============================================================
@@ -325,11 +329,11 @@ function movement.update_mode(car, tick)
 		return
 	end
 
-	local destination = car_data.moving.destination.position
-	local distance = util.distance(car.position, destination)
+	local destination_position = car_data.moving.destination.position
+	local distance = util.distance(car.position, destination_position)
 	local orientation = car.orientation
 	local x, y = car.position.x, car.position.y
-	local sx, sy = get_heading_vector(orientation)
+	local sx, sy = compute_heading_vector(orientation)
 
 	-- Density around the car (weight 2), blended with the density one disc
 	-- further ahead (weight 1).
@@ -397,7 +401,7 @@ function movement.update_mode(car, tick)
 	-- alone, it asks for a path.
 	local path = car_data.path
 	if in_zone and not path.active and distance > config.path_trigger.min_distance and tick >= (path.next_tick or 0) then
-		local bearing = compute_orientation_to(car, destination)
+		local bearing = compute_orientation_to(car, destination_position)
 		if math.abs(compute_angle_between(orientation, bearing)) > config.path_trigger.half_angle
 			or is_line_blocked(car, bearing, math.min(distance, config.path_trigger.range)) then
 			if movement.request_guided_path(car, tick) then
@@ -467,11 +471,10 @@ function movement.drive_tick(car, tick)
 	local path = car_data.path
 	local waypoint = path.active and path.waypoints[path.index]
 	if waypoint and not waypoint.axis_x then
-		local first = waypoint
 		local u_turn = path.u_turn
-		local angle = compute_angle_between(car.orientation, compute_orientation_to(car, first))
+		local angle = compute_angle_between(car.orientation, compute_orientation_to(car, waypoint))
 		if not u_turn and path.u_turn_done ~= path.index and math.abs(angle) > config.path.u_turn_angle
-			and util.distance(car.position, first) < config.path.pass_radius
+			and util.distance(car.position, waypoint) < config.path.pass_radius
 			and (not path.u_turn_done
 				or measure_obstacle_density(car, car.position.x, car.position.y) <= config.dense_area_threshold) then
 			u_turn = {tick = tick}
@@ -506,9 +509,9 @@ function movement.drive_tick(car, tick)
 
 	local x, y = car.position.x, car.position.y
 	local orientation = car.orientation
-	local sx, sy = get_heading_vector(orientation)
-	local rx, ry = get_heading_vector(orientation + config.lookahead.angle)
-	local lx, ly = get_heading_vector(orientation - config.lookahead.angle)
+	local sx, sy = compute_heading_vector(orientation)
+	local rx, ry = compute_heading_vector(orientation + config.lookahead.angle)
+	local lx, ly = compute_heading_vector(orientation - config.lookahead.angle)
 
 	-- Cost of the straight, right and left headings, from sample points one
 	-- tile apart along each of them. Near points weigh more than far ones. The
@@ -520,7 +523,7 @@ function movement.drive_tick(car, tick)
 
 	-- The margin cost (see measure_wall_margin) is only worth its extra checks when
 	-- something stands near the samples: one entity within reach is the car itself.
-	local reach = lookahead_start + lookahead_length + bonus + config.car_size.width * 1.5
+	local reach = lookahead_start + lookahead_length + bonus + MARGIN_OFFSET
 	local near = car.surface.count_entities_filtered{
 		position = car.position, radius = reach, collision_mask = car.prototype.collision_mask.layers,
 		limit = 2,
@@ -528,12 +531,11 @@ function movement.drive_tick(car, tick)
 	local left_side, right_side = near and SIDE_LEFT, near and SIDE_RIGHT -- the outer side of each heading
 
 	path_segment = nil
-	local path = car_data.path
 	if path.active and config.steering_cost.path_deviation > 0 then
 		local from = path.waypoints[path.index - 1] or path.origin
 		local length = util.distance(from, target)
 		if length > 1 then
-			path_segment = {x = from.x, y = from.y, nx = (target.x - from.x) / length, ny = (target.y - from.y) / length}
+			path_segment = {x = from.x, y = from.y, ux = (target.x - from.x) / length, uy = (target.y - from.y) / length}
 		end
 	end
 
@@ -625,7 +627,7 @@ end
 -- ways at the same spot (see is_blocked) there is nothing more it can do alone.
 -- Returns true then.
 -- `assumed`: the car did not stall, it is only taken to have been driving forward
--- (the start of a "blocked" maneuver, see start_maneuver). It is sent backwards
+-- (a car that stood still on its leg, see start_maneuver). It is sent backwards
 -- the same way, but no direction is noted as blocked.
 local function back_off(car, maneuver, tick, assumed)
 	local stalled, turn = maneuver.reverse, maneuver.turn
@@ -637,12 +639,13 @@ local function back_off(car, maneuver, tick, assumed)
 	local reverse = not stalled
 	if maneuver.follow ~= nil and turn ~= 0 then
 		reverse = maneuver.follow -- a turn failed: carry on along the wall
-		-- EXPERIMENT (pocket deadlock): a turn that stalled again at the same spot and angle
-		-- turned nothing; the other direction may have room to turn.
+		-- A turn that stalled again at the same spot and angle turned nothing (a car in
+		-- a pocket against a wall): the other direction may have room to turn.
 		local last = maneuver.turn_stall
 		if last ~= nil and util.distance(car.position, last.position) < PROBE_STEP
 			and math.abs(compute_angle_between(last.orientation, car.orientation)) < config.lookahead.angle / 4 then
-			reverse = not maneuver.follow		end
+			reverse = not maneuver.follow
+		end
 	end
 	if turn ~= 0 then
 		maneuver.turn_stall = {position = car.position, orientation = car.orientation}
@@ -716,7 +719,7 @@ end
 --    looked for apart, with a disc search that skips the car;
 --  - the probes are closer to each other than the car is wide.
 local function measure_free_room(car, x, y, orientation)
-	local vx, vy = get_heading_vector(orientation)
+	local vx, vy = compute_heading_vector(orientation)
 	local surface = car.surface
 	local probe = config.maneuver.probe
 
@@ -747,7 +750,7 @@ end
 -- density around the point 2 * config.density.radius away along it.
 local function score_heading(car, x, y, orientation, preferred)
 	local room = measure_free_room(car, x, y, orientation) / (math.floor(config.maneuver.probe.length / PROBE_STEP) + 1)
-	local vx, vy = get_heading_vector(orientation)
+	local vx, vy = compute_heading_vector(orientation)
 	local reach = 2 * config.density.radius
 	return room - math.abs(compute_angle_between(preferred, orientation)) * ANGLE_PULL
 		- config.steering_cost.density * measure_obstacle_density(car, x + vx * reach, y + vy * reach)
@@ -833,7 +836,7 @@ local function is_maneuver_done(car, car_data)
 		return false
 	end
 
-	local sx, sy = get_heading_vector(car.orientation)
+	local sx, sy = compute_heading_vector(car.orientation)
 	if not fits_at(car, x + sx * config.emergency_brake_lookahead, y + sy * config.emergency_brake_lookahead,
 		car.orientation) then
 		return false
@@ -873,7 +876,7 @@ end
 -- `radius` tiles every `step` tiles. Returns the trees and rocks there (a set), their
 -- number, and whether something else the car cannot drive over is there.
 local function measure_clearing(car, orientation, from, ahead, step, radius)
-	local vx, vy = get_heading_vector(orientation)
+	local vx, vy = compute_heading_vector(orientation)
 	local layers = car.prototype.collision_mask.layers
 	local found, count, blocked = {}, 0, false
 	for distance = from, ahead, step do
@@ -921,8 +924,9 @@ local function choose_clearing_heading(car, car_data)
 	return best
 end
 
--- Turns the maneuver of the car into a clearing, once per leg, when a tree or a rock lies
--- near enough to be worth it. False otherwise: the car is stuck as before.
+-- Turns the maneuver of the car into a clearing, at most config.clearing.max_count times
+-- per leg, when a tree or a rock lies near enough to be worth it (within
+-- config.clearing.lookahead). False otherwise: the car is stuck as before.
 function start_clearing(car, car_data, maneuver, tick)
 	local path = car_data.path
 	if (path.clear_count or 0) >= config.clearing.max_count then
@@ -1021,21 +1025,21 @@ local function send_path_request(car, car_data)
 	storage.path_requests[id] = car.unit_number
 end
 
--- Where a path goes: the destination, or when it is further than
+-- Where a path goes (failure or guided request): the destination, or when it is further than
 -- config.path_trigger.range a point at that distance, in the direction of the
 -- destination or close to it, where the car fits and the density is lowest (a
 -- turn away from the destination costs config.path_trigger.angle_cost per sector).
 local function choose_path_goal(car, car_data)
-	local destination = car_data.moving.destination.position
+	local destination_position = car_data.moving.destination.position
 	local range = config.path_trigger.range
-	if util.distance(car.position, destination) <= range then
-		return destination
+	if util.distance(car.position, destination_position) <= range then
+		return destination_position
 	end
-	local bearing = compute_orientation_to(car, destination)
+	local bearing = compute_orientation_to(car, destination_position)
 	local best, best_cost
 	for step = -config.path_trigger.sectors, config.path_trigger.sectors do
 		local orientation = bearing + step * config.path_trigger.step
-		local vx, vy = get_heading_vector(orientation)
+		local vx, vy = compute_heading_vector(orientation)
 		local x, y = car.position.x + vx * range, car.position.y + vy * range
 		if fits_at(car, x, y, orientation) then
 			local cost = measure_obstacle_density(car, x, y) + math.abs(step) * config.path_trigger.angle_cost
@@ -1044,12 +1048,12 @@ local function choose_path_goal(car, car_data)
 			end
 		end
 	end
-	return best or destination
+	return best or destination_position
 end
 
--- Starts waiting for a path. False when this leg has used its requests up
--- (`guided`: those of request_guided_path, else the failure requests).
-local function request_path(car, car_data, tick, guided)
+-- Sends a request and starts waiting for the path. False when this leg has used
+-- its requests up (`guided`: those of request_guided_path, else the failure requests).
+local function start_path_request(car, car_data, tick, guided)
 	local path = car_data.path
 	if guided then
 		if path.guided_count >= config.path_trigger.max_requests then
@@ -1073,8 +1077,9 @@ local function request_path(car, car_data, tick, guided)
 end
 
 -- A leg that lasts too long: asks for a path outside a maneuver, the car holds in
--- a maneuver until the answer (see wait_for_path). False when this leg has used
--- its failure requests up; true also while it waits for the next one.
+-- a maneuver until the answer (see wait_for_path). Once this leg has used its
+-- failure requests up the car clears its way if it can (false if not); true also
+-- while it waits for the next request.
 function movement.request_path(car, tick)
 	local car_data = storage.car_data[car.unit_number]
 	local path = car_data.path
@@ -1087,7 +1092,7 @@ function movement.request_path(car, tick)
 	if not car_data.maneuver.active then
 		movement.start_maneuver(car, tick)
 	end
-	return request_path(car, car_data, tick, false)
+	return start_path_request(car, car_data, tick, false)
 end
 
 -- Asks for a path because the destination is out of the cone ahead (see
@@ -1098,7 +1103,7 @@ function movement.request_guided_path(car, tick)
 		return false
 	end
 	movement.start_maneuver(car, tick)
-	return request_path(car, car_data, tick, true)
+	return start_path_request(car, car_data, tick, true)
 end
 
 -- A gate is crossed along the axis perpendicular to its wall. The wall runs where
@@ -1106,7 +1111,7 @@ end
 -- have the direction a scripted one has in the same wall). Alone, the gate falls
 -- back on its direction: facing east or west it is in a wall that runs
 -- north-south, so it is crossed along x.
-local function get_gate_axis(gate)
+local function measure_gate_axis(gate)
 	local along_x, along_y = 0, 0
 	for _, neighbour in pairs(gate.surface.find_entities_filtered{
 		position = gate.position, radius = 1.2, type = {"wall", "gate"}, force = gate.force,
@@ -1132,11 +1137,6 @@ local function get_gate_axis(gate)
 	return 0, 1
 end
 
--- Orientation (in turns) of the direction (dx, dy).
-local function get_orientation_of(dx, dy)
-	return (math.atan2(dx, -dy) / (2 * pi)) % 1
-end
-
 -- A path of the game hugs the walls and turns right in front of a gate, which a
 -- car cannot follow: it drives by the gate. Where the path goes through a gate
 -- (an opening of several gates side by side is one) it is reshaped, see
@@ -1156,7 +1156,7 @@ local function add_gate_waypoints(car, raw)
 		local gate = surface.find_entities_filtered{position = p, radius = 1.2, type = "gate", force = force, limit = 1}[1]
 		local crossed = false
 		if gate then
-			local ax, ay = get_gate_axis(gate)
+			local ax, ay = measure_gate_axis(gate)
 			local before, after = raw[math.max(1, index - 4)].position, raw[math.min(count, index + 4)].position
 			local gx, gy = gate.position.x, gate.position.y
 			local side_before = (before.x - gx) * ax + (before.y - gy) * ay
@@ -1173,7 +1173,7 @@ local function add_gate_waypoints(car, raw)
 				local cx, cy = sum_x / number, sum_y / number
 				local sign = side_after > side_before and 1 or -1
 				ax, ay = ax * sign, ay * sign
-				local orientation = get_orientation_of(ax, ay)
+				local orientation = compute_orientation_of(ax, ay)
 
 				-- Points before the gate: those right in front of it are dropped (the near
 				-- point takes their place); the others are pushed out where there is room,
@@ -1308,6 +1308,20 @@ local function wait_for_path(car, car_data, maneuver, tick)
 	return false
 end
 
+-- A maneuver failed: the car asks for a path, or clears its way once its failure
+-- requests are used up. Returns true when neither is possible: it is stuck.
+local function fail_maneuver(car, car_data, maneuver, tick)
+	if start_path_request(car, car_data, tick, false) then
+		return false
+	end
+	if start_clearing(car, car_data, maneuver, tick) then
+		return false
+	end
+	end_maneuver(car, maneuver, tick)
+	-- Wedged for good only if no path showed a way out on this leg.
+	return true
+end
+
 -- Drives a car that is in a maneuver, at the slow speed that update_mode's
 -- friction gives. It first picks a heading (see choose_heading) and keeps it
 -- for config.short_delay; every config.short_delay it checks whether
@@ -1323,21 +1337,12 @@ end
 -- blocked both ways at the same spot the maneuver fails at once.
 --
 -- A maneuver gets one try, of at most config.idle_delay. When it fails (time out,
--- or a car wedged between walls) the car asks for a path (see request_path); a
--- path that finds nothing sends it back to driving and maneuvering. Once the
--- failure requests of the leg are used up maneuver_tick returns true and the car
--- is stuck (see travel.start_stuck).
-local function fail_maneuver(car, car_data, maneuver, tick)
-	if request_path(car, car_data, tick, false) then
-		return false
-	end
-	if start_clearing(car, car_data, maneuver, tick) then
-		return false
-	end
-	end_maneuver(car, maneuver, tick)
-	-- Wedged for good only if no path showed a way out on this leg.
-	return true
-end
+-- or a car wedged between walls) the car asks for a path (see "Path"); a path that
+-- finds nothing sends it back to driving and maneuvering. Once the failure
+-- requests of the leg are used up the car clears its way if it can (see
+-- "Clearing"); otherwise maneuver_tick returns true and the car is stuck (see
+-- travel.start_stuck). It also drives a clearing, and holds the car while it waits
+-- for a path.
 
 function movement.maneuver_tick(car, tick)
 	local car_data = storage.car_data[car.unit_number]

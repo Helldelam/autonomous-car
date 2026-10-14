@@ -123,8 +123,9 @@ config.friction = {
 -- Path (see movement.lua, "Path")
 -- ============================================================
 -- A path from the game's pathfinder, asked for when the maneuver fails or the
--- leg lasts too long (rescue path), or by a driving car in a built or very dense
--- area whose destination is out of the cone ahead of it (guided path).
+-- leg lasts too long (failure request, the rescue path), or by a driving car in a
+-- built or very dense area whose destination is out of the cone ahead of it
+-- (guided request).
 
 config.path = {
 	margin = 0.4, -- added around the car's box in a request: the path keeps that much further off the walls,
@@ -136,13 +137,13 @@ config.path = {
 		-- makes the car back up in a U-turn (see movement.drive_tick). 0.25 made cars back into the trees of a forest at bends
 	density_factor = 0.3, -- factor of steering_cost.density while the car follows a path, which already avoids what is in the way:
 		-- the density ahead no longer pulls the car off it
-	max_requests = 3, -- rescue requests per leg
+	max_requests = 3, -- failure requests per leg (maneuver failed or leg too long)
 }
 config.path_trigger = { -- guided path
 	half_angle = 0.2, -- half the cone ahead of the car: 72 degrees on each side
 	min_distance = 10, -- no guided request when the destination is this close
 	range = 40, -- the straight line to the destination is checked over at most this; a destination further than this is
-		-- not the goal of a path (rescue or guided): a point at this distance in its direction is, where the density is lowest
+		-- not the goal of a path (failure or guided): a point at this distance in its direction is, where the density is lowest
 	sectors = 3, -- directions tried on each side of the bearing of the destination, `step` apart, for that point
 	step = 1 / 12, -- turns between two of these directions
 	angle_cost = 0.1, -- density equivalent of one such step away from the destination
@@ -204,8 +205,8 @@ config.clearing = {
 -- constant, and list the new usage here.
 
 config.short_delay = 30 -- (0.5s)
-	-- movement.update_mode: emergency braking cannot start again this soon after a stop; pace at which the straight line to a
-	--   destination out of a path is checked
+	-- movement.update_mode: emergency braking cannot start again this soon after a stop; pace at which a car without a path
+	--   checks the straight line to its destination
 	-- movement.drive_tick: a car that stands still this long after a leg began or a maneuver ended has hit something; a U-turn
 	--   that stalls this long ends
 	-- movement.maneuver_tick: a car that drives but does not move this long backs off; an arc and a back-off last this long, and
@@ -217,7 +218,7 @@ config.short_delay = 30 -- (0.5s)
 config.medium_delay = 180 -- (3s)
 	-- ghost_control.attempt_one_ghost: cooldown of a ghost that failed to revive, times the number of failures
 	-- movement.update_mode: slow mode lasts this long after an emergency stop on an obstacle, a maneuver or the end of a path
-	-- movement.request_path: wait between two path requests
+	-- movement.start_path_request: wait between two path requests
 config.idle_delay = 300 -- (5s) long on purpose during development, so idle waits are easy to see
 	-- TODO: lower to 60-120 before release; it also bounds the maneuvers, clearings and U-turns. See "À faire" in CLAUDE.md.
 	-- control.lua: wait before an idle car looks for a new task or a garage (ghost_control.go_idle, travel.handle_empty and a

@@ -55,7 +55,7 @@ function travel.release_charger_slot(car_data)
 end
 
 -- State of the path of a car (see movement.lua, "Path") at the start of a leg:
--- requests are counted per leg. `count`, `guided_count`: rescue and guided
+-- requests are counted per leg. `count`, `guided_count`: failure and guided
 -- requests of this leg; `pending`: waiting for the answer; `active`: following
 -- `waypoints`.
 function travel.create_path_state()
