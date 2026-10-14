@@ -106,8 +106,8 @@ config.gate_waypoints = { -- how a path is reshaped where it crosses a gate (see
 	exit = 3, -- the point past the gate
 }
 config.path_pass_radius = 8 -- tiles: a waypoint is also passed when the car is past its plane within this distance: a car that cannot turn to it in time would drive by and circle back
-config.path_u_turn_angle = 0.35 -- turns: a first or second waypoint of the path further off the car's heading than this, and nearer than path_pass_radius, makes the car back up in a U-turn (see movement.drive_tick). 0.25 made cars back into the trees of a forest at bends of the path
-config.path_density_factor =0.3 -- factor of steering_cost.density while the car follows a path, which already avoids what is in the way: the density ahead no longer pulls the car off it
+config.path_u_turn_angle = 0.35 -- turns: the current waypoint of the path further off the car's heading than this, and nearer than path_pass_radius, makes the car back up in a U-turn (see movement.drive_tick). 0.25 made cars back into the trees of a forest at bends of the path
+config.path_density_factor = 0.3 -- factor of steering_cost.density while the car follows a path, which already avoids what is in the way: the density ahead no longer pulls the car off it
 config.max_path_requests = 3 -- per leg, when the maneuvers fail or the leg lasts too long (see movement.lua, "Path")
 
 -- ============================================================

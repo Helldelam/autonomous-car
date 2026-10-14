@@ -359,8 +359,7 @@ function movement.update_mode(car, tick)
 	local mode = "normal"
 	if in_zone or tick < (car_data.slow_until or 0) then
 		mode = "slow"
-	elseif not car_data.near_built and distance >= car.speed * config.braking_duration
-		and density < (was_fast and config.high_speed_density.leave or config.high_speed_density.enter) then
+	elseif not car_data.near_built and distance >= car.speed * config.braking_duration		and density < (was_fast and config.high_speed_density.leave or config.high_speed_density.enter) then
 		mode = "fast"
 	end
 	car_data.mode = mode
@@ -468,17 +467,21 @@ function movement.drive_tick(car, tick)
 		end
 	end
 
-	-- The first waypoint of a path is behind the car, close by: a U-turn backwards. The car backs slowly,
+	-- The current waypoint of a path is behind the car, close by: a U-turn backwards. The car backs slowly,
 	-- steering its front toward the waypoint, until the waypoint is within lookahead_angle ahead, or is
-	-- reached, or the car stalls (short_delay), or the turn lasts idle_delay. One turn per path. The path
-	-- starts at the car: its first waypoint is often passed at once (advance_path), so the second counts too.
+	-- reached, or the car stalls (short_delay), or the turn lasts idle_delay. One turn per waypoint (the
+	-- path may double back), and a second turn on a path only outside dense areas: in a forest the car
+	-- backs into trees. The path starts at the car, so its first waypoint is often passed at once.
 	local path = car_data.path
-	local first = path.active and path.index <= 2 and path.waypoints[path.index]
-	if first and not first.axis_x and not first.reach then
+	local waypoint = path.active and path.waypoints[path.index]
+	if waypoint and not waypoint.axis_x then
+		local first = waypoint
 		local u_turn = path.u_turn
 		local angle = compute_angle_between(car.orientation, compute_orientation_to(car, first))
-		if not u_turn and not path.u_turn_done and math.abs(angle) > config.path_u_turn_angle
-			and util.distance(car.position, first) < config.path_pass_radius then
+		if not u_turn and path.u_turn_done ~= path.index and math.abs(angle) > config.path_u_turn_angle
+			and util.distance(car.position, first) < config.path_pass_radius
+			and (not path.u_turn_done
+				or measure_obstacle_density(car, car.position.x, car.position.y) <= config.dense_area_threshold) then
 			u_turn = {tick = tick}
 			path.u_turn = u_turn
 		end
@@ -490,7 +493,7 @@ function movement.drive_tick(car, tick)
 			end
 			if math.abs(angle) <= config.lookahead_angle or tick - u_turn.tick > config.idle_delay
 				or (u_turn.stalled_since and tick - u_turn.stalled_since > config.short_delay) then
-				path.u_turn, path.u_turn_done = nil, true
+				path.u_turn, path.u_turn_done = nil, path.index
 			else
 				local rotation = angle > 0 and 1 or -1
 				local direction = get_arc_rotation{reverse = true, turn = -1} == rotation and riding.direction.left or riding.direction.right
