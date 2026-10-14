@@ -25,7 +25,7 @@
 -- when the car has no batch. tests/show.ps1 decodes these lines, and reads
 -- FLAG_NAMES from the line below.
 
-local FLAG_NAMES = {"moving", "charging", "parking", "building", "stuck", "waiting", "empty", "maneuver", "emergency_brake", "high_speed", "precision_mode", "slowing", "path"}
+local FLAG_NAMES = {"moving", "charging", "parking", "building", "stuck", "waiting", "empty", "maneuver", "emergency_brake", "fast", "slow", "slowing", "path"}
 local BUILT_NAMES = {"wooden-chest", "stone-furnace", "small-electric-pole", "steel-chest", "car"}
 
 local T -- state of the scenario being run (see `use`): set before any of its code runs
@@ -35,7 +35,7 @@ local scenarios = {}
 -- Makes `name` the current scenario: its code reads and writes T.
 local function use(name)
 	if not states[name] then
-		states[name] = {name = name, chargers = {}, clusters = {}, surfaces = {}}
+		states[name] = {name = name, chargers = {}, clusters = {}, paths_seen = {}, brakes_seen = {}, health_seen = {}, surfaces = {}}
 	end
 	T = states[name]
 end
@@ -84,10 +84,25 @@ local function make(surface, name, x, y)
 	return entity
 end
 
+-- Small random shifts, to check that a result does not hang on exact positions:
+-- -Set "test_jitter=<seed>" (0 or nothing: none) moves every car by up to
+-- test_jitter_size tiles and turns it by a hundredth of a turn, and
+-- -Set "test_door_shift=1" moves every door by up to one tile along its wall. The
+-- numbers are a function of the seed and of the order of the calls in the scenario.
+local function jitter(range)
+	local seed = config.test_jitter or 0
+	if seed == 0 then
+		return 0
+	end
+	T.jitter_state = ((T.jitter_state or (seed * 7919 + 1)) * 16807) % 2147483647
+	return (T.jitter_state / 2147483647 * 2 - 1) * range
+end
+
 -- `fuel_ratio` overrides the charge a new car starts with.
 local function make_car(surface, x, y, orientation, fuel_ratio)
-	local car = make(surface, names.car, x, y)
-	car.orientation = orientation
+	local size = config.test_jitter_size or 0.3
+	local car = make(surface, names.car, x + jitter(size), y + jitter(size))
+	car.orientation = orientation + jitter(0.01)
 	if fuel_ratio then
 		_utils.set_fuel(car, _utils.get_fuel_capacity(car) * fuel_ratio)
 	end
@@ -703,6 +718,9 @@ end
 -- `T.spread`: two columns of three, 250 tiles apart, for courses longer than 100 tiles.
 -- `T.grid`: columns of six courses, 200 tiles apart, a charger at the top of each.
 local function course_origin(index)
+	if T.origin then
+		return T.origin[1], T.origin[2]
+	end
 	if T.grid then
 		return 60 + 200 * math.floor((index - 1) / 6), ((index - 1) % 6) * 100 - 250
 	end
@@ -744,7 +762,7 @@ local function get_course_ghosts(index, course)
 end
 
 local function build_courses(courses, chunks)
-	local s = new_surface(T.grid and {{60, 0}, {260, 0}, {460, 0}, {660, 0}} or {{0, 0}}, chunks or 11)
+	local s = new_surface(T.origin and {{T.origin[1] + 40, T.origin[2]}} or T.grid and {{60, 0}, {260, 0}, {460, 0}, {660, 0}} or {{0, 0}}, chunks or 11)
 	make(s, names.charger, 0, 0)
 	if T.grid then
 		for column = 0, 3 do
@@ -1507,6 +1525,7 @@ end
 
 -- A door at row ty of a wall that runs north-south in column tx, crossed from west to east.
 local function door_ns(s, tx, ty, wide, force)
+	ty = ty + math.floor(jitter((config.test_door_shift or 0) + 0.5) + 0.5)
 	wide = wide or not ONE_TILE_DOORS
 	for dy = wide and -1 or 0, wide and 1 or 0 do
 		wall_to_gate(s, tx, ty + dy, defines.direction.east, force)
@@ -1515,6 +1534,7 @@ end
 
 -- A door at column tx of a wall that runs east-west in row ty.
 local function door_ew(s, tx, ty, wide, force)
+	tx = tx + math.floor(jitter((config.test_door_shift or 0) + 0.5) + 0.5)
 	wide = wide or not ONE_TILE_DOORS
 	for dx = wide and -1 or 0, wide and 1 or 0 do
 		wall_to_gate(s, tx + dx, ty, defines.direction.north, force)
@@ -1714,6 +1734,254 @@ local function traffic_course(count, wide, both_ways)
 		cars = cars, chests = chests, ghosts = ghosts,
 	}
 end
+
+-- Several walls one behind the other, each with a 3-tile gate ("Portes qui se suivent" in
+-- CLAUDE.md). A scenario of its own for each case (a car takes any ghost of its surface), named
+-- series-<walls>w-sp<tiles between walls>-<f|b><a|s>: the car crosses from the west (f) or from the
+-- east (b), through gates in line (a) or alternately 0, 4, -4, 4, -4 tiles off the line (s). The
+-- walls are inside a closed box, so the only way is through the gates.
+local function series_course(count, spacing, back, staggered)
+	local offsets = staggered and {0, 4, -4, 4, -4} or {0, 0, 0, 0, 0}
+	local last = 40 + (count - 1) * spacing
+	local course = {
+		obstacles = function(s, cx, cy)
+			wall_line(s, cx - 30, cy - 50, cx + last + 70, cy - 50)
+			wall_line(s, cx - 30, cy + 50, cx + last + 70, cy + 50)
+			wall_line(s, cx - 30, cy - 49, cx - 30, cy + 49)
+			wall_line(s, cx + last + 70, cy - 49, cx + last + 70, cy + 49)
+			for i = 1, count do
+				local x = 40 + (i - 1) * spacing
+				course_wall(s, cx, cy, x)
+				door_ns(s, cx + x, cy + offsets[i])
+			end
+		end,
+	}
+	if back then
+		course.car = {last + 40, 0, 0.75}
+		course.chest = {-10, 0}
+	else
+		course.car = {0, 0, 0.25}
+		course.chest = {last + 50, 0}
+	end
+	return course
+end
+
+local function series_scenario(count, spacing, back, staggered)
+	return function()
+		T.origin = {60, 0}
+		build_courses({series_course(count, spacing, back, staggered)}, 4)
+	end
+end
+
+scenarios["series-2w-sp3-fa"] = {
+	ticks = 6000,
+	category = "doors",
+	setup = series_scenario(2, 3, false, false),
+	events = select_courses,
+}
+
+scenarios["series-2w-sp3-ba"] = {
+	ticks = 6000,
+	category = "doors",
+	setup = series_scenario(2, 3, true, false),
+	events = select_courses,
+}
+
+scenarios["series-2w-sp3-fs"] = {
+	ticks = 6000,
+	category = "doors",
+	setup = series_scenario(2, 3, false, true),
+	events = select_courses,
+}
+
+scenarios["series-2w-sp3-bs"] = {
+	ticks = 6000,
+	category = "doors",
+	setup = series_scenario(2, 3, true, true),
+	events = select_courses,
+}
+
+scenarios["series-2w-sp6-fa"] = {
+	ticks = 6000,
+	category = "doors",
+	setup = series_scenario(2, 6, false, false),
+	events = select_courses,
+}
+
+scenarios["series-2w-sp6-ba"] = {
+	ticks = 6000,
+	category = "doors",
+	setup = series_scenario(2, 6, true, false),
+	events = select_courses,
+}
+
+scenarios["series-2w-sp6-fs"] = {
+	ticks = 6000,
+	category = "doors",
+	setup = series_scenario(2, 6, false, true),
+	events = select_courses,
+}
+
+scenarios["series-2w-sp6-bs"] = {
+	ticks = 6000,
+	category = "doors",
+	setup = series_scenario(2, 6, true, true),
+	events = select_courses,
+}
+
+scenarios["series-3w-sp3-fa"] = {
+	ticks = 6000,
+	category = "doors",
+	setup = series_scenario(3, 3, false, false),
+	events = select_courses,
+}
+
+scenarios["series-3w-sp3-ba"] = {
+	ticks = 6000,
+	category = "doors",
+	setup = series_scenario(3, 3, true, false),
+	events = select_courses,
+}
+
+scenarios["series-3w-sp3-fs"] = {
+	ticks = 6000,
+	category = "doors",
+	setup = series_scenario(3, 3, false, true),
+	events = select_courses,
+}
+
+scenarios["series-3w-sp3-bs"] = {
+	ticks = 6000,
+	category = "doors",
+	setup = series_scenario(3, 3, true, true),
+	events = select_courses,
+}
+
+scenarios["series-3w-sp6-fa"] = {
+	ticks = 6000,
+	category = "doors",
+	setup = series_scenario(3, 6, false, false),
+	events = select_courses,
+}
+
+scenarios["series-3w-sp6-ba"] = {
+	ticks = 6000,
+	category = "doors",
+	setup = series_scenario(3, 6, true, false),
+	events = select_courses,
+}
+
+scenarios["series-3w-sp6-fs"] = {
+	ticks = 6000,
+	category = "doors",
+	setup = series_scenario(3, 6, false, true),
+	events = select_courses,
+}
+
+scenarios["series-3w-sp6-bs"] = {
+	ticks = 6000,
+	category = "doors",
+	setup = series_scenario(3, 6, true, true),
+	events = select_courses,
+}
+
+scenarios["series-5w-sp3-fa"] = {
+	ticks = 6000,
+	category = "doors",
+	setup = series_scenario(5, 3, false, false),
+	events = select_courses,
+}
+
+scenarios["series-5w-sp3-ba"] = {
+	ticks = 6000,
+	category = "doors",
+	setup = series_scenario(5, 3, true, false),
+	events = select_courses,
+}
+
+scenarios["series-5w-sp3-fs"] = {
+	ticks = 6000,
+	category = "doors",
+	setup = series_scenario(5, 3, false, true),
+	events = select_courses,
+}
+
+scenarios["series-5w-sp3-bs"] = {
+	ticks = 6000,
+	category = "doors",
+	setup = series_scenario(5, 3, true, true),
+	events = select_courses,
+}
+
+scenarios["series-5w-sp6-fa"] = {
+	ticks = 6000,
+	category = "doors",
+	setup = series_scenario(5, 6, false, false),
+	events = select_courses,
+}
+
+scenarios["series-5w-sp6-ba"] = {
+	ticks = 6000,
+	category = "doors",
+	setup = series_scenario(5, 6, true, false),
+	events = select_courses,
+}
+
+scenarios["series-5w-sp6-fs"] = {
+	ticks = 6000,
+	category = "doors",
+	setup = series_scenario(5, 6, false, true),
+	events = select_courses,
+}
+
+scenarios["series-5w-sp6-bs"] = {
+	ticks = 6000,
+	category = "doors",
+	setup = series_scenario(5, 6, true, true),
+	events = select_courses,
+}
+
+scenarios["series-3w-sp10-fs"] = {
+	ticks = 6000,
+	category = "doors",
+	setup = series_scenario(3, 10, false, true),
+	events = select_courses,
+}
+
+scenarios["series-3w-sp10-bs"] = {
+	ticks = 6000,
+	category = "doors",
+	setup = series_scenario(3, 10, true, true),
+	events = select_courses,
+}
+
+scenarios["series-5w-sp10-fs"] = {
+	ticks = 6000,
+	category = "doors",
+	setup = series_scenario(5, 10, false, true),
+	events = select_courses,
+}
+
+scenarios["series-5w-sp10-bs"] = {
+	ticks = 6000,
+	category = "doors",
+	setup = series_scenario(5, 10, true, true),
+	events = select_courses,
+}
+
+scenarios["series-3w-sp15-fs"] = {
+	ticks = 6000,
+	category = "doors",
+	setup = series_scenario(3, 15, false, true),
+	events = select_courses,
+}
+
+scenarios["series-3w-sp15-bs"] = {
+	ticks = 6000,
+	category = "doors",
+	setup = series_scenario(3, 15, true, true),
+	events = select_courses,
+}
 
 scenarios["doors-traffic"] = {
 	ticks = 12000,
@@ -1933,6 +2201,204 @@ scenarios["doors-odd"] = {
 -- not drive it) is driven straight at a gate by the scenario itself, once with
 -- the gate on a wall and once without any gate, for comparison. Lines GATE-TEST
 -- give its x position every 10 ticks, for 400 ticks: the wall is at x = 20.5.
+-- A base in a plain, as in the owner's game (2026-10-11): a walled box 100 x 70 tiles with doors
+-- 4 tiles wide in three of its four walls (the west wall has none): near the north-west corner,
+-- in the middle of the east wall and near the south-east corner. Eight cars start 150 to 190
+-- tiles away all round, facing the base, and have to get to the chests and ghosts inside.
+-- Lines INSIDE <car> <tick> give the tick each car first stood in the base, DONE 1 <tick> the
+-- tick all the ghosts were built.
+local function door4_ns(s, tx, ty)
+	for dy = -2, 1 do
+		wall_to_gate(s, tx, ty + dy, defines.direction.east)
+	end
+end
+
+local function door4_ew(s, tx, ty)
+	for dx = -2, 1 do
+		wall_to_gate(s, tx + dx, ty, defines.direction.north)
+	end
+end
+
+local plain_base_course = {
+	obstacles = function(s, cx, cy)
+		wall_line(s, cx - 50, cy - 35, cx + 50, cy - 35)
+		wall_line(s, cx - 50, cy + 35, cx + 50, cy + 35)
+		wall_line(s, cx - 50, cy - 34, cx - 50, cy + 34)
+		wall_line(s, cx + 50, cy - 34, cx + 50, cy + 34)
+		door4_ew(s, cx - 40, cy - 35)
+		door4_ns(s, cx + 50, cy)
+		door4_ew(s, cx + 40, cy + 35)
+		make(s, names.charger, cx - 5, cy - 28)
+		make(s, names.garage, cx + 25, cy - 28)
+	end,
+	cars = {
+		{-150, 0, 0.25}, {150, 0, 0.75}, {0, -150, 0.5}, {0, 150, 0},
+		{-120, -110, 0.375}, {120, 110, 0.875}, {-120, 110, 0.125}, {120, -110, 0.625},
+	},
+	chests = {{-10, -10}, {10, 10}, {-30, 20}, {30, -20}},
+	ghosts = {{0, 0}, {20, -15}, {-25, 15}, {35, 20}, {-35, -15}, {15, 25}},
+}
+
+scenarios["plain-base"] = {
+	ticks = 9000,
+	category = "doors",
+	setup = function()
+		build_courses({plain_base_course}, 15)
+		T.inside = {}
+	end,
+	events = function(t)
+		select_courses(t)
+		if t % 30 == 0 then
+			local cx, cy = course_origin(1)
+			for _, car in pairs(storage.cars) do
+				if car.valid and car.surface == T.surface and not T.inside[car.unit_number]
+					and math.abs(car.position.x - cx) < 48 and math.abs(car.position.y - cy) < 33 then
+					T.inside[car.unit_number] = t
+					out("INSIDE " .. car.unit_number .. " " .. t)
+				end
+			end
+		end
+	end,
+}
+
+-- Fuel use against distance (see "Carburant" in CLAUDE.md): six lanes, one car each, a supply
+-- chest 25, 50, 100, 200, 400 and 800 tiles away in a straight line, and a ghost next to it. The
+-- fuel the car burns on the way is in the trace (7th column). `kind` sets the ground
+-- between: open, scattered trees, or a field of furnaces (a built zone) before the chest.
+local RANGE_LENGTHS = {25, 50, 100, 200, 400, 800}
+
+local function build_range(kind)
+	local centres = {}
+	for x = 0, 900, 100 do
+		centres[#centres + 1] = {x, 0}
+	end
+	local s = new_surface(centres, 4)
+	T.range = {}
+	for lane, length in ipairs(RANGE_LENGTHS) do
+		local y = -50 + 20 * (lane - 1)
+		local x0, x1 = 10, 10 + length
+		make(s, names.charger, x0 - 6, y)
+		make(s, names.charger, x1 + 8, y)
+		make_car(s, x0, y, 0.25, 1)
+		fill(make(s, names.chest, x1 + 0.5, y + 0.5), {["wooden-chest"] = 20})
+		make_ghost(s, "wooden-chest", x1 + 4.5, y + 3.5)
+		if kind == "trees" and length > 40 then
+			plant(s, x0 + 15, y - 6, x1 - 15, y + 6, 8)
+		elseif kind == "built" and length > 40 then
+			build_factory(s, x1 - 30, y - 6, x1 - 10, y + 6, 4)
+		end
+		T.range[lane] = {x = x1 + 4.5, y = y + 3.5}
+	end
+end
+
+local function select_range(t)
+	if t == 100 then
+		for _, g in pairs(T.range) do
+			select_ghosts(g.x - 2, g.y - 2, g.x + 2, g.y + 2)
+		end
+	end
+	if t > 100 and t % 100 == 0 then
+		T.done = T.done or {}
+		for lane, g in pairs(T.range) do
+			if not T.done[lane] and #T.surface.find_entities_filtered{type = "entity-ghost", area = {{g.x - 1, g.y - 1}, {g.x + 1, g.y + 1}}} == 0 then
+				T.done[lane] = t
+				out("DONE " .. RANGE_LENGTHS[lane] .. " " .. t)
+			end
+		end
+	end
+end
+
+scenarios["range-open"] = {
+	ticks = 16000,
+	category = "energy",
+	setup = function()
+		build_range("open")
+	end,
+	events = select_range,
+}
+
+scenarios["range-trees"] = {
+	ticks = 16000,
+	category = "energy",
+	setup = function()
+		build_range("trees")
+	end,
+	events = select_range,
+}
+
+scenarios["range-built"] = {
+	ticks = 16000,
+	category = "energy",
+	setup = function()
+		build_range("built")
+	end,
+	events = select_range,
+}
+
+-- Long fuel runs: four lanes of 1000, 1500, 2000 and 2500 tiles over one kind of ground, set by
+-- -Set "test_tiles=<n>": 0 grass-1 (friction 1.6), 1 sand-1 (1.8), 2 dirt-1 (1.4), 3 stone-path
+-- (1.1), 4 concrete (0.8), 5 a mix changing every 100 tiles. Run with -Set "fuel_per_tile=100" so
+-- that the car does not detour for a charger: only what it burns is measured. -Set "test_long=1"
+-- makes the lanes 5000, 8000 and 11000 tiles long (the fourth is a copy of the third).
+local LONG_LENGTHS = {1000, 1500, 2000, 2500}
+local LONG_TILES = {[0] = "grass-1", "sand-1", "dirt-1", "stone-path", "concrete"}
+local LONG_MIX = {"sand-1", "grass-1", "concrete", "dirt-1", "stone-path"}
+
+local function build_long()
+	if config.test_long == 1 then
+		LONG_LENGTHS[1], LONG_LENGTHS[2], LONG_LENGTHS[3], LONG_LENGTHS[4] = 5000, 8000, 11000, 11000
+	end
+	local centres = {}
+	for x = 0, math.max(LONG_LENGTHS[3], LONG_LENGTHS[4]) + 400, 280 do
+		centres[#centres + 1] = {x, 0}
+	end
+	local s = new_surface(centres, 4)
+	local kind = config.test_tiles or 0
+	T.range = {}
+	for lane, length in ipairs(LONG_LENGTHS) do
+		local y = -60 + 40 * (lane - 1)
+		local x0, x1 = 10, 10 + length
+		local tiles = {}
+		for x = x0 - 8, x1 + 12 do
+			local name = kind == 5 and LONG_MIX[math.floor((x - x0) / 100) % #LONG_MIX + 1] or LONG_TILES[kind]
+			if name ~= "grass-1" then
+				for dy = -6, 6 do
+					tiles[#tiles + 1] = {name = name, position = {x, y + dy}}
+				end
+			end
+		end
+		s.set_tiles(tiles, false)
+		make(s, names.charger, x0 - 6, y)
+		make(s, names.charger, x1 + 8, y)
+		make_car(s, x0, y, 0.25, 1)
+		fill(make(s, names.chest, x1 + 0.5, y + 0.5), {["wooden-chest"] = 20})
+		make_ghost(s, "wooden-chest", x1 + 4.5, y + 3.5)
+		T.range[lane] = {x = x1 + 4.5, y = y + 3.5}
+	end
+end
+
+scenarios["range-long"] = {
+	ticks = 70000,
+	category = "energy",
+	setup = build_long,
+	events = function(t)
+		if t == 100 then
+			for _, g in pairs(T.range) do
+				select_ghosts(g.x - 2, g.y - 2, g.x + 2, g.y + 2)
+			end
+		end
+		if t > 100 and t % 100 == 0 then
+			T.done = T.done or {}
+			for lane, g in pairs(T.range) do
+				if not T.done[lane] and #T.surface.find_entities_filtered{type = "entity-ghost", area = {{g.x - 1, g.y - 1}, {g.x + 1, g.y + 1}}} == 0 then
+					T.done[lane] = t
+					out("DONE " .. LONG_LENGTHS[lane] .. " " .. t)
+				end
+			end
+		end
+	end,
+}
+
 scenarios["gate-manual"] = {
 	ticks = 600,
 	category = "movement",
@@ -1997,10 +2463,40 @@ local function trace_cars(tick)
 			local flags = ""
 			for _, name in ipairs(FLAG_NAMES) do
 				local flag = car_data[name]
+				if name == "fast" or name == "slow" then
+					flag = car_data.mode == name
+				end
 				if type(flag) == "table" then
 					flag = flag.active
 				end
 				flags = flags .. (flag and "1" or "0")
+			end
+
+			-- A new path: its waypoints, to see where the car was sent (PATH line).
+			local path = car_data.path
+			if path.active and T.paths_seen[id] ~= path.waypoints then
+				T.paths_seen[id] = path.waypoints
+				local points = {}
+				for _, w in ipairs(path.waypoints) do
+					table.insert(points, string.format("%.1f,%.1f%s", w.x, w.y, w.axis_x and "G" or ""))
+				end
+				local destination = car_data.moving.destination
+				destination = destination and destination.valid and destination.position
+				out(string.format("PATH %d car %d goal=%s n=%d %s from=%.1f,%.1f to=%s", tick, id,
+					path.goal and string.format("%.1f,%.1f", path.goal.x, path.goal.y) or "-", #points, table.concat(points, " "),
+					car.position.x, car.position.y, destination and string.format("%.1f,%.1f", destination.x, destination.y) or "-"))
+			end
+
+			local health = car.health
+			if T.health_seen[id] and health < T.health_seen[id] then
+				out(string.format("HEALTH %d car %d %.1f -> %.1f speed=%.3f", tick, id, T.health_seen[id], health, car.speed))
+			end
+			T.health_seen[id] = health
+
+			local brake = car_data.emergency_brake
+			if brake.active and T.brakes_seen[id] ~= brake.since then
+				T.brakes_seen[id] = brake.since
+				out(string.format("EMERG %d car %d cause=%s path=%d speed=%.3f", tick, id, brake.cause or "-", path.active and 1 or 0, car.speed))
 			end
 
 			local alerts = {}

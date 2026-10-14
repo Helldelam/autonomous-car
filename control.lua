@@ -9,6 +9,7 @@ local charger_control = require("charge")
 local garage_control = require("park")
 local ghost_control = require("ghost")
 local gui = require("gui")
+local debug_view = require("debug_view")
 
 local names = config.names
 
@@ -79,14 +80,15 @@ local function create_car_data(tick)
 			heading = nil, heading_since = nil, last_arc = nil, stall_since = nil, back_off_until = nil, back_off_from = nil,
 			follow = nil, follow_orientation = nil, blocked = {},
 		},
-		-- Path from the game's pathfinder, a last resort for a car whose maneuvers failed (see movement.lua).
-		-- `tried`: the leg has had its one request; `pending`: waiting for the answer; `active`: following `waypoints`.
-		path = {active = false, pending = false, tried = false, waypoints = nil, index = 1, request = nil},
+		-- Path from the game's pathfinder (see movement.lua, "Path"). `count`, `guided_count`: requests of this leg,
+		-- after a failure or guided; `pending`: waiting for the answer; `active`: following `waypoints`.
+		path = {active = false, pending = false, count = 0, guided_count = 0, waypoints = nil, index = 1, request = nil},
 		emergency_brake = {active = false, since = nil},
-		high_speed = false,
-		entry_speed = nil, -- speed of the car when it entered high speed
-		slowing = false, -- braking down to entry_speed after leaving high speed
-		precision_mode = false,
+		mode = "normal", -- "fast", "normal" or "slow", see movement.update_mode
+		slow_until = nil, -- tick until which the mode stays slow (after an emergency stop, a maneuver, a path)
+		near_built = false, -- something built lies near the car, see movement.lua
+		entry_speed = nil, -- speed of the car when it entered fast mode
+		slowing = false, -- braking down to entry_speed after leaving fast mode
 		neighbours = nil, -- moving cars nearby, see movement.lua
 
 		construction = nil, -- current batch, see ghost.lua
@@ -180,6 +182,7 @@ local function on_area_selected(event)
 	local queued = #storage.pending_clusters
 
 	if player then
+		-- TODO: tell the batch types apart in this announcement (build, landfill, deconstruct, upgrade, network).
 		player.print(assigned .. " construction batch(es) assigned.")
 		if queued > 0 then
 			if any_car then
@@ -297,6 +300,9 @@ local function on_tick(event)
 	if event.tick % config.short_delay == 0 then
 		gui.refresh_all()
 	end
+	if event.tick % config.slow_check_interval == 0 then
+		debug_view.refresh()
+	end
 	if event.tick % config.long_delay == 0 then
 		ghost_control.retry_pending_clusters()
 		garage_control.repair_parked_cars()
@@ -322,6 +328,9 @@ local function init_storage(event)
 	storage.pending_clusters = storage.pending_clusters or {} -- clusters waiting for a free car
 	storage.path_requests = storage.path_requests or {} -- [request id] = unit_number of the car waiting for that path
 	storage.idle_fallbacks = storage.idle_fallbacks or {} -- cars found in no state, see update_car
+	storage.debug_view = storage.debug_view or {} -- [player index] = false or true when the player toggled the debug drawing, see debug_view.lua
+
+	debug_view.sync_shortcuts()
 
 	script.on_event(defines.events.on_tick, on_tick)
 	on_tick(event)
@@ -340,6 +349,8 @@ local function on_next_task(event)
 	local destination = moving.destination
 	moving.active = false
 	moving.destination = nil
+	car_data.path.active = false -- the car arrived before the end of its path: it is of no use to the next leg
+	car_data.path.waypoints = nil
 
 	if _utils.deque.length(car_data.tasks) == 0 then
 		-- Nothing queued (the car arrived from a step back, or is charged).
@@ -392,7 +403,12 @@ script.on_event(prototypes.custom_event[names.next_task_event], on_next_task)
 script.on_event(defines.events.on_lua_shortcut, function(event)
 	if event.prototype_name == names.missing_items_shortcut then
 		gui.toggle(game.get_player(event.player_index))
+	elseif event.prototype_name == names.debug_view_shortcut then
+		debug_view.toggle(game.get_player(event.player_index))
 	end
+end)
+script.on_event(defines.events.on_player_created, function(event)
+	debug_view.sync_shortcut(game.get_player(event.player_index))
 end)
 script.on_event(defines.events.on_gui_click, gui.on_click)
 script.on_event(defines.events.on_script_path_request_finished, movement.on_path_finished)

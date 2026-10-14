@@ -184,7 +184,7 @@ function Invoke-Group($mod, [string]$variant, [string]$label, [string[]]$names, 
 	$control = [IO.File]::ReadAllText($mod.Source)
 	$tickOverride = if ($Ticks -gt 0) { "$Ticks" } else { "nil" }
 	$header = "`nlocal SCENARIOS = `"$($names -join ',')`"`nlocal TICKS = $tickOverride`n"
-	# -Set "friction_precision_factor=6": a config value changed for this run (only values the scripts read while running)
+	# -Set "friction_slow_factor=6": a config value changed for this run (only values the scripts read while running)
 	foreach ($assignment in $Set) {
 		$header += "require(`"config`").$assignment`n"
 	}
