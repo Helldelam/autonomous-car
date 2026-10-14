@@ -4,7 +4,7 @@ local names = require("config").names
 
 -- TODO: technologies (TechnologyPrototype) that unlock the mod's items and improve charge and
 -- repair speed, garage repair, garage/charger/car capacity, build speed and driving speed.
--- See "� faire" in CLAUDE.md.
+-- See "À faire" in CLAUDE.md.
 data:extend{
 	{
 		type = "fuel-category",

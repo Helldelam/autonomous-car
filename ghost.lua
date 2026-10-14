@@ -52,7 +52,7 @@ local ghost_control = {}
 -- ============================================================
 
 -- TODO: other robot types (logistic: items, fluids); building a whole mine from a selected
--- resource patch, without ghosts. See "� faire" in CLAUDE.md.
+-- resource patch, without ghosts. See "À faire" in CLAUDE.md.
 -- Key of a ghost in the tables of this module: its unit_number, or for an entity
 -- that has none (trees, rocks) its surface, name and position.
 function ghost_control.get_id(ghost)

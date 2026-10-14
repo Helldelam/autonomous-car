@@ -10,13 +10,16 @@ the copy of control.lua, and runs the scenarios in Factorio's benchmark mode.
 Factorio gets its own configuration and write folder there, so nothing is
 written to the real Factorio folder and the game may stay open.
 
-Every scenario of harness.lua has a category (movement, robustness,
+Every scenario of harness.lua has a category (movement, doors, robustness,
 construction, energy). The scenarios of one category that are asked for run
 together, in one game, each on its own surface: one Factorio launch per
 category, not per scenario. A script error stops the whole category.
 -Scenario takes scenario names, category names, or "all" (the default).
 -Changed picks the categories to run from the files changed since the last
 commit (git), so that a change does not run what it cannot affect.
+-Set "name=value" changes a config value for the run (only values the scripts
+read while playing). -Output gives the run its own folder: runs with different
+folders can go at once.
 
 A scenario runs for 22000 ticks, or for the `ticks` it declares; a category
 runs as long as its longest scenario, and each scenario stops reporting at its
@@ -30,7 +33,7 @@ exits with the number of scenarios that ended in a script error.
 
 .EXAMPLE
 tests\run.ps1
-Runs every scenario (four launches).
+Runs every scenario (one launch per category).
 
 .EXAMPLE
 tests\run.ps1 movement

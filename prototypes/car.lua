@@ -3,8 +3,8 @@
 -- which the scripts use as a battery. Its name, size and trunk come from
 -- config.lua, which the scripts read too. Its colour is not a prototype
 -- property: on_built in control.lua sets it on each car.
--- TODO: let the player arm the car (small capacity) so it defends itself. See "� faire" in CLAUDE.md.
--- TODO: modified spidertron (legs, no collision), as a replacement or an upgrade of the car; check it fits the game's technologies. See "A faire" in CLAUDE.md.
+-- TODO: let the player arm the car (small capacity) so it defends itself. See "À faire" in CLAUDE.md.
+-- TODO: modified spidertron (legs, no collision), as a replacement or an upgrade of the car; check it fits the game's technologies. See "À faire" in CLAUDE.md.
 local config = require("config")
 local names = config.names
 local hit_effects = require("__base__/prototypes/entity/hit-effects")
