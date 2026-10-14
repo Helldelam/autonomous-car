@@ -110,7 +110,7 @@ local function on_built(event)
 	local id = entity.unit_number
 
 	if entity.name == names.car then
-		entity.friction_modifier = config.friction_base
+		entity.friction_modifier = config.friction.normal
 		entity.color = colors.car
 		entity.riding_state = {acceleration = defines.riding.acceleration.nothing, direction = defines.riding.direction.straight}
 		-- A new car starts with config.critical_fuel_ratio of a full tank.

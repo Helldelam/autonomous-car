@@ -81,7 +81,7 @@ function garage_control.release_car(garage)
 	local garage_data = storage.garage_data[garage.unit_number]
 	local surface = garage.surface
 	local position = surface.find_non_colliding_position(config.names.car, garage.position,
-		config.garage_exit_radius, config.garage_exit_precision)
+		config.garage_exit.radius, config.garage_exit.precision)
 	if not position then
 		_utils.alert_once(garage_data.alerts, "no_room", garage.force, garage,
 			"No room for a car to leave this garage.", config.names.garage)

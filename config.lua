@@ -40,24 +40,30 @@ config.charger_input_flow_limit = "1600kW"
 -- Steering (see movement.drive_tick)
 -- ============================================================
 -- Each tick a moving car scores three headings - straight, slightly right and
--- slightly left - from sample points ahead of it, and steers to the cheapest.
--- A sample point costs the distance left from there to the target, relative
--- to the car's own (so about 1), plus what config.steering_cost adds.
+-- slightly left - from sample points one tile apart ahead of it, and steers to
+-- the cheapest. A sample point costs the distance left from there to the
+-- target, relative to the car's own (so about 1), plus what steering_cost adds.
 
-config.lookahead_angle = 1 / 12 -- angle between the straight heading and each side heading; a maneuver uses it for its left and right arcs too
-config.lookahead_side_offset = config.car_size.width -- the straight heading is sampled along two lines, this far on each side of the car
-config.lookahead_start = 1.3 -- distance of the first sample point. Its minimum is about 1.11: half the car length plus the
-	-- furthest a corner of the car reaches from its centre (hypot(length / 2, width / 2) = 0.61). Closer, the point overlaps
-	-- the car itself, the heading counts as blocked and the car does not steer toward it. Checked at the end of this file.
-config.lookahead_length = 4 -- distance covered by the sample points beyond the first one
-config.lookahead_speed_bonus = 2 -- extra look-ahead length above config.speed.fast
+config.lookahead = {
+	angle = 1 / 12, -- between the straight heading and each side heading; also the width of the sectors and arcs of the maneuvers and clearings
+	side_offset = config.car_size.width, -- the straight heading is sampled along two lines, this far on each side of the car
+	start = 1.3, -- distance of the first sample point. Its minimum is about 1.11: half the car length plus the
+		-- furthest a corner of the car reaches from its centre (hypot(length / 2, width / 2) = 0.61). Closer, the point overlaps
+		-- the car itself, the heading counts as blocked and the car does not steer toward it. Checked at the end of this file.
+	length = 4, -- distance covered by the sample points beyond the first one; also the spacing of the points kept on a path
+	speed_bonus = 2, -- extra length above speed.fast
+}
+config.slow_lookahead = { -- replaces start and length of lookahead in slow mode: a finer look-ahead
+	start = 1.6, -- above the minimum of lookahead.start (checked at the end): closer, a sample on a side heading overlaps the car
+		-- itself when the car is turned, and the car stops steering that way (cause of circles and long detours, see CLAUDE.md)
+	length = 2,
+}
 config.steering_cost = {
-	blocked = 3, -- added for a sample point where the car would not fit
-	density = 1.5, -- weight of the obstacle density summed further along the heading
-	path_deviation = 1, -- added, per car width, for a sample point further than config.path_corridor from the segment of the path being followed
+	blocked = 3, -- added for a sample point where the car would not fit, and again in front of a moving car
+	density = 1.5, -- weight of the obstacle density summed further along the heading (and of a maneuver's heading)
+	path_deviation = 1, -- added, per car width, for a sample point further than path.corridor from the segment of the path being followed
 	margin = 0.5, -- added, per side, for a sample point with an obstacle about a car width beside it: keeps the car off the walls
 }
-config.path_corridor = 2.5 -- tiles: distance to the followed segment of the path within which steering has no deviation cost
 config.arrival_distance = 6 -- a car this close to its destination has arrived and can act on it
 config.emergency_brake_lookahead = 3 -- an obstacle this far straight ahead triggers emergency braking, and keeps a maneuver from ending
 
@@ -68,72 +74,90 @@ config.emergency_brake_lookahead = 3 -- an obstacle this far straight ahead trig
 -- A disc centred on the car counts the car itself: about 0.035 with the radius
 -- below. movement.update_mode blends that disc (weight 2) with one further
 -- ahead (weight 1): on open ground its density is about 0.024, not 0. Keep
--- this in mind when setting a density threshold: high_speed_density here,
--- dense_area_threshold and maneuver_exit_density further down.
+-- this in mind when setting a density threshold: fast_density and
+-- dense_area_threshold here, maneuver.exit_density further down.
 
-config.density_radius = 3 -- radius of the discs
-config.density_lookahead_steps = 5 -- steering measures density in discs 0 to N ahead of the car, laid end to end
-config.high_speed_density = { -- fast mode
-	enter = 0.03, -- blended density below which the car cruises at high speed
-	leave = 0.05, -- and above which it stops doing so; two thresholds, so the mode does not flicker
+config.density = {
+	radius = 3, -- radius of the discs
+	lookahead_steps = 5, -- steering sums the density of discs 0 to N ahead of the car, laid end to end
 }
-config.built_zone_distance = 6 -- tiles: a car within this of anything built by its force (walls, gates, buildings) is in a built zone,
-	-- where it drives slowly (see "Driving modes" below)
-config.normal_beside_built = true -- but only in normal mode, not slow, while its target (waypoint or destination) is ahead and the straight line to it is free
-config.normal_beside_built_distance = 6 -- tiles: and further than this (nearer, the car stays slow)
-
--- ============================================================
--- Driving modes (see movement.update_mode)
--- ============================================================
--- Three modes of speed: fast (low density, far from anything built), slow (built
--- or very dense areas, and a moment after an emergency stop or a maneuver) and
--- normal (otherwise). In a built or very dense area a destination out of the cone
--- ahead of the car (half_angle, in turns, on each side) makes it ask for a path.
-config.path_trigger = {
-	half_angle = 0.2, -- 72 degrees on each side: a cone of 144 degrees
-	min_distance = 10, -- no path request when the destination is this close
-	range = 40, -- a destination further than this is not the goal: a low-density point at this distance in its direction is
-	sectors = 3, -- directions tried on each side of the bearing of the destination, `step` apart, for that point
-	step = 1 / 12, -- turns between two of these directions
-	angle_cost = 0.1, -- density equivalent of one such step away from the destination
-	max_requests = 10, -- per leg
+config.fast_density = { -- blended density of fast mode
+	enter = 0.03, -- below it the car cruises fast
+	leave = 0.05, -- above it it stops doing so; two thresholds, so the mode does not flicker
 }
-config.path_margin = 0.4 -- tiles added around the car's box in a path request: the path keeps that much further off the walls, and a gap of one tile (narrower than the box) is no passage
-config.gate_waypoints = { -- how a path is reshaped where it crosses a gate (see movement.add_gate_waypoints)
-	clear = 7, -- tiles: the path points that run along the wall are pushed out from it, up to this distance opposite the gate (less further along: see ramp), so that the car comes at the gate on a bend, not along the wall
-	ramp = 12, -- tiles along the wall over which that push fades out
-	near = 3, -- the point in front of the gate, on its axis
-	exit = 3, -- the point past the gate
-}
-config.path_pass_radius = 8 -- tiles: a waypoint is also passed when the car is past its plane within this distance: a car that cannot turn to it in time would drive by and circle back
-config.path_u_turn_angle = 0.35 -- turns: the current waypoint of the path further off the car's heading than this, and nearer than path_pass_radius, makes the car back up in a U-turn (see movement.drive_tick). 0.25 made cars back into the trees of a forest at bends of the path
-config.path_density_factor = 0.3 -- factor of steering_cost.density while the car follows a path, which already avoids what is in the way: the density ahead no longer pulls the car off it
-config.max_path_requests = 3 -- per leg, when the maneuvers fail or the leg lasts too long (see movement.lua, "Path")
+config.dense_area_threshold = 0.12 -- blended density above which the area is very dense: slow mode
+config.built_zone_distance = 6 -- a car within this of anything built by its force (walls, gates, buildings) is in a built zone:
+	-- slow mode, except in normal mode while its target (waypoint or destination) is ahead, further than
+	-- normal_beside_built_distance, not a gate, and the straight line to it is free
+config.normal_beside_built_distance = 6
 
 -- ============================================================
--- Speed (see movement.lua)
+-- Speed and driving modes (see movement.update_mode)
 -- ============================================================
+-- Three modes of speed: fast (low density, far from anything built), slow
+-- (built or very dense areas, and a moment after an emergency stop on an
+-- obstacle, a maneuver or the end of a path) and normal (otherwise).
 
 config.speed = {
-	stopped = 0.01, -- below this the car counts as stopped: it has arrived, or its emergency braking is over
-	slow = 0.1, -- within arrival distance, a car slower than this brakes to a stop
-	fast = 0.25, -- above this the car looks further ahead (see lookahead_speed_bonus)
+	stopped = 0.01, -- below this the car counts as stopped: it has arrived, its emergency braking is over, it stalls
+	slow = 0.1, -- a car that leaves fast mode brakes down to the speed it entered it at, but never below this
+	fast = 0.25, -- above this the car looks further ahead (see lookahead.speed_bonus)
 }
-config.braking_duration = 30 -- (0.5s) the car brakes, and leaves high speed, once its destination is less than this many ticks away at its current speed
+config.braking_duration = 30 -- (0.5s) ticks of travel at the current speed: a car whose destination is nearer than that brakes,
+	-- and is not in fast mode; also the length of the zone kept free in front of a moving car
 
 -- car.friction_modifier scales the friction of the car prototype: more friction
 -- means a lower cruising speed. It is rebuilt from these factors every tick
 -- (see movement.update_mode), so it cannot drift. The game also multiplies it by
 -- the friction of the tile under the car: the factors below are divided by that
 -- friction, except the emergency one, so a mode has the same speed on any tile.
-config.friction_base = 1
-config.friction_high_speed_factor = 0.1 -- cruising in an open area
-config.friction_slow_factor = 4 -- slow mode
-config.friction_maneuver_factor = 10 -- maneuver: much slower than slow mode
-config.friction_emergency_factor = 100 -- emergency braking, on top of the mode above
+config.friction = {
+	fast = 0.1, -- fast mode: cruising in an open area
+	normal = 1, -- normal mode: the friction of the car prototype
+	slow = 4, -- slow mode
+	maneuver = 10, -- maneuvers, U-turns and the wait for a path: much slower than slow mode
+	emergency = 100, -- emergency braking, on top of the mode
+}
 
 -- ============================================================
--- Maneuver mode (see movement.maneuver_tick)
+-- Path (see movement.lua, "Path")
+-- ============================================================
+-- A path from the game's pathfinder, asked for when the maneuver fails or the
+-- leg lasts too long (rescue path), or by a driving car in a built or very dense
+-- area whose destination is out of the cone ahead of it (guided path).
+
+config.path = {
+	margin = 0.4, -- added around the car's box in a request: the path keeps that much further off the walls,
+		-- and a gap of one tile (narrower than the box) is no passage
+	corridor = 2.5, -- distance to the followed segment within which steering has no deviation cost (steering_cost.path_deviation)
+	pass_radius = 8, -- a waypoint is also passed once the car is past its plane within this distance:
+		-- a car that cannot turn to it in time would drive by and circle back
+	u_turn_angle = 0.35, -- the current waypoint further off the car's heading than this, and nearer than pass_radius,
+		-- makes the car back up in a U-turn (see movement.drive_tick). 0.25 made cars back into the trees of a forest at bends
+	density_factor = 0.3, -- factor of steering_cost.density while the car follows a path, which already avoids what is in the way:
+		-- the density ahead no longer pulls the car off it
+	max_requests = 3, -- rescue requests per leg
+}
+config.path_trigger = { -- guided path
+	half_angle = 0.2, -- half the cone ahead of the car: 72 degrees on each side
+	min_distance = 10, -- no guided request when the destination is this close
+	range = 40, -- the straight line to the destination is checked over at most this; a destination further than this is
+		-- not the goal of a path (rescue or guided): a point at this distance in its direction is, where the density is lowest
+	sectors = 3, -- directions tried on each side of the bearing of the destination, `step` apart, for that point
+	step = 1 / 12, -- turns between two of these directions
+	angle_cost = 0.1, -- density equivalent of one such step away from the destination
+	max_requests = 10, -- guided requests per leg
+}
+config.gate_waypoints = { -- how a path is reshaped where it crosses a gate (see movement.add_gate_waypoints)
+	clear = 7, -- the path points that run along the wall are pushed out from it, up to this distance opposite the gate
+		-- (less further along: see ramp), so that the car comes at the gate on a bend, not along the wall
+	ramp = 12, -- tiles along the wall over which that push fades out
+	near = 3, -- the point in front of the gate, on its axis
+	exit = 3, -- the point past the gate
+}
+
+-- ============================================================
+-- Maneuver (see movement.maneuver_tick)
 -- ============================================================
 -- Slow driving, forwards or backwards, to get out of a dense area or away from an
 -- obstacle. It does not head for the destination: it picks a heading (the
@@ -141,38 +165,36 @@ config.friction_emergency_factor = 100 -- emergency braking, on top of the mode 
 -- arcs (forward or backward, each straight, left or right) at a time to turn
 -- toward it. A maneuver lasts at most idle_delay.
 
-
--- Free room is measured with probes the size of the car, placed along a heading
--- half a car length apart (see config.car_size): they overlap, so even a thin
--- wall cannot sit unseen between two of them.
-config.maneuver_probe = {
-	start = 1.5, -- distance of the first probe; must stay above the car length, or the car would detect itself
-	length = 4, -- distance covered by the probes beyond the first one
-	near_radius = 0.6, -- the gap between the car and the first probe is searched apart, in a disc of this radius
+config.maneuver = {
+	-- Free room is measured with probes the size of the car, placed along a heading
+	-- half a car length apart (see car_size): they overlap, so even a thin wall
+	-- cannot sit unseen between two of them.
+	probe = {
+		start = 1.5, -- distance of the first probe; must stay above the car length, or the car would detect itself
+		length = 4, -- distance covered by the probes beyond the first one
+		near_radius = 0.6, -- the gap between the car and the first probe is searched apart, in a disc of this radius
+	},
+	exit_density = 0.08, -- a maneuver cannot end while the density around the car is above this:
+		-- with the default radius, that is the car and one other entity at most (see "Obstacle density")
+	min_travel = 2, -- a maneuver ends only once the car has moved this far
 }
-config.clearing = { -- last resort of a car no maneuver and no path frees: it destroys trees and rocks (see movement.lua, "Clearing")
-	lookahead = 8, -- tiles looked at along each heading to count the trees and rocks it would cross
-	radius = 0.8, -- radius of the discs searched along a heading to count the trees and rocks it would cross
+
+-- ============================================================
+-- Clearing (see movement.lua, "Clearing")
+-- ============================================================
+-- Last resort of a car no maneuver and no path frees: it destroys the trees and
+-- rocks in its way, for at most idle_delay.
+
+config.clearing = {
+	lookahead = 8, -- tiles looked at along each heading to count the trees and rocks it would cross;
+		-- also the radius around the car within which one must stand for a clearing to start
+	radius = 0.8, -- radius of the discs searched along a heading for that count
 	clear_radius = 1.3, -- trees and rocks within this of the car, and of the points up to `reach` ahead of it, are destroyed
 	reach = 2.5, -- tiles ahead of the car where trees and rocks are destroyed
 	travel = 15, -- the clearing ends once the car has moved this far
-	obstacle_cost = 0.01, -- cost of each tree or rock on a heading, in turns of deviation from the destination
+	obstacle_cost = 0.01, -- cost of a heading per tree or rock on it, in turns of deviation from the destination
 	max_count = 10, -- clearings per leg
-	angle_cost = 1, -- cost per turn of deviation from the destination
 }
-config.maneuver_exit_density = 0.08 -- a maneuver cannot end while the density around the car is above this:
-	-- with the default radius, that is the car and one other entity at most (see "Obstacle density")
-config.maneuver_min_travel = 2 -- a maneuver ends only once the car has moved this far
-
--- ============================================================
--- Slow mode
--- ============================================================
--- Slow driving with a finer look-ahead, in built and very dense areas.
-
-config.dense_area_threshold = 0.12 -- blended density above which the area is very dense and the car drives slowly (see "Obstacle density")
-config.slow_lookahead_side_offset = config.lookahead_side_offset
-config.slow_lookahead_start = 1.6 -- replaces lookahead_start; above its minimum (see there and the checks at the end): closer, a sample on a side heading overlaps the car itself when the car is turned, and the car stops steering that way
-config.slow_lookahead_length = 2 -- replaces lookahead_length
 
 -- ============================================================
 -- Shared delays
@@ -182,46 +204,51 @@ config.slow_lookahead_length = 2 -- replaces lookahead_length
 -- constant, and list the new usage here.
 
 config.short_delay = 30 -- (0.5s)
-	-- travel.handle_critical_fuel: pause between two charger searches when none is reachable; period of the critical level measure while the tank holds much more than it
-	-- movement.update_mode: cooldown before emergency braking can trigger again after a stop
-	-- movement.drive_tick: a car that stands still this long after a leg began or a maneuver ended has hit an obstacle
-	-- movement.maneuver_tick: a car that drives but does not move this long backs off; the car follows one arc this long, and the heading is looked for again this often
+	-- movement.update_mode: emergency braking cannot start again this soon after a stop; pace at which the straight line to a
+	--   destination out of a path is checked
+	-- movement.drive_tick: a car that stands still this long after a leg began or a maneuver ended has hit something; a U-turn
+	--   that stalls this long ends
+	-- movement.maneuver_tick: a car that drives but does not move this long backs off; an arc and a back-off last this long, and
+	--   the heading of a maneuver or a clearing is looked for again this often
+	-- movement.on_path_finished: a request the pathfinder could not take yet is sent again after this
+	-- travel.handle_critical_fuel: pause between two charger searches when none is reachable; period of the critical level
+	--   measure while the tank holds much more than it
 	-- control.lua: period at which an open window of missing items is refreshed (gui.refresh_all)
 config.medium_delay = 180 -- (3s)
 	-- ghost_control.attempt_one_ghost: cooldown of a ghost that failed to revive, times the number of failures
-	-- movement.update_mode: slow mode lasts this long after an emergency stop, a maneuver or the end of a path
+	-- movement.update_mode: slow mode lasts this long after an emergency stop on an obstacle, a maneuver or the end of a path
 	-- movement.request_path: wait between two path requests
-config.idle_delay = 300 -- (5s) long on purpose during development, so idle waits are easy to see; lower to 60-120 before release
-	-- movement.maneuver_tick: longest a maneuver may last, its single try; past it the car asks for a path (movement.request_path), then is stuck
-	-- control.lua: wait before an idle car looks for a new task or a garage
-	-- ghost_control.go_idle, travel.handle_empty: a wait set as already elapsed, so that the car decides on the next tick
+config.idle_delay = 300 -- (5s) long on purpose during development, so idle waits are easy to see
+	-- TODO: lower to 60-120 before release; it also bounds the maneuvers, clearings and U-turns. See "À faire" in CLAUDE.md.
+	-- control.lua: wait before an idle car looks for a new task or a garage (ghost_control.go_idle, travel.handle_empty and a
+	--   new car set it as already elapsed, so that the car decides on the next tick)
+	-- movement.maneuver_tick: longest a maneuver may last, its single try; past it the car asks for a path, then is stuck
+	-- movement: longest a clearing or a U-turn may last
 config.long_delay = 600 -- (10s)
-	-- ghost_control.proceed: a batch waits this long for missing items before the clusters lacking them go back to the pending pool
-	-- control.lua: period at which parked cars are repaired (garage_control.repair_parked_cars)
-	-- control.lua: period of the fallback scan of pending clusters
+	-- ghost_control.proceed: a batch waits this long for missing items before the clusters lacking them go back to the pending
+	--   pool; ghost_control.wait_for_phase: a batch held back by an earlier phase gives way after this
+	-- movement.wait_for_path: longest wait for the answer of the pathfinder
+	-- control.lua: period of the fallback scan of pending clusters and of the repair of parked cars
 	-- travel.stuck_tick: wait before a stuck car tries its leg again
 	-- travel.is_leg_too_long: margin added to the expected duration of a leg
 config.very_long_delay = 3600 -- (60s)
-	-- ghost_control.requeue_ghost: a ghost given up after max_revive_attempts waits this long in the pending pool before any car may take it again,
-	-- so that the cars do not all gather on a ghost that cannot be built
+	-- ghost_control.requeue_ghost: a ghost given up after max_revive_attempts waits this long in the pending pool before any
+	--   car may take it again, so that the cars do not all gather on a ghost that cannot be built
+	-- travel.mark_unreachable: a car that has found no way to recharge for this long abandons its task: its batch goes back
+	--   to the pending pool
 
--- Measurements that need not happen every tick (the cars nearby, the closest
--- charger) are repeated this often, offset per car. Raise it if the mod slows
--- the game down: every player gets the same behaviour.
+-- Measurements that need not happen every tick are repeated this often, offset
+-- per car (_utils.is_slow_check_due): gates opened ahead, moving cars nearby,
+-- built things nearby, critical fuel level. Raise it if the mod slows the game
+-- down: every player gets the same behaviour.
 config.slow_check_interval = 6 -- (0.1s)
 	-- debug_view.refresh: period of the debug drawing
 
 -- Debug drawing of the car under the cursor or opened (see debug_view.lua): its
--- destination, path and state. Each player toggles it with a shortcut; this is
--- the state of a player who has not touched it.
+-- destination, path, state and steering costs. Each player toggles it with a
+-- shortcut; this is the state of a player who has not touched it.
 -- TODO: off by default before release (see "À faire" in CLAUDE.md).
 config.debug_view_default = true
-
--- The two ways a car abandons its task, each with its own delay:
-config.unreachable_abandon_delay = 3600 -- (60s) a car that has found no way to recharge for this long abandons its task:
-	-- its batch goes back to the pending pool (see travel.mark_unreachable)
-config.stuck_abandon_delay = 1800 -- (30s) a car that is out of stuck retries waits this long for the player, then abandons its task:
-	-- its ghosts are released and must be selected again (see travel.stuck_tick, ghost_control.abandon)
 
 -- ============================================================
 -- Construction (see ghost.lua)
@@ -239,14 +266,16 @@ config.chest_group_radius = 1.5 -- supply chests this close to each other form o
 -- ============================================================
 
 config.full_charge_duration = 900 -- (15s) time to fill an empty tank; the transfer per tick is derived from it and the tank capacity
--- High estimate of the fuel a trip burns, used to decide whether it needs a charging detour and where the
+-- High estimate of the fuel a trip of d tiles burns, used to decide whether it needs a charging detour and where the
 -- critical level lies (see charge.lua; measured on 364 trips of 5 to 11000 tiles, `range-*` scenarios):
--- fuel(d) = fuel_fixed + fuel_per_tile * min(d, fuel_near_distance) + fuel_far_per_tile * the rest.
+-- fixed + near_per_tile * min(d, near_distance) + far_per_tile * the rest.
 -- Covers about 90% of the short trips of the test scenarios (traps included) and all the long ones.
-config.fuel_fixed = 50000 -- J, the fixed margin of a trip
-config.fuel_per_tile = 2500 -- J per tile over the first fuel_near_distance tiles
-config.fuel_near_distance = 100 -- tiles
-config.fuel_far_per_tile = 450 -- J per tile beyond (measured 165 to 315 on long trips, at most 490)
+config.fuel_estimate = {
+	fixed = 50000, -- the fixed margin of a trip
+	near_per_tile = 2500, -- per tile over the first near_distance tiles
+	near_distance = 100,
+	far_per_tile = 450, -- per tile beyond (measured 165 to 315 on long trips, at most 490)
+}
 config.max_charge_detours = 5 -- consecutive charging detours before the destination is reported unreachable
 config.critical_fuel_ratio = 0.1 -- below this fraction of a full tank a car drops everything to recharge.
 	-- Also the charge of a new car, and the level an empty car must be back to before it resumes (see travel.handle_empty).
@@ -255,18 +284,24 @@ config.pre_park_fuel_ratio = 0.9 -- an idle car below this fraction tops up befo
 config.max_charger_users = 4 -- cars that can use the same charger at once
 
 -- ============================================================
--- Stuck detection (see travel.is_leg_too_long)
+-- Stuck (see travel.lua, "Stuck")
 -- ============================================================
 
-config.stuck_min_speed = 0.1 -- lowest average speed expected over a leg; bounds how long the leg may last
-config.max_stuck_retries = 3 -- times a car retries a stuck leg before it abandons its task (a leg to a charger is retried without limit)
+config.stuck = {
+	min_speed = 0.1, -- lowest average speed expected over a leg; bounds how long the leg may last (travel.is_leg_too_long)
+	max_retries = 3, -- times a car retries a stuck leg before it abandons its task (a leg to a charger is retried without limit)
+	abandon_delay = 1800, -- (30s) a car out of retries waits this long for the player, then abandons its task:
+		-- its ghosts are released and must be selected again (see travel.stuck_tick, ghost_control.abandon)
+}
 
 -- ============================================================
 -- Garage (see park.lua)
 -- ============================================================
 
-config.garage_exit_radius = 8 -- how far around a garage to look for a free spot to release a car
-config.garage_exit_precision = 0.25 -- step of that search
+config.garage_exit = { -- free spot where a garage releases a car
+	radius = 8, -- how far around the garage to look
+	precision = 0.25, -- step of that search
+}
 config.garage_repair_rate = 0.01 -- fraction of its health a parked car recovers every long_delay (free for now)
 
 -- ============================================================
@@ -276,24 +311,24 @@ config.garage_repair_rate = 0.01 -- fraction of its health a parked car recovers
 -- breaks one stops the mod from loading, with the message, instead of making
 -- the cars misbehave in game.
 
-assert(config.maneuver_probe.start > config.car_size.length,
-	"config.maneuver_probe.start must be above config.car_size.length: the car would detect itself")
+assert(config.maneuver.probe.start > config.car_size.length,
+	"config.maneuver.probe.start must be above config.car_size.length: the car would detect itself")
 assert(config.car_size.length / 2 < config.car_size.width,
 	"the maneuver probes are half a car length apart: that must stay below config.car_size.width")
 assert(config.speed.stopped < config.speed.slow and config.speed.slow < config.speed.fast,
 	"config.speed must go up from stopped to slow to fast")
-assert(config.high_speed_density.enter < config.high_speed_density.leave,
-	"config.high_speed_density.enter must be below config.high_speed_density.leave")
+assert(config.fast_density.enter < config.fast_density.leave,
+	"config.fast_density.enter must be below config.fast_density.leave")
 assert(config.step_back_distance > config.arrival_distance,
 	"config.step_back_distance must be above config.arrival_distance: the car would arrive without moving")
 
 -- The first sample point of a heading must lie beyond the car's own box, or the
 -- car would detect itself.
 local car_reach = config.car_size.length / 2 + math.sqrt((config.car_size.length / 2) ^ 2 + (config.car_size.width / 2) ^ 2)
-assert(config.lookahead_start >= car_reach,
-	"config.lookahead_start must be above half the car length plus its half diagonal: the first sample point would overlap the car")
-assert(config.slow_lookahead_start >= car_reach,
-	"config.slow_lookahead_start must be above half the car length plus its half diagonal: the first sample point would overlap the car")
+assert(config.lookahead.start >= car_reach,
+	"config.lookahead.start must be above half the car length plus its half diagonal: the first sample point would overlap the car")
+assert(config.slow_lookahead.start >= car_reach,
+	"config.slow_lookahead.start must be above half the car length plus its half diagonal: the first sample point would overlap the car")
 
 assert(config.critical_fuel_ratio < config.critical_check_fuel_ratio and config.critical_check_fuel_ratio < config.pre_park_fuel_ratio,
 	"config.critical_check_fuel_ratio must lie between config.critical_fuel_ratio and config.pre_park_fuel_ratio")

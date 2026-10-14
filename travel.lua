@@ -216,7 +216,7 @@ end
 
 -- Called when a goal keeps failing, after too many charging detours: alerts
 -- once, then sends the car back to waiting. A goal that has been failing for
--- config.unreachable_abandon_delay is abandoned: louder alert, and the
+-- config.very_long_delay is abandoned: louder alert, and the
 -- construction batch is requeued.
 function travel.mark_unreachable(car)
 	local car_data = storage.car_data[car.unit_number]
@@ -225,7 +225,7 @@ function travel.mark_unreachable(car)
 	_utils.alert_once(car_data.alerts, "unreachable", car.force, car,
 		"An autonomous car cannot find a way to recharge enough to reach its destination.", config.names.car)
 
-	if game.tick - car_data.unreachable_since >= config.unreachable_abandon_delay then
+	if game.tick - car_data.unreachable_since >= config.very_long_delay then
 		_utils.alert(car.force, car,
 			"An autonomous car has ABANDONED its current task after failing for a long time - check the area for obstructions or missing chargers.", config.names.car)
 		travel.requeue_construction(car_data)
@@ -328,11 +328,11 @@ end
 -- ============================================================
 
 -- True when the current leg has lasted much longer than its length justifies
--- (see config.stuck_min_speed): the car is stuck. A leg that lasts too long first
+-- (see config.stuck.min_speed): the car is stuck. A leg that lasts too long first
 -- gets its path (see update_car in control.lua). The car must be on a leg.
 function travel.is_leg_too_long(car, tick)
 	local moving = storage.car_data[car.unit_number].moving
-	local max_duration = moving.departure_distance / config.stuck_min_speed + config.long_delay
+	local max_duration = moving.departure_distance / config.stuck.min_speed + config.long_delay
 	return tick - moving.departure_tick > max_duration
 end
 
@@ -353,7 +353,7 @@ function travel.start_stuck(car, tick)
 	-- it like any other leg. See "À faire" in CLAUDE.md.
 	local to_charger = is_heading_to_charger(car_data)
 	car_data.stuck_retry_count = car_data.stuck_retry_count + 1
-	local can_retry = to_charger or (car_data.stuck_retry_count <= config.max_stuck_retries
+	local can_retry = to_charger or (car_data.stuck_retry_count <= config.stuck.max_retries
 		and _utils.get_fuel(car) >= charger_control.compute_fuel_to_reach(car, moving.destination.position))
 
 	if can_retry then
@@ -385,7 +385,7 @@ function travel.stuck_tick(car, tick)
 	local stuck = car_data.stuck
 
 	travel.stop_car(car)
-	if tick - stuck.since < (stuck.final and config.stuck_abandon_delay or config.long_delay) then
+	if tick - stuck.since < (stuck.final and config.stuck.abandon_delay or config.long_delay) then
 		return false
 	end
 	if stuck.final then
