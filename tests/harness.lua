@@ -1492,6 +1492,36 @@ scenarios["phases-single"] = {
 	end,
 }
 
+-- The only car is parked in its garage when a roboport ghost (network mode, the last
+-- phase) is selected: it must come out and build it. retry_pending_clusters used to
+-- scan the phases 1 to 3 only, so the car stayed in the garage (EVENT lines).
+scenarios["network-parked"] = {
+	ticks = 12000,
+	category = "construction",
+	setup = function()
+		local s = new_surface({{0, 0}}, 10)
+		make(s, names.charger, 0, 0)
+		T.garage = make(s, names.garage, 30, 0)
+		T.chest = make(s, names.chest, 0.5, 30.5)
+		fill(T.chest, {["roboport"] = 2})
+		T.cars = {make_car(s, -20, -20, 0)}
+		T.surface = s
+		make_ghost(s, "roboport", 80, 40)
+	end,
+	events = function(t)
+		if t == 2900 then
+			out("EVENT car parked: " .. tostring(T.garage.get_inventory(defines.inventory.chest).find_item_stack(names.car) ~= nil))
+		end
+		if t == 3000 then
+			select_all(70, 30, 90, 50)
+		end
+		watch_batches()
+		if t == 6000 or t == 11500 then
+			out("EVENT roboports built at " .. t .. ": " .. #T.surface.find_entities_filtered{name = "roboport"})
+		end
+	end,
+}
+
 -- ============================================================
 -- Doors: walls with gates (category "doors")
 -- ============================================================

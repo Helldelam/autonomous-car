@@ -52,7 +52,7 @@ local ghost_control = {}
 -- ============================================================
 
 -- TODO: other robot types (logistic: items, fluids); building a whole mine from a selected
--- resource patch, without ghosts. See "À faire" in CLAUDE.md.
+-- resource patch, without ghosts. See "ï¿½ faire" in CLAUDE.md.
 -- Key of a ghost in the tables of this module: its unit_number, or for an entity
 -- that has none (trees, rocks) its surface, name and position.
 function ghost_control.get_id(ghost)
@@ -537,7 +537,7 @@ end
 -- for which there is no event. Returns the number of cars that got a batch.
 function ghost_control.retry_pending_clusters()
 	local assigned = 0
-	for phase = 1, 3 do
+	for phase = 1, PHASE.network do -- network is the last phase
 		local index = 1
 		while index <= #storage.pending_clusters do
 			local cluster = storage.pending_clusters[index]
