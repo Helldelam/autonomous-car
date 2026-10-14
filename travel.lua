@@ -54,6 +54,14 @@ function travel.release_charger_slot(car_data)
 	end
 end
 
+-- State of the path of a car (see movement.lua, "Path") at the start of a leg:
+-- requests are counted per leg. `count`, `guided_count`: rescue and guided
+-- requests of this leg; `pending`: waiting for the answer; `active`: following
+-- `waypoints`.
+function travel.create_path_state()
+	return {active = false, pending = false, count = 0, guided_count = 0}
+end
+
 -- Drops the trip in progress: the leg or the stuck wait, a maneuver, a charge,
 -- a parking, the tasks queued for them and the charger slot they hold. The car
 -- keeps its batch: it decides again from the waiting loop (see reset_to_waiting)
@@ -64,7 +72,7 @@ function travel.cancel_trip(car_data)
 	car_data.parking.garage = nil
 	car_data.building.active = false
 	car_data.maneuver.active = false
-	car_data.path = {active = false, pending = false, count = 0, guided_count = 0}
+	car_data.path = travel.create_path_state()
 	car_data.stuck.active = false
 	car_data.stuck.destination = nil
 	car_data.moving.active = false
@@ -99,7 +107,7 @@ function travel.begin_leg(car, destination, next_task)
 	-- departure is not blocked (see movement.drive_tick).
 	car_data.maneuver.active = false
 	car_data.maneuver.ended_tick = game.tick
-	car_data.path = {active = false, pending = false, count = 0, guided_count = 0} -- path requests are counted per leg, see movement.lua
+	car_data.path = travel.create_path_state()
 	car_data.slowing = false
 
 	-- stuck_retry_count is not reset here: a retry is a new leg too. It is reset on arrival.

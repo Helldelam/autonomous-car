@@ -43,7 +43,7 @@ local function describe_flags(car_data)
 	end
 	local maneuver, path = car_data.maneuver, car_data.path
 	if maneuver.active then
-		flags[#flags + 1] = "maneuver:" .. (maneuver.clearing and "clearing" or maneuver.reason or "?")
+		flags[#flags + 1] = maneuver.clearing and "maneuver:clearing" or maneuver.back_off_until and "maneuver:back off" or "maneuver"
 	end
 	if car_data.emergency_brake.active then
 		flags[#flags + 1] = "brake:" .. (car_data.emergency_brake.cause or "?")

@@ -65,24 +65,12 @@ local function create_car_data(tick)
 		empty = {active = false}, -- battery completely empty, see travel.handle_empty
 		waiting = {active = true, since = tick - config.idle_delay}, -- already elapsed: a new car looks for work at once
 
-		-- Driving flags, set by movement.lua. travel.lua only cancels a maneuver
-		-- (new leg, stuck, empty battery) and resets its counters when a leg begins.
-		-- Maneuver mode, a sub-mode of moving.
-		-- `arcs` counts the arcs of the current maneuver,
-		-- and `ended_tick` is when the last one ended (or the leg began). `heading` is the orientation
-		-- the maneuver turns toward, `last_arc` the arc it drove last (the opposite one is forbidden),
-		-- `stall_since` the tick the car stopped moving while driving, `back_off_until` the end of a back-off,
-		-- `follow` the direction (reverse or not) the car follows along a wall, `blocked` where (position and
-			-- orientation) it stalled straight, per direction (see movement.back_off).
-		maneuver = {
-			active = false, reason = nil, since = nil, arc_since = nil, arcs = 0,
-			reverse = false, turn = 0, origin = nil, ended_tick = tick,
-			heading = nil, heading_since = nil, last_arc = nil, stall_since = nil, back_off_until = nil, back_off_from = nil,
-			follow = nil, follow_orientation = nil, blocked = {},
-		},
-		-- Path from the game's pathfinder (see movement.lua, "Path"). `count`, `guided_count`: requests of this leg,
-		-- after a failure or guided; `pending`: waiting for the answer; `active`: following `waypoints`.
-		path = {active = false, pending = false, count = 0, guided_count = 0, waypoints = nil, index = 1, request = nil},
+		-- Driving state, set by movement.lua. travel.lua only cancels a maneuver
+		-- (new leg, stuck, empty battery) and resets the path when a leg begins.
+		-- Maneuver, a sub-mode of moving: movement.start_maneuver sets its other fields.
+		-- `ended_tick` is when the last one ended (or the leg began).
+		maneuver = {active = false, arcs = 0, reverse = false, turn = 0, ended_tick = tick, blocked = {}},
+		path = travel.create_path_state(),
 		emergency_brake = {active = false, since = nil},
 		mode = "normal", -- "fast", "normal" or "slow", see movement.update_mode
 		slow_until = nil, -- tick until which the mode stays slow (after an emergency stop, a maneuver, a path)
