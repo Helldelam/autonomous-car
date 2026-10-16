@@ -100,16 +100,14 @@ local PHASE = {deconstruct = 1, landfill = 2, upgrade = 3, build = 3, network = 
 -- The modes whose targets are ghosts that a car revives with an item.
 local REVIVES = {build = true, landfill = true, network = true}
 
--- TODO: mine cliffs by consuming the cliff explosives they need, as native robots do (a cliff is
--- not minable). See "À faire" in CLAUDE.md.
 -- True if cars can work on the entity: a ghost, an entity marked for
--- deconstruction that can be mined (a cliff cannot), or an entity marked for an
--- upgrade to another entity (or quality) that an item places.
+-- deconstruction that can be mined or a cliff (which needs its cliff explosive), or
+-- an entity marked for an upgrade to another entity (or quality) that an item places.
 function ghost_control.is_target(entity)
 	if entity.type == "entity-ghost" or entity.type == "tile-ghost" then
 		return true
 	elseif entity.to_be_deconstructed() then
-		return entity.minable
+		return entity.minable or entity.type == "cliff"
 	elseif entity.to_be_upgraded() then
 		local target, quality = entity.get_upgrade_target()
 		return target ~= nil and (target.name ~= entity.name or (quality ~= nil and quality.name ~= entity.quality.name))
@@ -275,6 +273,8 @@ local function compute_yield(entity)
 	if entity.type == "item-entity" then
 		add(_utils.make_item_key(entity.stack.name, entity.stack.quality), entity.stack.count)
 		return yield
+	elseif entity.type == "cliff" then
+		return yield -- destroyed, gives nothing
 	end
 	local products = entity.prototype.mineable_properties.products
 	for _, product in pairs(products or {}) do
@@ -292,12 +292,15 @@ local function compute_yield(entity)
 end
 
 -- What the car must collect to work on a ghost ([item key] = count): the item
--- that builds it, or that places the entity an upgrade turns it into. Nothing to mine.
+-- that builds it, that places the entity an upgrade turns it into, or the cliff
+-- explosive that destroys a cliff. Nothing to mine.
 function ghost_control.compute_needs(ghost)
 	local key, count
 	local mode = ghost_control.get_target_mode(ghost)
 	if REVIVES[mode] then
 		key, count = ghost_control.get_ghost_item(ghost)
+	elseif ghost.type == "cliff" then
+		key, count = ghost.prototype.cliff_explosive_prototype, 1
 	elseif mode == "upgrade" then
 		local target, quality = ghost.get_upgrade_target()
 		if target then
@@ -543,9 +546,10 @@ end
 -- over after each assignment. Clusters with no valid ghost left are
 -- dropped. Called when the player selects ghosts and every config.long_delay as
 -- a fallback: that also notices a car that a player put in a garage by hand,
--- for which there is no event. Returns the number of cars that got a batch.
+-- for which there is no event. Returns the number of cars that got a batch, by
+-- batch mode ([mode] = count).
 function ghost_control.retry_pending_clusters()
-	local assigned = 0
+	local assigned = {}
 	for phase = 1, PHASE.network do -- network is the last phase
 		local index = 1
 		while index <= #storage.pending_clusters do
@@ -559,8 +563,9 @@ function ghost_control.retry_pending_clusters()
 				local car = ghost_control.find_available_car(cluster)
 				if car then
 					table.remove(storage.pending_clusters, index)
+					local mode = get_mode(cluster.ghosts) --[[@as string]] -- the cluster has a valid ghost (count > 0)
 					ghost_control.assign_cluster(car, cluster)
-					assigned = assigned + 1
+					assigned[mode] = (assigned[mode] or 0) + 1
 					index = 1
 				else
 					index = index + 1 -- another cluster may be on a surface that has a car
@@ -937,11 +942,22 @@ function ghost_control.revive_ghost(car, ghost)
 	return false
 end
 
--- Mines an entity marked for deconstruction into the car trunk. Returns false
--- if that failed, usually because the items do not fit in the trunk. An entity
--- that is no longer marked counts as done.
+-- Mines an entity marked for deconstruction into the car trunk; a cliff is
+-- destroyed instead, using one cliff explosive of the trunk (no explosion is shown).
+-- Returns false if that failed, usually because the items do not fit in the trunk
+-- (or the explosive is missing). An entity that is no longer marked counts as done.
 function ghost_control.deconstruct_entity(car, entity)
 	if not entity.to_be_deconstructed() then
+		return true
+	end
+	if entity.type == "cliff" then
+		local trunk = car.get_inventory(defines.inventory.car_trunk)
+		local key = entity.prototype.cliff_explosive_prototype
+		if _utils.get_item_count(trunk, key) < 1 then
+			return false
+		end
+		trunk.remove(_utils.make_stack(key, 1))
+		entity.destroy{raise_destroy = true}
 		return true
 	end
 	return entity.mine{inventory = car.get_inventory(defines.inventory.car_trunk), raise_destroyed = true}
