@@ -350,17 +350,15 @@ end
 -- Stops a stuck car and alerts the player. The car waits for the player to free
 -- it, then tries its leg again (see travel.stuck_tick). It tries again only
 -- while it has retries left and fuel for the leg: otherwise it waits longer, then
--- abandons its task. A leg to a charger is always retried: the car has nothing
--- better to do.
+-- abandons its task. A leg to a charger is retried without limit only when the car
+-- has no batch (it is on its way back, with nothing better to do); a charging detour
+-- of a batch is limited like any other leg, and the batch is abandoned if it fails.
 function travel.start_stuck(car, tick)
 	local car_data = storage.car_data[car.unit_number]
 	local moving = car_data.moving
 	local stuck = car_data.stuck
 
-	-- TODO: retry a leg to a charger without limit only when the car is on its
-	-- way back (top-up before the garage, or after an abandon); otherwise limit
-	-- it like any other leg. See "À faire" in CLAUDE.md.
-	local to_charger = is_heading_to_charger(car_data)
+	local to_charger = is_heading_to_charger(car_data) and not car_data.construction
 	car_data.stuck_retry_count = car_data.stuck_retry_count + 1
 	local can_retry = to_charger or (car_data.stuck_retry_count <= config.stuck.max_retries
 		and _utils.get_fuel(car) >= charger_control.compute_fuel_to_reach(car, moving.destination.position))

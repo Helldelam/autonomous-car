@@ -141,7 +141,7 @@ Section « Clearing » de `movement.lua`, `config.clearing`. Dernier recours ava
 
 ### Stuck, batterie vide
 
-- `stuck` : arrêt, alerte, attente `long_delay`, puis nouvel essai du même trajet (`stuck.destination` ; sa tâche est restée en tête de file). Après `stuck.max_retries` essais, ou sans carburant pour le trajet, dernière attente (`stuck.final`) de `stuck.abandon_delay`, puis abandon : les ghosts du batch sont libérés (le joueur doit les resélectionner) et la voiture rentre par les tâches existantes (dépôt, charge, garage). Un trajet vers un chargeur est réessayé sans limite. `stuck_retry_count` est remis à zéro à l'arrivée, pas dans `begin_leg`.
+- `stuck` : arrêt, alerte, attente `long_delay`, puis nouvel essai du même trajet (`stuck.destination` ; sa tâche est restée en tête de file). Après `stuck.max_retries` essais, ou sans carburant pour le trajet, dernière attente (`stuck.final`) de `stuck.abandon_delay`, puis abandon : les ghosts du batch sont libérés (le joueur doit les resélectionner) et la voiture rentre par les tâches existantes (dépôt, charge, garage). Un trajet vers un chargeur est réessayé sans limite quand la voiture n'a pas de batch (retour à la base) ; un détour de recharge d'un batch est limité comme les autres trajets (le batch est abandonné s'il échoue). `stuck_retry_count` est remis à zéro à l'arrivée, pas dans `begin_leg`.
 - `empty` : batterie à 0, la voiture ne fait que surveiller `critical_fuel_ratio` (alerte `battery_empty`), puis reprend son batch par `waiting`. Rien dans le mod ne recharge une voiture vide : le joueur la ramasse et la repose, ce qui crée une nouvelle voiture.
 
 ### Trajets et tâches
@@ -244,7 +244,6 @@ Idées et tâches retenues par le propriétaire, pas encore commencées. Chacune
 - **Points de recharge automatiques.** Construire des chargeurs pour atteindre une destination éloignée, sans modifier le réseau électrique. (`charge.lua`, `charger_control.find_charger`)
 - **Kits de réparation.** Slots de kits de réparation dans le garage pour réparer les voitures, en plus de la réparation gratuite (`garage_control.repair_parked_cars`). (`park.lua`)
 - **Recharger une voiture vide.** Ajouter un ou plusieurs moyens ; aujourd'hui il faut la ramasser et la reposer. (`travel.handle_empty`)
-- **Réessai sans limite vers un chargeur.** Ne le garder que lorsque la voiture est sur le retour (recharge juste avant le garage, ou après un abandon complet) ; ailleurs, limiter les essais comme pour les autres trajets. Tant que ce réessai est sans limite, `release_charger_slot` dans `stuck_tick` ne libère jamais rien. (`travel.start_stuck`)
 - **Technologies.** Des technologies (`TechnologyPrototype`) pour débloquer et améliorer : l'ensemble minimal d'objets nécessaire au fonctionnement du mod (derrière Automobilism et d'autres), la vitesse de charge et de réparation, la réparation dans les garages, la capacité des garages, des chargeurs et des voitures, la vitesse de construction, la vitesse de déplacement (si possible sans perturber les trajets). (`data.lua`)
 - **Autres types de robots** (facultatif). Logistique : objets, liquides. (`ghost.lua`, `ghost_control.register_ghost`)
 - **Voiture armée.** Pouvoir armer la voiture (petite capacité) pour qu'elle se défende seule. (`prototypes/car.lua`)
