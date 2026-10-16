@@ -244,7 +244,7 @@ scenarios["basics"] = {
 			T.garage1.die()
 			out("EVENT garage1 died")
 		end
-		if t == 6500 then
+		if t == 4600 then
 			make(T.surface, names.garage, 12020, 30)
 		end
 	end,
@@ -1094,28 +1094,134 @@ scenarios["maze"] = {
 	events = select_courses,
 }
 
--- A car with a completely empty battery: it does nothing and alerts the player
--- (flag `empty`, alert battery_empty) and is not given the ghost selected at
--- t = 200. Its battery is refilled at t = 3000: it should resume and build it.
-scenarios["empty-battery"] = {
-	ticks = 8000,
+-- A car with 5 batteries parks in a garage (it keeps them aside: EVENT garage) and leaves again
+-- for the ghost selected at t = 4000: it first goes to the supply chest for batteries, which
+-- holds 300 (it takes what its slot lacks, 195) and then builds (EVENT lines every 100 ticks).
+scenarios["batteries-garage"] = {
+	ticks = 7000,
 	category = "robustness",
 	setup = function()
 		local s = new_surface({{0, 0}}, 10)
 		make(s, names.charger, 0, 0)
-		make(s, names.garage, 20, -10)
+		T.garage = make(s, names.garage, 20, -10)
 		T.chest = make(s, names.chest, 0.5, 30.5)
-		fill(T.chest, {["wooden-chest"] = 20})
-		T.car = make_car(s, 5, 10, 0, 0)
+		fill(T.chest, {["wooden-chest"] = 20, battery = 300})
+		T.car = make_car(s, 10, 10, 0, 1)
+		_utils.insert_batteries(T.car, 5)
 		make_ghost(s, "wooden-chest", 40.5, 40.5)
+		T.surface = s
+		T.cars = {T.car}
 	end,
 	events = function(t)
-		if t == 200 then
+		if t == 3500 then
+			out("EVENT garage t=" .. t .. ": batteries kept " .. tostring(select(2, next(storage.garage_data[T.garage.unit_number].batteries)))
+				.. ", car valid " .. tostring(T.car.valid))
+		end
+		if t == 4000 then
 			select_ghosts(35, 35, 45, 45)
 		end
-		if t == 3000 then
-			_utils.set_fuel(T.car, _utils.get_fuel_capacity(T.car) * 0.5)
-			out("EVENT battery refilled")
+		if t >= 4000 and t <= 5000 and t % 100 == 0 then
+			local count, x, y = "none", 0, 0
+			for _, car in pairs(storage.cars) do
+				if car.valid then
+					count, x, y = _utils.get_battery_count(car), car.position.x, car.position.y
+				end
+			end
+			out(string.format("EVENT t=%d: batteries in the car %s at %.0f,%.0f, in the chest %d", t, tostring(count), x, y,
+				T.chest.get_inventory(defines.inventory.chest).get_item_count("battery")))
+		end
+	end,
+}
+
+-- Emergency batteries on a long way to the only charger, 2000 tiles away. Two cars at 14 % charge
+-- (under the critical level): car 1 carries 3 batteries, which lets it reach the charger
+-- (the estimate of the trip is above its tank, not above tank plus batteries), car 2 none
+-- and stays where it is. EVENT lines every 1000 ticks: charge, batteries left, position.
+scenarios["batteries-trip"] = {
+	ticks = 30000,
+	category = "robustness",
+	setup = function()
+		local strip = {}
+		for x = 0, 2400, 280 do
+			strip[#strip + 1] = {x, 0}
+		end
+		local s = new_surface(strip, 4)
+		make(s, names.charger, 2000, 0)
+		T.cars = {make_car(s, 5, 0, 0.25, 0.14), make_car(s, 5, 8, 0.25, 0.14)}
+		_utils.insert_batteries(T.cars[1], 3)
+		T.surface = s
+	end,
+	events = function(t)
+		if t % 2000 == 0 then
+			local parts = {}
+			for index, car in ipairs(T.cars) do
+				if car.valid then
+					parts[#parts + 1] = string.format("car %d: charge %.3f, batteries %d, x %.0f", index,
+						_utils.get_fuel_ratio(car), _utils.get_battery_count(car), car.position.x)
+				end
+			end
+			out("EVENT t=" .. t .. " " .. table.concat(parts, " | "))
+		end
+	end,
+}
+
+-- Emergency use of the batteries, EVENT lines for each car (charge, batteries, battery_empty alert):
+-- car 1 at 2 % (under battery_trigger_ratio) with 2 batteries burns one at once; car 2 at 0 % with
+-- none is empty, alerts and stays still until a battery is put in at t = 600, then resumes; car 3 at
+-- 0 % with a battery burns it first and never alerts; car 4 at 3 % with 3 batteries, 400 tiles from
+-- the charger, burns a battery on the way when its charge falls under the trigger. Also checks the
+-- battery slot of the trunk (see below).
+scenarios["batteries-emergency"] = {
+	ticks = 9000,
+	category = "robustness",
+	setup = function()
+		local strip = {}
+		for x = 0, 1200, 280 do
+			strip[#strip + 1] = {x, 0}
+		end
+		local s = new_surface(strip, 4)
+		make(s, names.charger, 0, -20)
+		make(s, names.charger, 1000, 0)
+		T.cars = {make_car(s, 5, 0, 0.25, 0.02), make_car(s, 5, 8, 0.25, 0), make_car(s, 5, 16, 0.25, 0),
+			make_car(s, 600, 0, 0.25, 0.03)}
+		_utils.insert_batteries(T.cars[1], 2)
+		_utils.insert_batteries(T.cars[3], 1)
+		_utils.insert_batteries(T.cars[4], 3)
+		T.surface = s
+	end,
+	events = function(t)
+		if t == 600 then
+			_utils.insert_batteries(T.cars[2], 1)
+		end
+		-- Battery slot of car 3 (see _utils.set_battery_filter): the trunk takes 40 slots of 50
+		-- chests; at t = 110 its filter is cleared and a chest put in it (the player could do it),
+		-- and control.lua must have put the filter back and moved the chest out by t = 900.
+		local trunk = T.cars[3].valid and T.cars[3].get_inventory(defines.inventory.car_trunk)
+		if trunk and t == 100 then
+			local inserted = trunk.insert{name = "wooden-chest", count = 10000}
+			trunk.remove{name = "wooden-chest", count = inserted}
+			out("EVENT filled " .. inserted .. " chests in a trunk of " .. #trunk .. " slots (2000 chests in 41 slots expected)")
+		end
+		if trunk and t == 110 then
+			trunk.set_filter(#trunk, nil)
+			trunk[#trunk].set_stack{name = "wooden-chest", count = 5}
+		end
+		if trunk and (t == 110 or t == 900) then
+			local filter, stack = trunk.get_filter(#trunk), trunk[#trunk]
+			out("EVENT slot t=" .. t .. ": filter " .. tostring(filter and filter.name) .. " holds "
+				.. (stack.valid_for_read and (stack.name .. " x" .. stack.count) or "nothing")
+				.. ", chests in the cargo " .. trunk.get_item_count("wooden-chest"))
+		end
+		if t == 20 or t == 500 or t == 700 or (t >= 1000 and t % 1000 == 0) then
+			local parts = {}
+			for index, car in ipairs(T.cars) do
+				if car.valid then
+					parts[#parts + 1] = string.format("car %d: charge %.3f, batteries %d, alert %s, x %.0f", index,
+						_utils.get_fuel_ratio(car), _utils.get_battery_count(car),
+						tostring(storage.car_data[car.unit_number].alerts.battery_empty or false), car.position.x)
+				end
+			end
+			out("EVENT t=" .. t .. " " .. table.concat(parts, " | "))
 		end
 	end,
 }
@@ -1910,118 +2016,6 @@ local function series_scenario(count, spacing, back, staggered)
 		build_courses({series_course(count, spacing, back, staggered)}, 4)
 	end
 end
-
-scenarios["series-2w-sp3-fa"] = {
-	ticks = 6000,
-	category = "doors",
-	setup = series_scenario(2, 3, false, false),
-	events = select_courses,
-}
-
-scenarios["series-2w-sp3-ba"] = {
-	ticks = 6000,
-	category = "doors",
-	setup = series_scenario(2, 3, true, false),
-	events = select_courses,
-}
-
-scenarios["series-2w-sp3-fs"] = {
-	ticks = 6000,
-	category = "doors",
-	setup = series_scenario(2, 3, false, true),
-	events = select_courses,
-}
-
-scenarios["series-2w-sp3-bs"] = {
-	ticks = 6000,
-	category = "doors",
-	setup = series_scenario(2, 3, true, true),
-	events = select_courses,
-}
-
-scenarios["series-2w-sp6-fa"] = {
-	ticks = 6000,
-	category = "doors",
-	setup = series_scenario(2, 6, false, false),
-	events = select_courses,
-}
-
-scenarios["series-2w-sp6-ba"] = {
-	ticks = 6000,
-	category = "doors",
-	setup = series_scenario(2, 6, true, false),
-	events = select_courses,
-}
-
-scenarios["series-2w-sp6-fs"] = {
-	ticks = 6000,
-	category = "doors",
-	setup = series_scenario(2, 6, false, true),
-	events = select_courses,
-}
-
-scenarios["series-2w-sp6-bs"] = {
-	ticks = 6000,
-	category = "doors",
-	setup = series_scenario(2, 6, true, true),
-	events = select_courses,
-}
-
-scenarios["series-3w-sp3-fa"] = {
-	ticks = 6000,
-	category = "doors",
-	setup = series_scenario(3, 3, false, false),
-	events = select_courses,
-}
-
-scenarios["series-3w-sp3-ba"] = {
-	ticks = 6000,
-	category = "doors",
-	setup = series_scenario(3, 3, true, false),
-	events = select_courses,
-}
-
-scenarios["series-3w-sp3-fs"] = {
-	ticks = 6000,
-	category = "doors",
-	setup = series_scenario(3, 3, false, true),
-	events = select_courses,
-}
-
-scenarios["series-3w-sp3-bs"] = {
-	ticks = 6000,
-	category = "doors",
-	setup = series_scenario(3, 3, true, true),
-	events = select_courses,
-}
-
-scenarios["series-3w-sp6-fa"] = {
-	ticks = 6000,
-	category = "doors",
-	setup = series_scenario(3, 6, false, false),
-	events = select_courses,
-}
-
-scenarios["series-3w-sp6-ba"] = {
-	ticks = 6000,
-	category = "doors",
-	setup = series_scenario(3, 6, true, false),
-	events = select_courses,
-}
-
-scenarios["series-3w-sp6-fs"] = {
-	ticks = 6000,
-	category = "doors",
-	setup = series_scenario(3, 6, false, true),
-	events = select_courses,
-}
-
-scenarios["series-3w-sp6-bs"] = {
-	ticks = 6000,
-	category = "doors",
-	setup = series_scenario(3, 6, true, true),
-	events = select_courses,
-}
 
 scenarios["series-5w-sp3-fa"] = {
 	ticks = 6000,

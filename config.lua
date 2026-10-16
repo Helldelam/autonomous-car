@@ -31,7 +31,9 @@ config.names = {
 }
 
 config.car_size = {width = 0.7, length = 1} -- collision box of the car; the maneuver probes are derived from it
-config.car_inventory_size = 40 -- trunk slots of the car; also the most a cluster can require
+config.car_cargo_size = 40 -- trunk slots for the cargo of a batch: the most a cluster can require
+config.car_inventory_size = config.car_cargo_size + 1 -- trunk slots of the car: the last one only takes batteries (see _utils.set_battery_filter)
+config.battery_item = "battery" -- item a car burns when its tank is almost empty; the last trunk slot is reserved for it
 config.garage_inventory_size = 50 -- slots of a garage, one parked car each
 config.charger_buffer_capacity = "60MJ"
 config.charger_input_flow_limit = "1600kW"
@@ -286,8 +288,10 @@ config.fuel_estimate = {
 }
 config.max_charge_detours = 5 -- consecutive charging detours before the destination is reported unreachable
 config.critical_fuel_ratio = 0.1 -- below this fraction of a full tank a car drops everything to recharge.
-	-- Also the charge of a new car, and the level an empty car must be back to before it resumes (see travel.handle_empty).
+	-- Also the charge of a new car.
 config.critical_check_fuel_ratio = 0.8 -- above this fraction of a full tank a car does not look for the critical level at all: it is certainly near a charger
+config.battery_fuel_ratio = config.critical_fuel_ratio / 2 -- fraction of a full tank that one battery gives
+config.battery_trigger_ratio = config.critical_fuel_ratio / 4 -- below this fraction of a full tank a car burns a battery; an empty car resumes above it
 config.pre_park_fuel_ratio = 0.9 -- an idle car below this fraction tops up before it parks
 config.max_charger_users = 4 -- cars that can use the same charger at once
 

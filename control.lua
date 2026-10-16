@@ -60,6 +60,7 @@ local function create_car_data(tick)
 		},
 		charging = {active = false, charger = nil},
 		parking = {active = false, garage = nil},
+		restock = false, -- true for a car that just left a garage: it fetches batteries before its batch (ghost_control.proceed)
 		building = {active = false, next_attempt_tick = 0}, -- only active once the car has stopped at its site
 		-- Waiting for the player after a failed leg, see travel.start_stuck. `final`: the car will not retry but abandon its task.
 		stuck = {active = false, since = 0, final = false, destination = nil},
@@ -104,6 +105,7 @@ local function on_built(event)
 		entity.riding_state = {acceleration = defines.riding.acceleration.nothing, direction = defines.riding.direction.straight}
 		-- A new car starts with config.critical_fuel_ratio of a full tank.
 		_utils.set_fuel_item(entity)
+		_utils.set_battery_filter(entity)
 		if _utils.get_fuel(entity) == 0 then
 			_utils.set_fuel(entity, _utils.get_fuel_capacity(entity) * config.critical_fuel_ratio)
 		end
@@ -114,7 +116,7 @@ local function on_built(event)
 		storage.charger_data[id] = {users = 0} -- cars charging here or on their way
 	elseif entity.name == names.garage then
 		storage.garages[id] = entity
-		storage.garage_data[id] = {fuel = {}, alerts = {}} -- fuel[slot] = fuel level of the car parked in that slot
+		storage.garage_data[id] = {fuel = {}, batteries = {}, alerts = {}} -- fuel[slot], batteries[slot] = fuel level and batteries of the car parked in that slot
 	elseif entity.name == names.chest then
 		storage.supply_chests[id] = entity
 	end
@@ -213,7 +215,7 @@ local function end_wait(car, car_data, tick)
 		-- longer exists. Drop them and wait again.
 		car_data.tasks = _utils.deque.new()
 		car_data.waiting.since = tick
-	elseif not car.get_inventory(defines.inventory.car_trunk).is_empty() then
+	elseif not _utils.is_cargo_empty(car) then
 		-- Leftovers must be unloaded before the car takes a new batch or parks.
 		if not ghost_control.deposit_leftovers(car) then
 			car_data.waiting.since = tick
@@ -310,6 +312,11 @@ local function on_tick(event)
 	if event.tick % config.long_delay == 0 then
 		ghost_control.retry_pending_clusters()
 		garage_control.repair_parked_cars()
+		for _, car in pairs(storage.cars) do
+			if car.valid then
+				_utils.set_battery_filter(car)
+			end
+		end
 	end
 end
 
@@ -390,6 +397,8 @@ local function on_next_task(event)
 		ghost_control.collect_items(car, destination)
 	elseif task.type == "deposit" then
 		ghost_control.deposit_items(car, destination)
+	elseif task.type == "restock" then
+		ghost_control.restock_batteries(car, destination)
 	end
 end
 

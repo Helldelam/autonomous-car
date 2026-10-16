@@ -185,6 +185,80 @@ function _utils.get_contents(inventory)
 end
 
 -- ============================================================
+-- Batteries
+-- ============================================================
+-- The last trunk slot only takes batteries (set_battery_filter): the player
+-- puts them there to recharge an empty car (travel.handle_empty). They are not
+-- cargo: the helpers below tell the cargo of a car from them.
+
+local BATTERY = {name = config.battery_item, quality = "normal"}
+
+-- Locks the last trunk slot of a car to batteries. Safe to call again: the
+-- player may have changed the filter, and no event tells, so control.lua calls
+-- it every config.long_delay. What a changed filter let into the slot goes to the
+-- cargo slots, or to the ground.
+function _utils.set_battery_filter(car)
+	local trunk = car.get_inventory(defines.inventory.car_trunk)
+	local slot = #trunk
+	local filter = trunk.get_filter(slot)
+	if filter and filter.name == config.battery_item then
+		return
+	end
+	local stack = trunk[slot]
+	local other
+	if stack.valid_for_read and stack.name ~= config.battery_item then
+		other = {name = stack.name, quality = stack.quality, count = stack.count}
+		stack.clear()
+	end
+	trunk.set_filter(slot, config.battery_item)
+	if other then
+		local inserted = trunk.insert(other)
+		if inserted < other.count then
+			car.surface.spill_item_stack{position = car.position, stack = {name = other.name, quality = other.quality, count = other.count - inserted}}
+		end
+	end
+end
+
+-- Batteries a car can burn at most, as fuel: the battery slot adds to the charge.
+function _utils.get_reachable_fuel(car)
+	return _utils.get_fuel(car) + _utils.get_battery_count(car) * config.battery_fuel_ratio * _utils.get_fuel_capacity(car)
+end
+
+-- Batteries in the trunk of a car.
+function _utils.get_battery_count(car)
+	return car.get_inventory(defines.inventory.car_trunk).get_item_count(BATTERY)
+end
+
+-- Removes up to `count` batteries from the trunk; returns how many.
+function _utils.remove_batteries(car, count)
+	if count <= 0 then
+		return 0
+	end
+	return car.get_inventory(defines.inventory.car_trunk).remove{name = BATTERY.name, quality = BATTERY.quality, count = count}
+end
+
+-- Puts `count` batteries in the trunk (the battery slot takes them).
+function _utils.insert_batteries(car, count)
+	if count <= 0 then
+		return 0
+	end
+	return car.get_inventory(defines.inventory.car_trunk).insert{name = BATTERY.name, quality = BATTERY.quality, count = count}
+end
+
+-- True if the trunk holds nothing but batteries.
+function _utils.is_cargo_empty(car)
+	local trunk = car.get_inventory(defines.inventory.car_trunk)
+	return trunk.get_item_count() - trunk.get_item_count(BATTERY) <= 0
+end
+
+-- The cargo of a trunk as `get_contents` ([key] = count), without the batteries.
+function _utils.get_cargo_contents(trunk)
+	local contents = _utils.get_contents(trunk)
+	contents[BATTERY.name] = nil
+	return contents
+end
+
+-- ============================================================
 -- Alerts
 -- ============================================================
 -- `item` is the name of the item whose icon marks the alert on the map.
