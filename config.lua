@@ -144,11 +144,15 @@ config.path = {
 		sectors = 3, -- directions tried on each side of the bearing of the destination, `step` apart, for that point
 		step = 1 / 12, -- turns between two of these directions
 		angle_cost = 0.1, -- density equivalent of one such step away from the destination
+		radius = 5, -- how close to the goal the pathfinder must get (LuaSurface.request_path radius): a little under arrival_distance,
+		-- so that the path ends where the car counts as arrived. At 3 a goal hemmed in by buildings (a garage in a crowded room)
+		-- had no free spot within reach: no path, and the car circled the walls until it was stuck
 	},
 }
 config.path_trigger = { -- guided path
 	half_angle = 0.2, -- half the cone ahead of the car: 72 degrees on each side
-	min_distance = 10, -- no guided request when the destination is this close
+	min_distance = config.arrival_distance, -- no guided request once the car has arrived; a larger value leaves a ring
+		-- where the car is neither arrived nor allowed to ask (a destination behind a wall corner: it turned in circles)
 	max_requests = 10, -- guided requests per leg
 }
 config.gate_waypoints = { -- how a path is reshaped where it crosses a gate (see movement.add_gate_waypoints)
@@ -323,6 +327,8 @@ assert(config.speed.stopped < config.speed.slow and config.speed.slow < config.s
 	"config.speed must go up from stopped to slow to fast")
 assert(config.fast_density.enter < config.fast_density.leave,
 	"config.fast_density.enter must be below config.fast_density.leave")
+assert(config.path.goal.radius < config.arrival_distance,
+	"config.path.goal.radius must be below config.arrival_distance: a path would end where the car has not arrived")
 assert(config.step_back_distance > config.arrival_distance,
 	"config.step_back_distance must be above config.arrival_distance: the car would arrive without moving")
 
