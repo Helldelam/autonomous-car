@@ -54,9 +54,9 @@ tests\show.ps1 construction -Car 132           # changements d'état d'une voitu
 - `-Reference` vérifie qu'un refactoring ne change aucun comportement : Factorio est déterministe, deux versions équivalentes donnent des traces identiques (à scénarios groupés identiques : les numéros d'entités en dépendent). La version de référence tourne avec son propre `tests/harness.lua` quand elle en a un.
 - Variantes de départ : `-Set "test_jitter=<n>"` (départ ± 0,3 tile, orientation ± 0,01 tour), `-Set "test_door_shift=1"` (portes décalées d'une tile au plus).
 
-Catégories (70 scénarios) :
-- `movement` (13) : déplacements autour d'obstacles (salles, murs, forêts, labyrinthes) ; `forests` regroupe 24 parcours sur une grande carte.
-- `doors` (42), ouvertures de 3 tiles (`ONE_TILE_DOORS` dans le harnais ramène celles d'une tile) : `gates` (12 traversées d'un mur de 600 tiles par une ouverture, seul moyen de passer), `gate` (une voiture), `doors-clutter` (7 parcours : bâtiments, poteaux, forêt clairsemée ou bosquet près de la porte), `doors-traffic` (3 parcours où 4 ou 8 voitures passent la même porte, dans un sens ou les deux), `doors-odd` (11 cas rares : porte masquée par un coffre, sas, couloir, porte ennemie, voiture dos à la porte, longue marche le long du mur), `doors-base-1` à `6` (base murée de 80 × 48 tiles, deux pièces et trois portes, garage, chargeur et coffre en divers endroits ; un scénario chacun car une voiture va n'importe où sur sa surface), `plain-base`, et 30 `series-<N>w-sp<S>-<f|b><a|s>` (N murs espacés de S tiles, portes alignées ou décalées, voiture dans un sens ou l'autre ; voir « Limites assumées »).
+Catégories (72 scénarios) :
+- `movement` (14) : déplacements autour d'obstacles (salles, murs, forêts, labyrinthes ; `wall-corner` : le bout d'un mur, cible à 5-10 tiles derrière) ; `forests` regroupe 24 parcours sur une grande carte.
+- `doors` (43), ouvertures de 3 tiles (`ONE_TILE_DOORS` dans le harnais ramène celles d'une tile) : `gates` (12 traversées d'un mur de 600 tiles par une ouverture, seul moyen de passer), `gate` (une voiture), `doors-clutter` (7 parcours : bâtiments, poteaux, forêt clairsemée ou bosquet près de la porte), `doors-traffic` (3 parcours où 4 ou 8 voitures passent la même porte, dans un sens ou les deux), `doors-odd` (11 cas rares : porte masquée par un coffre, sas, couloir, porte ennemie, voiture dos à la porte, longue marche le long du mur), `doors-base-1` à `6` (base murée de 80 × 48 tiles, deux pièces et trois portes, garage, chargeur et coffre en divers endroits ; un scénario chacun car une voiture va n'importe où sur sa surface), `plain-base`, `garage-room` (garage dans une petite pièce encombrée, trois voitures à garer), et 30 `series-<N>w-sp<S>-<f|b><a|s>` (N murs espacés de S tiles, portes alignées ou décalées, voiture dans un sens ou l'autre ; voir « Limites assumées »).
 - `robustness` (4) : voitures bloquées, pannes, batterie vide.
 - `construction` (4) : `construction`, `work` (grande carte : démontage, mise à niveau, ghosts, tuiles et roboports, trois voitures), `phases-single` (ordre des phases avec une seule voiture), `network-parked` (roboports quand toutes les voitures sont au garage).
 - `energy` (7) : chargeurs et garages ; `critical-no-batch` (une voiture sous son seuil critique ne reçoit pas de batch, une autre fait un détour de recharge entre le coffre et le chantier) ; `range-open`, `range-trees`, `range-built` (consommation sur des trajets de 25 à 800 tiles, voir « Carburant ») ; `range-long` (quatre trajets de 1000 à 2500 tiles, ou 5000, 8000 et 11 000 avec `-Set "test_long=1"`, sur la tuile choisie par `-Set "test_tiles=0..5"` ; lancer avec `-Set "fuel_estimate.near_per_tile=100"` pour mesurer sans détour de recharge).
@@ -77,6 +77,7 @@ Catégories (70 scénarios) :
 | `park.lua` | `garage_control` | garages, réparation lente des voitures garées |
 | `gui.lua` | `gui` | fenêtre des objets manquants (raccourci `missing_items_shortcut`) |
 | `debug_view.lua` | `debug_view` | affichage de débogage de la voiture sous le curseur ou ouverte (destination, chemin, état, coûts de braquage), redessiné toutes les `slow_check_interval` ticks (raccourci `debug_view_shortcut`, activé par défaut : `config.debug_view_default`) ; ne fait que lire `car_data` (dont `car_data.steering`, écrit par `drive_tick` pour lui) |
+| `game_trace.lua` | `game_trace` | trace d'une partie réelle pour analyse : commande `/car-trace [numéro d'unité]` (relancée, elle arrête), écrit `script-output/autonomous-car-trace.txt` (échantillon de chaque voiture en mouvement toutes les `short_delay / 2` ticks, ligne `EVENT` à chaque changement d'état) ; ne fait que lire `car_data` (dont `car_data.trace_info`, écrit par `update_mode` pour lui seulement pendant la trace) |
 | `_utils.lua` | `_utils` | carburant, entité la plus proche, passage en attente (`start_waiting`), deque, alertes, clés d'objets, libération d'entités, événement de fin d'étape |
 | `config.lua` | | noms et tailles communs aux prototypes et aux scripts, puis réglages |
 | `colors.lua` | | couleur que le script donne à chaque voiture posée (un prototype de voiture n'a pas de couleur) |
@@ -226,7 +227,7 @@ La friction agit sur le symptôme, pas sur la cause : régler d'abord les seuils
 Une ligne par étude : le problème, la solution gardée et son effet, ce qui a été écarté (à ne pas refaire). Mesures : `doors` compte les coffres construits (112), `movement` les voitures arrivées (123), « contacts » les événements `HEALTH` (aucun point de vie perdu). Le détail des chiffres est dans l'historique git de ce fichier (`git show 3889bf9:CLAUDE.md`).
 
 - **Portes d'une tile** (2026-10-10, commit `ccc6568`) : la voiture ne s'y engage qu'une fois sur deux, jamais dans une base (ses trois caps ne l'alignent sur l'ouverture que par hasard) → ouverture minimale de 3 tiles, décision du propriétaire (un seul échec dans `gates`, `doors-clutter` et `doors-odd`). Gardés dans `ccc6568` seulement : pas de mode rapide à moins de 15 tiles d'un mur (sans effet mesurable) ; plafond de friction (`friction_modifier` × friction de la tuile au-dessus de 1000 inverse le freinage et la vitesse explose ; les réglages actuels plafonnent à 400 : à reprendre si une friction augmente). Écartés : freinage près des portes, `lookahead.side_offset` 0,5 et 0,55, durées plus longues.
-- **Cercles et grands détours près des murs** (2026-10-11) : la voiture se détectait elle-même (voir « Invariants ») → `slow_lookahead.start` 1,6, `path.pass_radius` 8 et pas de freinage d'urgence en suivi de chemin : 658 voitures sur 666 contre 634 pour `main`, trajets jusqu'à deux fois plus courts (sauf `plain-base` et `long-wall` : problème 6). Écartés : limites de vitesse en virage ou avant les coins (`turn_limit`, `corner_limit`, `gate_speed`), `friction.slow` 2, 3 ou 6, décalage des coins (`path_offset`), vitesse minimale du frein d'urgence.
+- **Cercles et grands détours près des murs** (2026-10-11) : la voiture se détectait elle-même (voir « Invariants ») → `slow_lookahead.start` 1,6, `path.pass_radius` 8 et pas de freinage d'urgence en suivi de chemin : 658 voitures sur 666 contre 634 pour `main`, trajets jusqu'à deux fois plus courts (sauf `plain-base` et `long-wall` : mode lent, accepté). Écartés : limites de vitesse en virage ou avant les coins (`turn_limit`, `corner_limit`, `gate_speed`), `friction.slow` 2, 3 ou 6, décalage des coins (`path_offset`), vitesse minimale du frein d'urgence.
 - **Dérive vers une poche** le long d'un rivage ou de tourelles (2026-10-12) : les points d'échantillon côté obstacle écartaient la voiture du chemin vers une cavité sans issue → coût d'écart au chemin (`steering_cost.path_deviation` 1, `path.corridor` 2,5) : `wall-turrets` 6/6, trois séries de portes de plus réussies. Un couloir de 0,7 à 1,5 fait perdre des voitures aux portes, un coût de 3 dans `maze` et `huge-wall`. Écartée : friction réduite en poche. Reste une limite assumée (demi-tour contre un mur complexe).
 - **Fuite dans la plaine** (2026-10-13) : la densité lue jusqu'à 33 tiles rendait la plaine vide moins chère que la base où était la cible → disques limités à la cible, `path.density_factor` 0,3 : trajets 6 à 17 % plus courts, 18 à 48 % de contacts en moins. Facteur 0 : une voiture bloquée contre un mur. Écartés : sauter les waypoints derrière la voiture, reculer en ligne droite, rayon d'atteinte du waypoint élargi.
 - **Passages d'une tile dans le chemin** (2026-10-13) : le chemin passait où la voiture ne passe pas → `path.margin` 0,4 : autant d'arrivées qu'à 0,3 et 0,5, 37 % de contacts en moins qu'à 0,3. Base de référence alors : `doors` 102 coffres sur 112, `movement` 123/123.
@@ -262,7 +263,15 @@ Idées et tâches retenues par le propriétaire, pas encore commencées. Chacune
 
 ### Ouverts
 
-6. **Mode lent plus lent que `main`** (mesuré en test, 2026-10-12). Près d'un bâti la voiture roule en mode lent même en terrain dégagé : `plain-base` et `long-wall` prennent 1,2 à 1,4 fois le temps de `main`. Acceptable tant que le résultat reste robuste. Le mode normal à côté d'un bâti (voir « Conduite ») n'y gagne que 3 % : la cible y est derrière un mur. Le surcoût viendrait surtout du chemin guidé et de son suivi (cause non vérifiée).
+Aucun pour l'instant.
+
+### Corrigés, à valider
+
+Aucun pour l'instant.
+
+#### Validation reportée
+
+- **Qualité des objets** (ancien problème 9). Ghosts, mises à niveau, collecte, dépôt, fenêtre des objets manquants et garage tiennent compte de la qualité (rien ne devient gratuitement normal ou rare). Écrit d'après la documentation : Factorio refuse tout prototype de qualité sans l'extension Qualité, que le propriétaire n'a pas à court terme ; la qualité normale ne régresse pas.
 
 ### Limites assumées
 
@@ -276,34 +285,3 @@ Choix et limites que le propriétaire a acceptés, à ne pas « corriger » sans
 - **Portes ouvertes dans toutes les directions** : les portes de la force à portée d'une voiture en mouvement s'ouvrent, quelle que soit sa direction (`open_gates`).
 - **Plus de chargeur joignable** : la voiture attend longtemps (`very_long_delay`) avant d'abandonner, pour laisser le monde évoluer.
 - **Zone aveugle de la manœuvre** : le coin d'une grande entité peut passer inaperçu ; rattrapé au tick suivant.
-
-### Corrigés, à valider
-
-- **Roboports jamais construits quand toutes les voitures sont au garage** (ancien problème 12, 2026-10-14). `retry_pending_clusters` parcourt maintenant toutes les phases, `network` comprise (elle s'arrêtait à 3). Scénario `network-parked` : voiture garée, roboport sélectionné au tick 3000, batch attribué aussitôt, roboport construit. À valider en jeu : sélectionner seulement des fantômes de roboports, voitures au garage : une voiture sort et les construit.
-
-- **Oscillations et départ rapide à l'opposé de la destination au départ d'un chemin** (vu en jeu, 2026-10-14). Demi-tour en marche arrière sur tout waypoint (voir « Chemin »). À valider en jeu : la voiture se retourne au départ d'un chemin au lieu d'osciller ou de fuir ; pas de recul inutile en forêt ni dans une impasse étroite.
-
-- **Voiture qui s'éloigne de sa destination dans une plaine, ou rate l'entrée d'une base** (vu en jeu, 2026-10-13). Densité lue jusqu'à la cible seulement, points de passage d'une porte sur son axe réel (confirmé en jeu) et écartés du mur, but intermédiaire plus proche de la ligne droite, chemin effacé à l'arrivée. À valider en jeu : plus de fuite dans la plaine ni de long détour, moins de chocs autour d'une porte, virage plus doux à l'entrée d'une porte ; affichage de débogage (raccourci, tracé du chemin, coûts).
-
-- **Voiture qui dérive du chemin et finit dans une poche** (vu en scénario `work`). Coût d'écart au chemin suivi, mode normal à côté d'un bâti quand la voie est libre. À valider en jeu : une voiture qui longe un étang ou un mur tourne moins en rond et ne finit plus dans une pointe de terre.
-
-- **Voiture bloquée dans une forêt dense.** Dégagement en dernier recours (voir « Dégagement »). À valider en jeu : une voiture qui démarre au milieu d'une forêt s'en sort en laissant une trouée et ne détruit rien d'autre ; même chose parmi des rochers (non couvert par un scénario).
-
-- **Carburant non calibré** (ancien problème 3). L'estimation suit la mesure (voir « Carburant »). À valider en jeu : une voiture qui part loin se recharge quand il faut, sans tomber en panne ni faire de détours inutiles.
-
-- **Grands détours, cercles et blocages près des murs et des portes** (ancien problème 5, vu en jeu le 2026-10-11). La voiture se détectait elle-même (voir « Invariants ») ; trois modes de vitesse, chemin guidé, refaçonnage aux portes, pas de freinage d'urgence en suivi de chemin. À valider en jeu :
-  - en rase campagne la voiture roule vite, ralentit près d'un mur, d'une porte ou d'un bâtiment (moins de 6 tiles) et repart vite ensuite ;
-  - plus de cercles ni de grands détours près d'un mur, d'un bâtiment ou d'une porte : la voiture va droit au passage ; ouvertures de 3 tiles franchies, y compris au milieu d'une base ;
-  - une voiture dans une impasse en U, ou dos à sa destination, se dégage seule (manœuvre ou chemin) ;
-  - sur un chemin (près de murs, d'arbres, d'une forêt) la voiture ne s'arrête plus par à-coups ; elle s'arrête quand même à l'arrivée et ne finit pas contre un obstacle (un choc doit rester sans dégât notable) ;
-  - la voiture n'est pas sensiblement plus lente qu'avant en terrain dégagé à proximité d'un bâtiment (voir problème 6) ;
-  - plusieurs voitures qui passent la même porte ne se bloquent pas ;
-  - le reste (construction, démontage, mise à niveau, remblai, recharge, garage, fenêtre des objets manquants) se comporte comme avant.
-
-- **Coût de la mesure du seuil critique** (ancien problème 11). Rien de visible : vérifier en jeu qu'une voiture qui passe sous le seuil part toujours se recharger à temps.
-
-- **Sélecteur renommé et descriptions complétées** (2026-10-14). « Sélecteur des voitures autonomes » (objet, raccourci, touche) ; les descriptions mentionnent remblai, démontage, mise à niveau, dégagement des arbres et rochers, réparation au garage, ce que reçoit le coffre. À valider en jeu : noms et infobulles en anglais et en français.
-
-#### Validation reportée
-
-- **Qualité des objets** (ancien problème 9). Ghosts, mises à niveau, collecte, dépôt, fenêtre des objets manquants et garage tiennent compte de la qualité (rien ne devient gratuitement normal ou rare). Écrit d'après la documentation : Factorio refuse tout prototype de qualité sans l'extension Qualité, que le propriétaire n'a pas à court terme ; la qualité normale ne régresse pas.

@@ -357,6 +357,7 @@ function movement.update_mode(car, tick)
 			and is_way_open(car, orientation, target, target_distance)
 	end
 	local in_zone = (car_data.near_built and not car_data.line_clear) or density > config.dense_area_threshold
+	car_data.trace_info = storage.game_trace and {density = density, in_zone = in_zone} or nil -- read by game_trace.lua
 
 	-- Two thresholds for fast, so the mode does not flicker when the density hovers around one value.
 	local was_fast = car_data.mode == "fast"
@@ -404,7 +405,11 @@ function movement.update_mode(car, tick)
 	-- alone, it asks for a path.
 	local path = car_data.path
 	if in_zone and not path.active and distance > config.path_trigger.min_distance and tick >= path.next_tick then
-		if not is_way_open(car, orientation, destination_position, distance) then
+		local way_open = is_way_open(car, orientation, destination_position, distance)
+		if car_data.trace_info then
+			car_data.trace_info.way_open = way_open
+		end
+		if not way_open then
 			if movement.request_guided_path(car, tick) then
 				set_friction(car, config.friction.maneuver)
 				return
@@ -1017,7 +1022,7 @@ local function send_path_request(car, car_data)
 		start = car.position,
 		goal = path.goal,
 		force = car.force,
-		radius = config.arrival_distance / 2,
+		radius = config.path.goal.radius,
 		can_open_gates = true,
 		entity_to_ignore = car,
 		pathfind_flags = {cache = false, low_priority = true, prefer_straight_paths = true},

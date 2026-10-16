@@ -10,6 +10,7 @@ local garage_control = require("park")
 local ghost_control = require("ghost")
 local gui = require("gui")
 local debug_view = require("debug_view")
+local game_trace = require("game_trace")
 
 local names = config.names
 
@@ -280,6 +281,9 @@ local function on_tick(event)
 	for id, car in pairs(storage.cars) do
 		if car.valid then
 			update_car(car, storage.car_data[id], event.tick)
+			if storage.game_trace and car.valid then -- the car is gone when it has just parked in a garage
+				game_trace.record(car, storage.car_data[id], event.tick)
+			end
 		else
 			_utils.release_entity("car", id)
 		end
@@ -400,4 +404,8 @@ script.on_event(defines.events.on_player_created, function(event)
 end)
 script.on_event(defines.events.on_gui_click, gui.on_click)
 script.on_event(defines.events.on_script_path_request_finished, movement.on_path_finished)
+commands.add_command("car-trace", "Writes a trace of the autonomous cars to script-output (see game_trace.lua). Optional argument: the unit number of one car. Run it again to stop.",
+	function(command)
+		game_trace.toggle(game.get_player(command.player_index), tonumber(command.parameter))
+	end)
 script.on_event(defines.events.on_tick, init_storage)

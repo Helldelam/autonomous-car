@@ -705,6 +705,36 @@ scenarios["long-wall"] = {
 	end,
 }
 
+-- The end of a 41-tile wall: eight cars beside it, the supply chest just past its end, 5 to
+-- 10 tiles from them (around config.arrival_distance), and the ghost further on. The car
+-- has to go round the corner of the wall without turning in circles along it.
+scenarios["wall-corner"] = {
+	ticks = 6000,
+	category = "movement",
+	setup = function()
+		local s = new_surface({{0, 0}}, 10)
+		make(s, names.charger, 0, 0)
+		T.offsets = {10, 14, 17, 19, 10, 14, 17, 19}
+		for index, offset in ipairs(T.offsets) do
+			local cx, cy = 100 + 100 * math.floor((index - 1) / 4), ((index - 1) % 4) * 100 - 150
+			for y = -20, 20 do
+				s.create_entity{name = "stone-wall", position = {cx + 10.5, cy + y + 0.5}, force = "player"}
+			end
+			make_car(s, cx + 7, cy + offset, index <= 4 and 0.25 or 0, 1)
+			fill(make(s, names.chest, cx + 13.5, cy + 22.5), {["wooden-chest"] = 20})
+			make_ghost(s, "wooden-chest", cx + 18.5, cy + 25.5)
+		end
+	end,
+	events = function(t)
+		if t == 100 then
+			for index = 1, #T.offsets do
+				local cx, cy = 100 + 100 * math.floor((index - 1) / 4), ((index - 1) % 4) * 100 - 150
+				select_ghosts(cx + 16, cy + 23, cx + 21, cy + 28)
+			end
+		end
+	end,
+}
+
 -- Obstacle courses: each course is a car, an obstacle field between it and its supply
 -- chest, and a ghost behind the chest. The number of chests built (SUMMARY) is the
 -- number of cars that got through; BATCH lines give the tick each finished.
@@ -2502,6 +2532,30 @@ scenarios["gate-manual"] = {
 -- ============================================================
 -- Trace
 -- ============================================================
+
+-- A garage in a small walled room, ringed by furnaces so close that no free spot is left within 3 tiles of its
+-- centre, with a 3-tile door: three idle cars outside, at different distances, have to park in it. The
+-- pathfinder must reach the garage itself (the goal is its centre).
+scenarios["garage-room"] = {
+	ticks = 4000,
+	category = "doors",
+	setup = function()
+		local s = new_surface({{0, 0}}, 10)
+		make(s, names.charger, 0, 0)
+		wall_line(s, 100, -10, 114, -10)
+		wall_line(s, 100, 4, 114, 4)
+		wall_line(s, 100, -9, 100, 3)
+		wall_line(s, 114, -9, 114, 3)
+		door_ew(s, 107, 4, true)
+		make(s, names.garage, 107, -3)
+		for _, offset in ipairs{{-4, -3}, {4, -3}, {0, -7}, {-4, 1}, {4, 1}} do
+			make(s, "stone-furnace", 107 + offset[1], -3 + offset[2])
+		end
+		make_car(s, 107, 20, 0.5)
+		make_car(s, 95, 12, 0.25)
+		make_car(s, 125, 8, 0.75)
+	end,
+}
 
 local function trace_cars(tick)
 	-- A car found in no state by update_car: where it came from is in the trace just before.
