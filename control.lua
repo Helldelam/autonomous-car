@@ -171,8 +171,20 @@ local function on_area_selected(event)
 	local queued = #storage.pending_clusters
 
 	if player then
-		-- TODO: tell the batch types apart in this announcement (build, landfill, deconstruct, upgrade, network).
-		player.print(assigned .. " construction batch(es) assigned.")
+		-- One line per batch type, none for a type without batch (landfill counts as construction).
+		local build_count = (assigned.build or 0) + (assigned.landfill or 0)
+		if (assigned.deconstruct or 0) > 0 then
+			player.print(assigned.deconstruct .. " destruction batch(es) assigned.")
+		end
+		if build_count > 0 then
+			player.print(build_count .. " construction batch(es) assigned.")
+		end
+		if (assigned.upgrade or 0) > 0 then
+			player.print(assigned.upgrade .. " upgrade batch(es) assigned.")
+		end
+		if (assigned.network or 0) > 0 then
+			player.print(assigned.network .. " logistic network batch(es) assigned.")
+		end
 		if queued > 0 then
 			if any_car then
 				player.print(queued .. " batch(es) queued, waiting for a car to become available.")

@@ -1547,6 +1547,59 @@ scenarios["phases-single"] = {
 	end,
 }
 
+-- Three cliffs and a tree are marked for deconstruction; the chest holds two cliff
+-- explosives, one short for the cliffs (a cluster waits for all its items). The car must
+-- fetch them, mine the tree, give the cliffs back to the pending pool, and destroy all three
+-- once the third explosive is added at tick 5000 (EVENT lines).
+scenarios["cliffs"] = {
+	ticks = 9000,
+	category = "construction",
+	setup = function()
+		local s = new_surface({{0, 0}}, 6)
+		make(s, names.charger, 0, 0)
+		make(s, names.garage, 20, -10)
+		T.chest = make(s, names.chest, 0.5, 30.5)
+		fill(T.chest, {["cliff-explosives"] = 2})
+		T.cars = {make_car(s, 16, 10, 0.1)}
+		T.surface = s
+		T.marked = {}
+		-- Cliffs can only be marked once the force has researched the cliff explosives.
+		game.forces.player.technologies["cliff-explosives"].researched = true
+		for i = 0, 2 do
+			local cliff = s.create_entity{name = "cliff", position = {40 + 5 * i, 60}, cliff_orientation = "west-to-east", force = "player"}
+			if cliff then
+				local ordered = cliff.order_deconstruction("player")
+				out("SETUP cliff ordered=" .. tostring(ordered) .. " marked=" .. tostring(cliff.to_be_deconstructed()) .. " minable=" .. tostring(cliff.minable) .. " type=" .. cliff.type)
+				table.insert(T.marked, cliff)
+			else
+				out("SETUP cliff NOT created")
+			end
+		end
+		mark(s, "tree-01", 60, 60)
+		T.mine = T.marked
+	end,
+	events = function(t)
+		if t == 300 then
+			select_all(30, 50, 70, 70)
+		end
+		if t == 5000 then
+			fill(T.chest, {["cliff-explosives"] = 1})
+			out("EVENT third explosive added")
+		end
+		watch_batches()
+		if t == 1700 or t == 2200 or t == 2500 or t == 3500 then
+			local valid = {}
+			for index, entity in ipairs(T.marked) do
+				valid[index] = entity.valid and "valid" or "gone"
+			end
+			out("EVENT t=" .. t .. " marked " .. table.concat(valid, " ") .. ", chest explosives " .. T.chest.get_inventory(defines.inventory.chest).get_item_count("cliff-explosives"))
+		end
+		if t == 4500 or t == 8500 then
+			out("EVENT t=" .. t .. " marked left " .. count_valid(T.mine) .. "/" .. #T.mine)
+		end
+	end,
+}
+
 -- The only car is parked in its garage when a roboport ghost (network mode, the last
 -- phase) is selected: it must come out and build it. retry_pending_clusters used to
 -- scan the phases 1 to 3 only, so the car stayed in the garage (EVENT lines).
