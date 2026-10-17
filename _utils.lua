@@ -194,8 +194,8 @@ end
 local BATTERY = {name = config.battery_item, quality = "normal"}
 
 -- Locks the last trunk slot of a car to batteries. Safe to call again: the
--- player may have changed the filter, and no event tells, so control.lua calls
--- it every config.long_delay. What a changed filter let into the slot goes to the
+-- player may have changed the filter, and no event tells, so on_tick calls it
+-- every config.slow_check_interval. What a changed filter let into the slot goes to the
 -- cargo slots, or to the ground.
 function _utils.set_battery_filter(car)
 	local trunk = car.get_inventory(defines.inventory.car_trunk)

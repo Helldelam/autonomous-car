@@ -1094,9 +1094,9 @@ scenarios["maze"] = {
 	events = select_courses,
 }
 
--- A car with 5 batteries parks in a garage (it keeps them aside: EVENT garage) and leaves again
--- for the ghost selected at t = 4000: it first goes to the supply chest for batteries, which
--- holds 300 (it takes what its slot lacks, 195) and then builds (EVENT lines every 100 ticks).
+-- A car with 5 batteries is idle: just before parking it goes to the supply chest for batteries, which
+-- holds 300 (it takes what its slot lacks, 195), then parks and keeps them aside (EVENT garage: 200).
+-- It leaves again for the ghost selected at t = 4000, with 200 at once, and builds (EVENT lines every 100 ticks).
 scenarios["batteries-garage"] = {
 	ticks = 7000,
 	category = "robustness",
@@ -1106,6 +1106,7 @@ scenarios["batteries-garage"] = {
 		T.garage = make(s, names.garage, 20, -10)
 		T.chest = make(s, names.chest, 0.5, 30.5)
 		fill(T.chest, {["wooden-chest"] = 20, battery = 300})
+		make(s, names.chest, 2.5, 30.5) -- a chest of the group without batteries
 		T.car = make_car(s, 10, 10, 0, 1)
 		_utils.insert_batteries(T.car, 5)
 		make_ghost(s, "wooden-chest", 40.5, 40.5)
@@ -1195,7 +1196,7 @@ scenarios["batteries-emergency"] = {
 		end
 		-- Battery slot of car 3 (see _utils.set_battery_filter): the trunk takes 40 slots of 50
 		-- chests; at t = 110 its filter is cleared and a chest put in it (the player could do it),
-		-- and control.lua must have put the filter back and moved the chest out by t = 900.
+		-- and control.lua must have put the filter back and moved the chest out by t = 130 (slow_check_interval).
 		local trunk = T.cars[3].valid and T.cars[3].get_inventory(defines.inventory.car_trunk)
 		if trunk and t == 100 then
 			local inserted = trunk.insert{name = "wooden-chest", count = 10000}
@@ -1206,7 +1207,7 @@ scenarios["batteries-emergency"] = {
 			trunk.set_filter(#trunk, nil)
 			trunk[#trunk].set_stack{name = "wooden-chest", count = 5}
 		end
-		if trunk and (t == 110 or t == 900) then
+		if trunk and (t == 110 or t == 130) then
 			local filter, stack = trunk.get_filter(#trunk), trunk[#trunk]
 			out("EVENT slot t=" .. t .. ": filter " .. tostring(filter and filter.name) .. " holds "
 				.. (stack.valid_for_read and (stack.name .. " x" .. stack.count) or "nothing")
@@ -1649,6 +1650,54 @@ scenarios["phases-single"] = {
 		watch_phases({T.mine, T.build})
 		if t == 15500 then
 			report_phases("end")
+		end
+	end,
+}
+
+-- Two assembling machines are ghosts that request modules (insert_plan): the first two
+-- speed modules (both slots), the second a productivity module the chest does not hold
+-- until t = 3000. Both are one cluster, which waits for all its items: nothing is built at t = 1500
+-- (EVENT), then both machines are built with their modules in the slots and no item request
+-- proxy left (EVENT at t = 5000).
+scenarios["modules"] = {
+	ticks = 6000,
+	category = "construction",
+	setup = function()
+		local s = new_surface({{0, 0}}, 10)
+		make(s, names.charger, 0, 0)
+		make(s, names.garage, 20, -10)
+		T.chest = make(s, names.chest, 0.5, 30.5)
+		fill(T.chest, {["assembling-machine-2"] = 2, ["speed-module"] = 5})
+		make_car(s, 10, 10, 0, 1)
+		T.ghosts = {}
+		for index, module in ipairs{"speed-module", "productivity-module"} do
+			local ghost = s.create_entity{name = "entity-ghost", inner_name = "assembling-machine-2",
+				position = {40.5 + 10 * index, 40.5}, force = "player", expires = false}
+			local slots = {{inventory = defines.inventory.crafter_modules, stack = 0}}
+			if index == 1 then
+				slots[2] = {inventory = defines.inventory.crafter_modules, stack = 1}
+			end
+			ghost.insert_plan = {{id = {name = module}, items = {in_inventory = slots}}}
+			T.ghosts[index] = ghost
+		end
+		T.surface = s
+	end,
+	events = function(t)
+		if t == 200 then
+			select_ghosts(40, 35, 70, 45)
+		end
+		if t == 3000 then
+			fill(T.chest, {["productivity-module"] = 1})
+		end
+		if t == 1500 or t == 5000 then
+			local parts = {}
+			for _, machine in pairs(T.surface.find_entities_filtered{name = "assembling-machine-2"}) do
+				local modules = machine.get_module_inventory()
+				parts[#parts + 1] = string.format("machine at %.0f: modules %d, proxies %d", machine.position.x,
+					modules and #modules - modules.count_empty_stacks() or -1,
+					#T.surface.find_entities_filtered{name = "item-request-proxy", position = machine.position, radius = 3})
+			end
+			out("EVENT t=" .. t .. " " .. #T.surface.find_entities_filtered{name = "entity-ghost"} .. " ghosts left; " .. table.concat(parts, " | "))
 		end
 	end,
 }

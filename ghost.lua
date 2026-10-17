@@ -291,14 +291,41 @@ local function compute_yield(entity)
 	return yield
 end
 
+-- The items an entity ghost requests besides its own, placed in inventory slots
+-- (modules, and whatever else the blueprint puts in): [item key] = count. Equipment
+-- grids are not handled.
+local function compute_requests(ghost)
+	local requests = {}
+	if ghost.type ~= "entity-ghost" then
+		return requests
+	end
+	for _, plan in pairs(ghost.insert_plan) do
+		local count = 0
+		for _, position in pairs(plan.items.in_inventory or {}) do
+			count = count + (position.count or 1)
+		end
+		if count > 0 then
+			local name = plan.id.name
+			local key = _utils.make_item_key(type(name) == "string" and name or name.name, plan.id.quality)
+			requests[key] = (requests[key] or 0) + count
+		end
+	end
+	return requests
+end
+
 -- What the car must collect to work on a ghost ([item key] = count): the item
--- that builds it, that places the entity an upgrade turns it into, or the cliff
--- explosive that destroys a cliff. Nothing to mine.
+-- that builds it and the items it requests (modules), that places the entity an
+-- upgrade turns it into, or the cliff explosive that destroys a cliff. Nothing to mine.
 function ghost_control.compute_needs(ghost)
 	local key, count
 	local mode = ghost_control.get_target_mode(ghost)
 	if REVIVES[mode] then
 		key, count = ghost_control.get_ghost_item(ghost)
+		local needs = compute_requests(ghost)
+		if key then
+			needs[key] = (needs[key] or 0) + count
+		end
+		return needs
 	elseif ghost.type == "cliff" then
 		key, count = ghost.prototype.cliff_explosive_prototype, 1
 	elseif mode == "upgrade" then
@@ -815,8 +842,12 @@ local function wait_for_phase(car, car_data)
 	_utils.start_waiting(car_data)
 end
 
--- Closest supply chest whose group holds batteries, or nil.
-local function find_battery_chest(car)
+-- Closest supply chest whose group holds batteries, or nil (also nil when the
+-- battery slot of the car is full).
+function ghost_control.find_battery_chest(car)
+	if _utils.get_battery_count(car) >= prototypes.item[config.battery_item].stack_size then
+		return nil
+	end
 	return _utils.find_closest(storage.supply_chests, car.position, function(chest)
 		for _, member in pairs(ghost_control.find_chest_group(chest)) do
 			if member.get_inventory(defines.inventory.chest).get_item_count(config.battery_item) > 0 then
@@ -839,18 +870,6 @@ function ghost_control.proceed(car)
 	local construction = car_data.construction
 	if not construction then
 		return
-	end
-
-	-- A car that just left a garage tops up its batteries first, if a chest has some:
-	-- without batteries the batch goes on all the same.
-	if car_data.restock then
-		car_data.restock = false
-		local chest = _utils.get_battery_count(car) < prototypes.item[config.battery_item].stack_size
-			and find_battery_chest(car)
-		if chest then
-			travel.set_destination(car, chest, {type = "restock"})
-			return
-		end
 	end
 
 	if next(construction.ghosts) == nil then
@@ -884,7 +903,8 @@ function ghost_control.proceed(car)
 end
 
 -- "restock" task: the car reached the supply chest `chest`. Takes as many batteries
--- as its battery slot holds, then goes on with its batch.
+-- as its battery slot holds, then goes on (the car is idle and about to park:
+-- its wait is already over, end_wait sends it to its garage).
 function ghost_control.restock_batteries(car, chest)
 	if chest and chest.valid then
 		local wanted = prototypes.item[config.battery_item].stack_size - _utils.get_battery_count(car)
@@ -893,11 +913,18 @@ function ghost_control.restock_batteries(car, chest)
 				break
 			end
 			local inventory = member.get_inventory(defines.inventory.chest)
-			local taken = inventory.remove{name = config.battery_item, count = math.min(wanted, inventory.get_item_count(config.battery_item))}
-			wanted = wanted - _utils.insert_batteries(car, taken)
+			local count = math.min(wanted, inventory.get_item_count(config.battery_item))
+			if count > 0 then -- a chest of the group without batteries is skipped (remove needs a positive count)
+				local taken = inventory.remove{name = config.battery_item, count = count}
+				local inserted = _utils.insert_batteries(car, taken)
+				if inserted < taken then
+					inventory.insert{name = config.battery_item, count = taken - inserted}
+				end
+				wanted = wanted - inserted
+			end
 		end
 	end
-	ghost_control.proceed(car)
+	_utils.start_waiting(storage.car_data[car.unit_number], game.tick - config.idle_delay)
 end
 
 -- "collect" task: the car reached the supply chest `chest`. Takes what it still
@@ -962,6 +989,24 @@ function ghost_control.find_nearest_ready_ghost(car, cluster)
 	return best, any_valid
 end
 
+-- Puts the items of the insert plan of a revived ghost in its inventories, taking
+-- them from the trunk. A slot that does not take its item leaves it in the trunk
+-- (a surplus, deposited at the end of the batch).
+local function insert_requests(trunk, entity, plans)
+	for _, plan in pairs(plans) do
+		local name = plan.id.name
+		local key = _utils.make_item_key(type(name) == "string" and name or name.name, plan.id.quality)
+		for _, position in pairs(plan.items.in_inventory or {}) do
+			local inventory = entity.get_inventory(position.inventory)
+			local stack = inventory and inventory[position.stack + 1] -- 0-based in the plan
+			local count = position.count or 1
+			if stack and not stack.valid_for_read and stack.set_stack(_utils.make_stack(key, count)) then
+				trunk.remove(_utils.make_stack(key, count))
+			end
+		end
+	end
+end
+
 -- Builds a ghost with an item from the car trunk. Returns false if the revive
 -- failed, usually because something - often the car itself - is in the way.
 function ghost_control.revive_ghost(car, ghost)
@@ -974,13 +1019,27 @@ function ghost_control.revive_ghost(car, ghost)
 	if _utils.get_item_count(trunk, key) <= 0 then
 		return false
 	end
+	local requests = compute_requests(ghost)
+	for request, count in pairs(requests) do
+		if _utils.get_item_count(trunk, request) < count then
+			return false
+		end
+	end
+	local plans = ghost.type == "entity-ghost" and ghost.insert_plan or {}
 
 	-- revive() returns nil when it fails.
-	if ghost.revive{raise_revive = true} then
-		trunk.remove(_utils.make_stack(key, 1))
-		return true
+	local collided, entity, proxy = ghost.revive{raise_revive = true}
+	if not collided then
+		return false
 	end
-	return false
+	trunk.remove(_utils.make_stack(key, 1))
+	if entity and entity.valid then
+		insert_requests(trunk, entity, plans)
+	end
+	if proxy and proxy.valid then
+		proxy.destroy() -- the car delivered the requests itself
+	end
+	return true
 end
 
 -- Mines an entity marked for deconstruction into the car trunk; a cliff is

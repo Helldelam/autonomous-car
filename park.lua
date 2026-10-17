@@ -111,7 +111,6 @@ function garage_control.release_car(garage)
 		if garage_data.batteries[slot] then
 			_utils.insert_batteries(car, garage_data.batteries[slot])
 		end
-		storage.car_data[car.unit_number].restock = true
 	end
 	stack.clear()
 	garage_data.fuel[slot] = nil

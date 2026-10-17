@@ -60,7 +60,6 @@ local function create_car_data(tick)
 		},
 		charging = {active = false, charger = nil},
 		parking = {active = false, garage = nil},
-		restock = false, -- true for a car that just left a garage: it fetches batteries before its batch (ghost_control.proceed)
 		building = {active = false, next_attempt_tick = 0}, -- only active once the car has stopped at its site
 		-- Waiting for the player after a failed leg, see travel.start_stuck. `final`: the car will not retry but abandon its task.
 		stuck = {active = false, since = 0, final = false, destination = nil},
@@ -202,7 +201,7 @@ end
 -- ============================================================
 
 -- The wait of an idle car is over: it resumes its batch, takes a pending
--- cluster, or goes to park, topping up its tank first if needed.
+-- cluster, or goes to park, topping up its tank and batteries first if needed.
 local function end_wait(car, car_data, tick)
 	-- Whatever starts a leg ends the wait (travel.begin_leg), and a car that
 	-- cannot set off goes back to waiting (travel.reset_to_waiting): only the
@@ -227,7 +226,14 @@ local function end_wait(car, car_data, tick)
 			car_data.waiting.since = tick
 		elseif not travel.top_up_before_parking(car, garage.position) then
 			_utils.alert_reset(car_data.alerts, "no_garage")
-			travel.set_destination(car, garage, {type = "parking"})
+			-- Batteries are topped up just before parking, if a chest has some: without
+			-- batteries the car parks all the same.
+			local chest = ghost_control.find_battery_chest(car)
+			if chest then
+				travel.set_destination(car, chest, {type = "restock"})
+			else
+				travel.set_destination(car, garage, {type = "parking"})
+			end
 		end
 	end
 end
@@ -294,6 +300,10 @@ end
 local function on_tick(event)
 	for id, car in pairs(storage.cars) do
 		if car.valid then
+			-- No event tells that the player changed the filter of the battery slot.
+			if _utils.is_slow_check_due(car, event.tick) then
+				_utils.set_battery_filter(car)
+			end
 			update_car(car, storage.car_data[id], event.tick)
 			if storage.game_trace and car.valid then -- the car is gone when it has just parked in a garage
 				game_trace.record(car, storage.car_data[id], event.tick)
@@ -312,11 +322,6 @@ local function on_tick(event)
 	if event.tick % config.long_delay == 0 then
 		ghost_control.retry_pending_clusters()
 		garage_control.repair_parked_cars()
-		for _, car in pairs(storage.cars) do
-			if car.valid then
-				_utils.set_battery_filter(car)
-			end
-		end
 	end
 end
 
