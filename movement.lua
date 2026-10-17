@@ -326,7 +326,6 @@ end
 -- the same tick. It may start a maneuver, in which case maneuver_tick runs instead
 -- of drive_tick (see update_car in control.lua). It ends by setting
 -- car.friction_modifier, the lever that controls cruising speed, from the mode.
--- TODO: make a car flee from danger (enemy force). See "À faire" in CLAUDE.md.
 function movement.update_mode(car, tick)
 	local car_data = storage.car_data[car.unit_number]
 	open_gates(car, tick)

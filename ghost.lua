@@ -693,10 +693,20 @@ function ghost_control.assign_cluster(car, cluster)
 		alerted_items = {}, failed_attempts = {}, mode = get_mode(cluster.ghosts),
 	}
 	add_cluster(car.unit_number, car_data.construction, cluster)
+	car_data.flee.count = 0 -- a new batch: the flights of the last one are forgotten
 	car_data.waiting.active = false
 
 	ghost_control.fill_batch(car)
-	ghost_control.proceed(car)
+
+	-- A car that has just left its garage first tops up its batteries and ammo, if a chest has some
+	-- (ghost_control.restock then goes on with the batch through end_wait).
+	local chest = car_data.just_left_garage and ghost_control.find_restock_chest(car)
+	car_data.just_left_garage = false
+	if chest then
+		travel.set_destination(car, chest, {type = "restock"})
+	else
+		ghost_control.proceed(car)
+	end
 end
 
 -- ============================================================
@@ -842,16 +852,83 @@ local function wait_for_phase(car, car_data)
 	_utils.start_waiting(car_data)
 end
 
--- Closest supply chest whose group holds batteries, or nil (also nil when the
--- battery slot of the car is full).
-function ghost_control.find_battery_chest(car)
-	if _utils.get_battery_count(car) >= prototypes.item[config.battery_item].stack_size then
-		return nil
+-- Position of an ammo item in config.ammo_items (1 = strongest); an item not in the
+-- list ranks first, so a car never swaps it away.
+local function get_ammo_rank(name)
+	for rank, item in ipairs(config.ammo_items) do
+		if item == name then
+			return rank
+		end
 	end
+	return 0
+end
+
+-- Strongest ammo of config.ammo_items held by the chests of `group`, or nil.
+local function find_best_ammo(group)
+	for _, name in ipairs(config.ammo_items) do
+		for _, member in pairs(group) do
+			if member.get_inventory(defines.inventory.chest).get_item_count{name = name, quality = "normal"} > 0 then
+				return name
+			end
+		end
+	end
+	return nil
+end
+
+-- True if the chests of `group` have room for the whole stack `ammo` ({name, quality, count}).
+local function can_store(group, ammo)
+	for _, member in pairs(group) do
+		local inventory = member.get_inventory(defines.inventory.chest)
+		if inventory.can_insert{name = ammo.name, quality = ammo.quality, count = ammo.count} then
+			return true
+		end
+	end
+	return false
+end
+
+-- What a car may take from the supply chests of `group` to refill its battery slot
+-- and, once armed, its ammo slot: a list of {name, quality, wanted, insert} for the
+-- slots that are not full. The ammo is the strongest type the group holds when the
+-- slot is empty or holds a weaker type (`swap`: the weaker ammo goes back to the
+-- chest first), else the type already in the slot.
+local function compute_restock(car, group)
+	local wanted = {}
+	local batteries = prototypes.item[config.battery_item].stack_size - _utils.get_battery_count(car)
+	if batteries > 0 then
+		table.insert(wanted, {name = config.battery_item, quality = "normal", wanted = batteries, insert = function(count)
+			return _utils.insert_batteries(car, count)
+		end})
+	end
+	if _utils.is_armed(car) then
+		local ammo = _utils.get_ammo(car)
+		local best = find_best_ammo(group)
+		local swap = false
+		if best and (not ammo or (ammo.name ~= best and get_ammo_rank(best) < get_ammo_rank(ammo.name) and can_store(group, ammo))) then
+			swap = ammo ~= nil
+			ammo = {name = best, quality = "normal", count = 0}
+		end
+		if ammo then
+			local missing = prototypes.item[ammo.name].stack_size - ammo.count
+			if missing > 0 then
+				table.insert(wanted, {name = ammo.name, quality = ammo.quality, wanted = missing, swap = swap, insert = function(count)
+					return _utils.insert_ammo(car, ammo, count)
+				end})
+			end
+		end
+	end
+	return wanted
+end
+
+-- Closest supply chest whose group holds something the car's battery or ammo slot
+-- lacks, or nil (also nil when both are full).
+function ghost_control.find_restock_chest(car)
 	return _utils.find_closest(storage.supply_chests, car.position, function(chest)
-		for _, member in pairs(ghost_control.find_chest_group(chest)) do
-			if member.get_inventory(defines.inventory.chest).get_item_count(config.battery_item) > 0 then
-				return true
+		local group = ghost_control.find_chest_group(chest)
+		for _, item in pairs(compute_restock(car, group)) do
+			for _, member in pairs(group) do
+				if member.get_inventory(defines.inventory.chest).get_item_count{name = item.name, quality = item.quality} > 0 then
+					return true
+				end
 			end
 		end
 		return false
@@ -902,25 +979,50 @@ function ghost_control.proceed(car)
 	end
 end
 
+-- Puts the ammo of the car's slot into the chests of `group` to make room for a
+-- stronger type. Returns false (and keeps the ammo) when the chests cannot take it all.
+local function swap_ammo_back(car, group)
+	local ammo = _utils.remove_ammo(car)
+	if not ammo then
+		return true
+	end
+	local remaining = ammo.count
+	for _, member in pairs(group) do
+		if remaining > 0 then
+			remaining = remaining - member.get_inventory(defines.inventory.chest).insert{name = ammo.name, quality = ammo.quality, count = remaining}
+		end
+	end
+	if remaining > 0 then
+		_utils.insert_ammo(car, ammo, remaining)
+		return false
+	end
+	return true
+end
+
 -- "restock" task: the car reached the supply chest `chest`. Takes as many batteries
--- as its battery slot holds, then goes on (the car is idle and about to park:
--- its wait is already over, end_wait sends it to its garage).
-function ghost_control.restock_batteries(car, chest)
+-- and as much ammo as its slots hold (see compute_restock), then goes on (the car is
+-- idle and about to park: its wait is already over, end_wait sends it to its garage).
+function ghost_control.restock(car, chest)
 	if chest and chest.valid then
-		local wanted = prototypes.item[config.battery_item].stack_size - _utils.get_battery_count(car)
-		for _, member in pairs(ghost_control.find_chest_group(chest)) do
-			if wanted <= 0 then
-				break
+		local group = ghost_control.find_chest_group(chest)
+		for _, item in pairs(compute_restock(car, group)) do
+			if item.swap and not swap_ammo_back(car, group) then
+				item.wanted = 0
 			end
-			local inventory = member.get_inventory(defines.inventory.chest)
-			local count = math.min(wanted, inventory.get_item_count(config.battery_item))
-			if count > 0 then -- a chest of the group without batteries is skipped (remove needs a positive count)
-				local taken = inventory.remove{name = config.battery_item, count = count}
-				local inserted = _utils.insert_batteries(car, taken)
-				if inserted < taken then
-					inventory.insert{name = config.battery_item, count = taken - inserted}
+			for _, member in pairs(group) do
+				if item.wanted <= 0 then
+					break
 				end
-				wanted = wanted - inserted
+				local inventory = member.get_inventory(defines.inventory.chest)
+				local count = math.min(item.wanted, inventory.get_item_count{name = item.name, quality = item.quality})
+				if count > 0 then -- a chest of the group without the item is skipped (remove needs a positive count)
+					local taken = inventory.remove{name = item.name, quality = item.quality, count = count}
+					local inserted = item.insert(taken)
+					if inserted < taken then
+						inventory.insert{name = item.name, quality = item.quality, count = taken - inserted}
+					end
+					item.wanted = item.wanted - inserted
+				end
 			end
 		end
 	end

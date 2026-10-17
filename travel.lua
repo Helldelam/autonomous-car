@@ -79,6 +79,8 @@ function travel.cancel_trip(car_data)
 	car_data.moving.active = false
 	car_data.moving.destination = nil
 	car_data.moving.departure_tick = nil
+	car_data.flee.active = false
+	_utils.alert_reset(car_data.alerts, "flee")
 	car_data.tasks = _utils.deque.new()
 end
 
@@ -178,6 +180,56 @@ function travel.reset_to_waiting(car)
 	travel.cancel_trip(car_data) -- the queued tasks belonged to the trip that was dropped
 	travel.stop_car(car)
 	_utils.start_waiting(car_data)
+end
+
+-- ============================================================
+-- Fleeing
+-- ============================================================
+
+-- Where the car flees from `enemy`: the closest charger or garage lying away from it
+-- (in the half plane opposite to the enemy, within config.flee.max_refuge_distance and
+-- the car's reach), else a waypoint that far straight away from the enemy, whatever
+-- the car's fuel (the best chance it has left). Like a step-back waypoint, a plain
+-- table stands in for the destination entity.
+function travel.find_refuge(car, enemy)
+	local away_x, away_y = car.position.x - enemy.position.x, car.position.y - enemy.position.y
+	local fuel = _utils.get_reachable_fuel(car)
+	local function is_away(entity)
+		return (entity.position.x - car.position.x) * away_x + (entity.position.y - car.position.y) * away_y > 0
+			and util.distance(car.position, entity.position) <= config.flee.max_refuge_distance
+			and fuel >= charger_control.compute_fuel_to_reach(car, entity.position)
+	end
+	local charger = _utils.find_closest(storage.chargers, car.position, is_away, "charger", car.surface)
+	local garage = _utils.find_closest(storage.garages, car.position, is_away, "garage", car.surface)
+	if charger and garage then
+		return util.distance(car.position, charger.position) <= util.distance(car.position, garage.position) and charger or garage
+	end
+	if charger or garage then
+		return charger or garage
+	end
+
+	local length = math.sqrt(away_x * away_x + away_y * away_y)
+	if length == 0 then
+		away_x, away_y, length = 1, 0, 1 -- the enemy is right on the car
+	end
+	local far = {
+		x = car.position.x + away_x / length * config.flee.max_refuge_distance,
+		y = car.position.y + away_y / length * config.flee.max_refuge_distance,
+	}
+	return {position = car.surface.find_non_colliding_position(config.names.car, far, config.flee.radius, 1) or far, valid = true}
+end
+
+-- Drops the leg or the work in progress (the car keeps its batch) and drives to
+-- `refuge` (an entity or a waypoint). On arrival the car waits there (on_next_task in control.lua), then
+-- the waiting loop resumes the batch. Each flight counts toward config.flee.max_count.
+function travel.start_flee(car, refuge)
+	local car_data = storage.car_data[car.unit_number]
+	travel.cancel_trip(car_data)
+	car_data.flee.active = true
+	car_data.flee.count = car_data.flee.count + 1
+	travel.begin_leg(car, refuge, {type = "flee"})
+	_utils.alert_once(car_data.alerts, "flee", car.force, car,
+		"An autonomous car is fleeing from an enemy.", config.names.car)
 end
 
 -- ============================================================

@@ -28,12 +28,15 @@ config.names = {
 	missing_items_shortcut = "autonomous_car_missing_items_shortcut", -- shows or hides the window of missing items
 	debug_view_shortcut = "autonomous_car_debug_view_shortcut", -- shows or hides the debug drawing of the selected car
 	next_task_event = "autonomous_car_next_task", -- custom event, see _utils.raise_next_task
+	turret = "autonomous_car_turret", -- hidden turret that follows each armed car and shoots for it, see armed.lua
+	armed_technology = "autonomous_car_armed", -- research that arms the cars
 }
 
 config.car_size = {width = 0.7, length = 1} -- collision box of the car; the maneuver probes are derived from it
 config.car_cargo_size = 40 -- trunk slots for the cargo of a batch: the most a cluster can require
 config.car_inventory_size = config.car_cargo_size + 1 -- trunk slots of the car: the last one only takes batteries (see _utils.set_battery_filter)
 config.battery_item = "battery" -- item a car burns when its tank is almost empty; the last trunk slot is reserved for it
+config.ammo_items = {"uranium-rounds-magazine", "piercing-rounds-magazine", "firearm-magazine"} -- ammo a car takes from a supply chest, strongest first: it fills an empty slot with the strongest one the chest holds and swaps a weaker one for a stronger one (see ghost_control.restock)
 config.garage_inventory_size = 50 -- slots of a garage, one parked car each
 config.charger_buffer_capacity = "60MJ"
 config.charger_input_flow_limit = "1600kW"
@@ -206,6 +209,21 @@ config.clearing = {
 }
 
 -- ============================================================
+-- Fleeing (see control.lua, handle_danger)
+-- ============================================================
+-- A moving or building car that meets an enemy (a force other than its own and the
+-- neutral one: biters, worms, spawners, enemy turrets) drops its leg and drives to
+-- the closest charger or garage lying away from it, else a point straight away from it.
+-- It waits there, then resumes its batch.
+
+config.flee = {
+	radius = 40, -- an enemy military target this close makes the car flee
+	max_refuge_distance = 150, -- a charger or garage is a refuge within this distance and the car's reachable fuel; without one the car drives this far straight away from the enemy
+	max_count = 3, -- flights per batch: past it the car abandons its batch (the site is too dangerous), then ignores enemies
+		-- until it has a new one
+}
+
+-- ============================================================
 -- Shared delays
 -- ============================================================
 -- Every "wait, then retry or re-evaluate" in the mod uses one of these five
@@ -241,6 +259,7 @@ config.long_delay = 600 -- (10s)
 	-- control.lua: period of the fallback scan of pending clusters and of the repair of parked cars
 	-- travel.stuck_tick: wait before a stuck car tries its leg again
 	-- travel.is_leg_too_long: margin added to the expected duration of a leg
+	-- control.lua (on_next_task): a car that fled waits this long at its refuge before resuming
 config.very_long_delay = 3600 -- (60s)
 	-- ghost_control.requeue_ghost: a ghost given up after max_revive_attempts waits this long in the pending pool before any
 	--   car may take it again, so that the cars do not all gather on a ghost that cannot be built
