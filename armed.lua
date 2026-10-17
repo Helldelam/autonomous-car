@@ -18,9 +18,10 @@ end
 
 -- Makes the turret of a car match its state: created when the force has the
 -- technology, moved onto the car, its ammo set to the content of the ammo slot
--- (less what it fired since the last call). Does nothing for a car that is not armed.
+-- (less what it fired since the last call). A car that is not armed or has no ammo
+-- has no turret (an empty turret shows a red warning icon).
 function armed.update(car, car_data)
-	if not _utils.is_armed(car) then
+	if not _utils.is_armed(car) or not _utils.get_ammo(car) then
 		destroy_turret(car_data)
 		return
 	end
@@ -53,8 +54,7 @@ function armed.update(car, car_data)
 	end
 
 	if not ammo then
-		inventory.clear()
-		car_data.turret_ammo = nil
+		destroy_turret(car_data) -- the turret fired its last magazine
 	elseif inventory.get_item_count{name = ammo.name, quality = ammo.quality} ~= ammo.count then
 		inventory.clear()
 		inventory.insert{name = ammo.name, quality = ammo.quality, count = ammo.count}

@@ -121,6 +121,7 @@ function garage_control.release_car(garage)
 		if ammo then
 			_utils.insert_ammo(car, ammo, ammo.count)
 		end
+		storage.car_data[car.unit_number].just_left_garage = true
 	end
 	stack.clear()
 	garage_data.fuel[slot] = nil

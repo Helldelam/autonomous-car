@@ -697,7 +697,16 @@ function ghost_control.assign_cluster(car, cluster)
 	car_data.waiting.active = false
 
 	ghost_control.fill_batch(car)
-	ghost_control.proceed(car)
+
+	-- A car that has just left its garage first tops up its batteries and ammo, if a chest has some
+	-- (ghost_control.restock then goes on with the batch through end_wait).
+	local chest = car_data.just_left_garage and ghost_control.find_restock_chest(car)
+	car_data.just_left_garage = false
+	if chest then
+		travel.set_destination(car, chest, {type = "restock"})
+	else
+		ghost_control.proceed(car)
+	end
 end
 
 -- ============================================================

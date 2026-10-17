@@ -1237,7 +1237,9 @@ end
 -- uranium magazines, and an empty chest in the group) just before parking: it swaps its firearm
 -- magazines for the stronger uranium ones. EVENT t=3500 gives what the garage keeps aside for it
 -- (batteries 200, uranium x20, 105 firearm magazines back in the chest), then the ghost selected at
--- t = 4000 sends it out again with both, and a turret (EVENT lines every 100 ticks).
+-- t = 4000 sends it out again; 100 more uranium magazines were put in the chest at t = 3600, so
+-- on leaving the garage it stops at the chest first (ammo 100, all the chest had), then goes to the site with a turret
+-- (EVENT lines every 100 ticks).
 scenarios["armed"] = {
 	ticks = 7000,
 	category = "robustness",
@@ -1263,6 +1265,9 @@ scenarios["armed"] = {
 			out("EVENT garage t=" .. t .. ": batteries kept " .. tostring(select(2, next(data.batteries))) .. ", ammo kept "
 				.. tostring(ammo and ammo.name) .. " x" .. tostring(ammo and ammo.count) .. ", chest firearm magazines "
 				.. T.chest.get_item_count("firearm-magazine") .. ", car valid " .. tostring(T.car.valid))
+		end
+		if t == 3600 then
+			T.chest.insert{name = "uranium-rounds-magazine", count = 100} -- stock arrives while the car is parked
 		end
 		if t == 4000 then
 			select_ghosts(35, 35, 45, 45)

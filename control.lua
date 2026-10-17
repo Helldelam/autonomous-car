@@ -87,6 +87,7 @@ local function create_car_data(tick)
 
 		-- Fleeing from an enemy (handle_danger): `active` while on the way to the refuge, `count` the flights of this batch.
 		flee = {active = false, count = 0},
+		just_left_garage = false, -- set by garage_control.release_car: its first batch starts with a restock stop (ghost_control.assign_cluster)
 		turret = nil, turret_ammo = nil, -- hidden turret of an armed car and the ammo it holds, see armed.lua
 
 		-- Failure tracking, see travel.lua.
