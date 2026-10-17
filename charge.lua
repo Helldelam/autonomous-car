@@ -40,9 +40,10 @@ end
 
 -- TODO: build chargers automatically to reach a distant destination. See "À faire" in CLAUDE.md.
 -- Closest charger to `target_position` (the car itself by default) that has a
--- free slot and that the car has enough fuel to reach. Returns nil if there is none.
+-- free slot and that the car has enough fuel, with its batteries, to reach. Returns
+-- nil if there is none.
 function charger_control.find_charger(car, target_position)
-	local remaining_fuel = _utils.get_fuel(car)
+	local remaining_fuel = _utils.get_reachable_fuel(car)
 	return _utils.find_closest(storage.chargers, target_position or car.position, function(charger, id)
 		return storage.charger_data[id].users < config.max_charger_users
 			and remaining_fuel >= charger_control.compute_fuel_to_reach(car, charger.position)

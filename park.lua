@@ -38,7 +38,7 @@ function garage_control.parking_tick(car, garage)
 	end
 	_utils.alert_reset(car_data.alerts, "garage_full")
 
-	if not car.get_inventory(defines.inventory.car_trunk).is_empty() then
+	if not _utils.is_cargo_empty(car) then
 		_utils.alert_once(car_data.alerts, "not_empty", car.force, car,
 			"An autonomous car still carries items and cannot park until its trunk is empty.", config.names.car)
 		return
@@ -51,10 +51,16 @@ function garage_control.parking_tick(car, garage)
 		alert_parking_failed(car, garage)
 		return
 	end
-	storage.garage_data[garage.unit_number].fuel[slot] = _utils.get_fuel(car)
+	local garage_data = storage.garage_data[garage.unit_number]
+	garage_data.fuel[slot] = _utils.get_fuel(car)
+	-- The batteries stay with the car, not in the garage slots.
+	local batteries = _utils.remove_batteries(car, _utils.get_battery_count(car))
+	garage_data.batteries[slot] = batteries > 0 and batteries or nil
 
 	-- Once mined the car entity is invalid: on_tick releases its state on the next tick.
 	if not car.mine{inventory = inventory} then
+		_utils.insert_batteries(car, batteries)
+		garage_data.batteries[slot] = nil
 		alert_parking_failed(car, garage)
 	end
 end
@@ -102,9 +108,13 @@ function garage_control.release_car(garage)
 		if garage_data.fuel[slot] then
 			_utils.set_fuel(car, garage_data.fuel[slot])
 		end
+		if garage_data.batteries[slot] then
+			_utils.insert_batteries(car, garage_data.batteries[slot])
+		end
 	end
 	stack.clear()
 	garage_data.fuel[slot] = nil
+	garage_data.batteries[slot] = nil
 	return car
 end
 

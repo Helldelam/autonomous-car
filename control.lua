@@ -104,6 +104,7 @@ local function on_built(event)
 		entity.riding_state = {acceleration = defines.riding.acceleration.nothing, direction = defines.riding.direction.straight}
 		-- A new car starts with config.critical_fuel_ratio of a full tank.
 		_utils.set_fuel_item(entity)
+		_utils.set_battery_filter(entity)
 		if _utils.get_fuel(entity) == 0 then
 			_utils.set_fuel(entity, _utils.get_fuel_capacity(entity) * config.critical_fuel_ratio)
 		end
@@ -114,7 +115,7 @@ local function on_built(event)
 		storage.charger_data[id] = {users = 0} -- cars charging here or on their way
 	elseif entity.name == names.garage then
 		storage.garages[id] = entity
-		storage.garage_data[id] = {fuel = {}, alerts = {}} -- fuel[slot] = fuel level of the car parked in that slot
+		storage.garage_data[id] = {fuel = {}, batteries = {}, alerts = {}} -- fuel[slot], batteries[slot] = fuel level and batteries of the car parked in that slot
 	elseif entity.name == names.chest then
 		storage.supply_chests[id] = entity
 	end
@@ -200,7 +201,7 @@ end
 -- ============================================================
 
 -- The wait of an idle car is over: it resumes its batch, takes a pending
--- cluster, or goes to park, topping up its tank first if needed.
+-- cluster, or goes to park, topping up its tank and batteries first if needed.
 local function end_wait(car, car_data, tick)
 	-- Whatever starts a leg ends the wait (travel.begin_leg), and a car that
 	-- cannot set off goes back to waiting (travel.reset_to_waiting): only the
@@ -213,7 +214,7 @@ local function end_wait(car, car_data, tick)
 		-- longer exists. Drop them and wait again.
 		car_data.tasks = _utils.deque.new()
 		car_data.waiting.since = tick
-	elseif not car.get_inventory(defines.inventory.car_trunk).is_empty() then
+	elseif not _utils.is_cargo_empty(car) then
 		-- Leftovers must be unloaded before the car takes a new batch or parks.
 		if not ghost_control.deposit_leftovers(car) then
 			car_data.waiting.since = tick
@@ -225,7 +226,14 @@ local function end_wait(car, car_data, tick)
 			car_data.waiting.since = tick
 		elseif not travel.top_up_before_parking(car, garage.position) then
 			_utils.alert_reset(car_data.alerts, "no_garage")
-			travel.set_destination(car, garage, {type = "parking"})
+			-- Batteries are topped up just before parking, if a chest has some: without
+			-- batteries the car parks all the same.
+			local chest = ghost_control.find_battery_chest(car)
+			if chest then
+				travel.set_destination(car, chest, {type = "restock"})
+			else
+				travel.set_destination(car, garage, {type = "parking"})
+			end
 		end
 	end
 end
@@ -292,6 +300,10 @@ end
 local function on_tick(event)
 	for id, car in pairs(storage.cars) do
 		if car.valid then
+			-- No event tells that the player changed the filter of the battery slot.
+			if _utils.is_slow_check_due(car, event.tick) then
+				_utils.set_battery_filter(car)
+			end
 			update_car(car, storage.car_data[id], event.tick)
 			if storage.game_trace and car.valid then -- the car is gone when it has just parked in a garage
 				game_trace.record(car, storage.car_data[id], event.tick)
@@ -390,6 +402,8 @@ local function on_next_task(event)
 		ghost_control.collect_items(car, destination)
 	elseif task.type == "deposit" then
 		ghost_control.deposit_items(car, destination)
+	elseif task.type == "restock" then
+		ghost_control.restock_batteries(car, destination)
 	end
 end
 

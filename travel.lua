@@ -345,7 +345,7 @@ function travel.is_leg_too_long(car, tick)
 	return tick - moving.departure_tick > max_duration
 end
 
--- TODO: send another car to rescue a stuck car (shares the empty-car recharge work, and could
+-- TODO: send another car to rescue a stuck car (and could
 -- later fetch a broken-down train). See "À faire" in CLAUDE.md.
 -- Stops a stuck car and alerts the player. The car waits for the player to free
 -- it, then tries its leg again (see travel.stuck_tick). It tries again only
@@ -418,18 +418,34 @@ end
 -- Empty battery
 -- ============================================================
 
--- Runs before everything else for every car, every tick. A car with a completely
--- empty battery cannot move: it drops its trip and its queued tasks, alerts the
--- player, and does nothing but check whether its battery is back above
--- config.critical_fuel_ratio, in which case it resumes its batch through the
--- waiting loop. Nothing in the mod refills an empty car: the player's way out
--- is to pick the car up and place it again, which makes a new car (see on_built
--- in control.lua) instead of waking this one. Returns true when it took over
--- the car for this tick.
--- TODO: add one or more ways to recharge an empty car. See "À faire" in CLAUDE.md.
+-- Burns one battery of the battery slot when the tank is almost empty (below
+-- config.battery_trigger_ratio), so that the car keeps going to a charger. Not
+-- while charging or parking: the tank is being filled.
+local function burn_battery_if_low(car, car_data)
+	if car_data.charging.active or car_data.parking.active then
+		return
+	end
+	local capacity = _utils.get_fuel_capacity(car)
+	if _utils.get_fuel(car) < config.battery_trigger_ratio * capacity and _utils.get_battery_count(car) > 0 then
+		_utils.remove_batteries(car, 1)
+		_utils.set_fuel(car, _utils.get_fuel(car) + config.battery_fuel_ratio * capacity)
+	end
+end
+
+-- Runs before everything else for every car, every tick. First burns a battery if
+-- the tank is almost empty (see above). A car with a completely empty battery and
+-- no battery to burn cannot move: it drops its trip and its queued tasks, alerts
+-- the player, and does nothing but check whether its battery is back above
+-- config.battery_trigger_ratio (a battery put in its battery slot, or the player
+-- picking the car up and placing it again, which makes a new car: see on_built in
+-- control.lua), in which case it goes back to waiting; below the critical level
+-- it then heads for a charger (handle_critical_fuel). Returns true when it took
+-- over the car for this tick.
 function travel.handle_empty(car, tick)
 	local car_data = storage.car_data[car.unit_number]
 	local empty = car_data.empty
+
+	burn_battery_if_low(car, car_data)
 
 	if not empty.active then
 		-- Charging, parking and building do not need the car to move.
@@ -441,12 +457,13 @@ function travel.handle_empty(car, tick)
 		travel.cancel_trip(car_data)
 		car_data.waiting.active = false
 		_utils.alert_once(car_data.alerts, "battery_empty", car.force, car,
-			"An autonomous car has run out of battery and cannot move: recover it or recharge it.",
+			"An autonomous car has run out of battery and cannot move: put a battery in the battery slot "
+				.. "(last slot of its trunk), or recover it.",
 			config.names.car)
 	end
 
 	travel.stop_car(car)
-	if _utils.get_fuel_ratio(car) >= config.critical_fuel_ratio then
+	if _utils.get_fuel_ratio(car) >= config.battery_trigger_ratio then
 		empty.active = false
 		_utils.alert_reset(car_data.alerts, "battery_empty")
 		_utils.start_waiting(car_data, tick - config.idle_delay) -- already elapsed: handled on the next tick

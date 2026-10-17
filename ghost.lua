@@ -291,14 +291,41 @@ local function compute_yield(entity)
 	return yield
 end
 
+-- The items an entity ghost requests besides its own, placed in inventory slots
+-- (modules, and whatever else the blueprint puts in): [item key] = count. Equipment
+-- grids are not handled.
+local function compute_requests(ghost)
+	local requests = {}
+	if ghost.type ~= "entity-ghost" then
+		return requests
+	end
+	for _, plan in pairs(ghost.insert_plan) do
+		local count = 0
+		for _, position in pairs(plan.items.in_inventory or {}) do
+			count = count + (position.count or 1)
+		end
+		if count > 0 then
+			local name = plan.id.name
+			local key = _utils.make_item_key(type(name) == "string" and name or name.name, plan.id.quality)
+			requests[key] = (requests[key] or 0) + count
+		end
+	end
+	return requests
+end
+
 -- What the car must collect to work on a ghost ([item key] = count): the item
--- that builds it, that places the entity an upgrade turns it into, or the cliff
--- explosive that destroys a cliff. Nothing to mine.
+-- that builds it and the items it requests (modules), that places the entity an
+-- upgrade turns it into, or the cliff explosive that destroys a cliff. Nothing to mine.
 function ghost_control.compute_needs(ghost)
 	local key, count
 	local mode = ghost_control.get_target_mode(ghost)
 	if REVIVES[mode] then
 		key, count = ghost_control.get_ghost_item(ghost)
+		local needs = compute_requests(ghost)
+		if key then
+			needs[key] = (needs[key] or 0) + count
+		end
+		return needs
 	elseif ghost.type == "cliff" then
 		key, count = ghost.prototype.cliff_explosive_prototype, 1
 	elseif mode == "upgrade" then
@@ -366,7 +393,7 @@ end
 
 -- Splits ghosts into clusters: one ghost type per cluster (all the entities to
 -- mine, or to upgrade, or the ghosts that extend the logistic network, together),
--- small enough for a car trunk (config.car_inventory_size slots). A cluster grows
+-- small enough for a car trunk (config.car_cargo_size slots). A cluster grows
 -- breadth-first from a seed ghost, nearest neighbours first, so it stays compact.
 -- The first ghost that no longer fits becomes the seed of the next cluster, so
 -- clusters tile the selected area.
@@ -398,7 +425,7 @@ function ghost_control.build_clusters(ghosts)
 			-- Adds a ghost to the cluster if its item still fits in the trunk.
 			local function try_add(ghost)
 				local delta, load = count_extra_slots(items, ghost)
-				if slots + delta > config.car_inventory_size then
+				if slots + delta > config.car_cargo_size then
 					return false
 				end
 				table.insert(cluster, ghost)
@@ -496,7 +523,7 @@ function ghost_control.find_available_car(cluster)
 	local car = _utils.find_closest(storage.cars, centroid, function(car, id)
 		local car_data = storage.car_data[id]
 		return car_data.waiting.active and not car_data.construction
-			and car.get_inventory(defines.inventory.car_trunk).is_empty()
+			and _utils.is_cargo_empty(car)
 			and not travel.is_fuel_critical(car)
 	end, nil, surface)
 	if car then
@@ -515,7 +542,7 @@ end
 -- car that just became free. Returns true if the car got one.
 function ghost_control.try_assign_pending(car)
 	if storage.car_data[car.unit_number].construction
-		or not car.get_inventory(defines.inventory.car_trunk).is_empty()
+		or not _utils.is_cargo_empty(car)
 		or travel.is_fuel_critical(car) then
 		return false
 	end
@@ -641,7 +668,7 @@ function ghost_control.fill_batch(car)
 			local centroid = ghost_control.compute_centroid(cluster.ghosts)
 			if centroid and is_cluster_ready(cluster) and get_cluster_surface(cluster) == car.surface
 				and get_mode(cluster.ghosts) == mode
-				and reserved + get_slots(cluster) <= config.car_inventory_size then
+				and reserved + get_slots(cluster) <= config.car_cargo_size then
 				local distance = util.distance(origin, centroid)
 				if not best_index or distance < best_distance then
 					best_index, best_distance = index, distance
@@ -815,6 +842,22 @@ local function wait_for_phase(car, car_data)
 	_utils.start_waiting(car_data)
 end
 
+-- Closest supply chest whose group holds batteries, or nil (also nil when the
+-- battery slot of the car is full).
+function ghost_control.find_battery_chest(car)
+	if _utils.get_battery_count(car) >= prototypes.item[config.battery_item].stack_size then
+		return nil
+	end
+	return _utils.find_closest(storage.supply_chests, car.position, function(chest)
+		for _, member in pairs(ghost_control.find_chest_group(chest)) do
+			if member.get_inventory(defines.inventory.chest).get_item_count(config.battery_item) > 0 then
+				return true
+			end
+		end
+		return false
+	end, "chest", car.surface)
+end
+
 -- Decides the next step of a car's batch: end it if no ghost is left, drive to
 -- the site once every item is on board and no earlier phase is left (wait
 -- otherwise), otherwise fetch items from a supply chest, or wait with an alert
@@ -857,6 +900,31 @@ function ghost_control.proceed(car)
 		end
 		_utils.start_waiting(car_data)
 	end
+end
+
+-- "restock" task: the car reached the supply chest `chest`. Takes as many batteries
+-- as its battery slot holds, then goes on (the car is idle and about to park:
+-- its wait is already over, end_wait sends it to its garage).
+function ghost_control.restock_batteries(car, chest)
+	if chest and chest.valid then
+		local wanted = prototypes.item[config.battery_item].stack_size - _utils.get_battery_count(car)
+		for _, member in pairs(ghost_control.find_chest_group(chest)) do
+			if wanted <= 0 then
+				break
+			end
+			local inventory = member.get_inventory(defines.inventory.chest)
+			local count = math.min(wanted, inventory.get_item_count(config.battery_item))
+			if count > 0 then -- a chest of the group without batteries is skipped (remove needs a positive count)
+				local taken = inventory.remove{name = config.battery_item, count = count}
+				local inserted = _utils.insert_batteries(car, taken)
+				if inserted < taken then
+					inventory.insert{name = config.battery_item, count = taken - inserted}
+				end
+				wanted = wanted - inserted
+			end
+		end
+	end
+	_utils.start_waiting(storage.car_data[car.unit_number], game.tick - config.idle_delay)
 end
 
 -- "collect" task: the car reached the supply chest `chest`. Takes what it still
@@ -921,6 +989,24 @@ function ghost_control.find_nearest_ready_ghost(car, cluster)
 	return best, any_valid
 end
 
+-- Puts the items of the insert plan of a revived ghost in its inventories, taking
+-- them from the trunk. A slot that does not take its item leaves it in the trunk
+-- (a surplus, deposited at the end of the batch).
+local function insert_requests(trunk, entity, plans)
+	for _, plan in pairs(plans) do
+		local name = plan.id.name
+		local key = _utils.make_item_key(type(name) == "string" and name or name.name, plan.id.quality)
+		for _, position in pairs(plan.items.in_inventory or {}) do
+			local inventory = entity.get_inventory(position.inventory)
+			local stack = inventory and inventory[position.stack + 1] -- 0-based in the plan
+			local count = position.count or 1
+			if stack and not stack.valid_for_read and stack.set_stack(_utils.make_stack(key, count)) then
+				trunk.remove(_utils.make_stack(key, count))
+			end
+		end
+	end
+end
+
 -- Builds a ghost with an item from the car trunk. Returns false if the revive
 -- failed, usually because something - often the car itself - is in the way.
 function ghost_control.revive_ghost(car, ghost)
@@ -933,13 +1019,27 @@ function ghost_control.revive_ghost(car, ghost)
 	if _utils.get_item_count(trunk, key) <= 0 then
 		return false
 	end
+	local requests = compute_requests(ghost)
+	for request, count in pairs(requests) do
+		if _utils.get_item_count(trunk, request) < count then
+			return false
+		end
+	end
+	local plans = ghost.type == "entity-ghost" and ghost.insert_plan or {}
 
 	-- revive() returns nil when it fails.
-	if ghost.revive{raise_revive = true} then
-		trunk.remove(_utils.make_stack(key, 1))
-		return true
+	local collided, entity, proxy = ghost.revive{raise_revive = true}
+	if not collided then
+		return false
 	end
-	return false
+	trunk.remove(_utils.make_stack(key, 1))
+	if entity and entity.valid then
+		insert_requests(trunk, entity, plans)
+	end
+	if proxy and proxy.valid then
+		proxy.destroy() -- the car delivered the requests itself
+	end
+	return true
 end
 
 -- Mines an entity marked for deconstruction into the car trunk; a cliff is
@@ -1158,7 +1258,7 @@ end
 -- True if a group of supply chests has room for at least one of the items of
 -- `trunk`.
 local function can_group_store(group, trunk)
-	for key in pairs(_utils.get_contents(trunk)) do
+	for key in pairs(_utils.get_cargo_contents(trunk)) do
 		for _, chest in pairs(group) do
 			if chest.get_inventory(defines.inventory.chest).can_insert(_utils.make_stack(key, 1)) then
 				return true
@@ -1185,7 +1285,7 @@ end
 -- then back in the waiting loop.
 function ghost_control.deposit_leftovers(car)
 	local car_data = storage.car_data[car.unit_number]
-	if car.get_inventory(defines.inventory.car_trunk).is_empty() then
+	if _utils.is_cargo_empty(car) then
 		_utils.alert_reset(car_data.alerts, "supply_full")
 		return false
 	end
@@ -1208,7 +1308,7 @@ function ghost_control.deposit_items(car, chest)
 	if chest and chest.valid then
 		for _, member in pairs(ghost_control.find_chest_group(chest)) do
 			local inventory = member.get_inventory(defines.inventory.chest)
-			for key, count in pairs(_utils.get_contents(trunk)) do
+			for key, count in pairs(_utils.get_cargo_contents(trunk)) do
 				local inserted = inventory.insert(_utils.make_stack(key, count))
 				if inserted > 0 then
 					trunk.remove(_utils.make_stack(key, inserted))
