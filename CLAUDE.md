@@ -267,10 +267,6 @@ Aucun pour l'instant.
 
 ### Corrigés, à valider
 
-- **Modules des ghosts** (2026-10-17). La voiture prend aussi au coffre les objets que le ghost demande (modules) et les insère à leurs slots après la construction ; elle retire la demande de livraison (`item-request-proxy`). Un module absent du coffre fait attendre le cluster comme tout objet manquant. À valider en jeu : foreuse ou assembleur avec modules, module manquant, qualité.
-
-- **Batteries de secours** (2026-10-16). Le dernier slot du coffre (41 slots, 40 de chargement) n'accepte que des batteries, filtre remis en place automatiquement ; une voiture brûle une batterie sous 2,5 % de charge (le quart du seuil critique), les batteries comptent pour rejoindre un chargeur, et chaque voiture complète le slot depuis un coffre d'approvisionnement juste avant de se garer. Alerte « batterie vide » seulement sans batterie. À valider en jeu : recharge du slot juste avant le garage, voiture à 3 % qui brûle une batterie, voiture vide + 1 batterie qui repart, modification du filtre du slot par le joueur.
-
 #### Validation reportée
 
 - **Qualité des objets** (ancien problème 9). Ghosts, mises à niveau, collecte, dépôt, fenêtre des objets manquants et garage tiennent compte de la qualité (rien ne devient gratuitement normal ou rare). Écrit d'après la documentation : Factorio refuse tout prototype de qualité sans l'extension Qualité, que le propriétaire n'a pas à court terme ; la qualité normale ne régresse pas.
