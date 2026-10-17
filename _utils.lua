@@ -259,6 +259,43 @@ function _utils.get_cargo_contents(trunk)
 end
 
 -- ============================================================
+-- Ammo
+-- ============================================================
+-- An armed car has one ammo slot (the car_ammo inventory of its gun, which only
+-- takes bullet ammo). armed.lua gives it a hidden turret that fires that ammo.
+
+-- True once the force of the car has researched the armed car technology.
+function _utils.is_armed(car)
+	return car.force.technologies[config.names.armed_technology].researched
+end
+
+-- Stack in the ammo slot of a car ({name, quality, count}), or nil.
+function _utils.get_ammo(car)
+	local stack = car.get_inventory(defines.inventory.car_ammo)[1]
+	if stack.valid_for_read then
+		return {name = stack.name, quality = stack.quality.name, count = stack.count}
+	end
+	return nil
+end
+
+-- Takes the ammo out of the slot; returns the stack (see get_ammo) or nil.
+function _utils.remove_ammo(car)
+	local ammo = _utils.get_ammo(car)
+	if ammo then
+		car.get_inventory(defines.inventory.car_ammo).clear()
+	end
+	return ammo
+end
+
+-- Puts `count` of the ammo `ammo` ({name, quality}) in the slot; returns how many went in.
+function _utils.insert_ammo(car, ammo, count)
+	if count <= 0 then
+		return 0
+	end
+	return car.get_inventory(defines.inventory.car_ammo).insert{name = ammo.name, quality = ammo.quality, count = count}
+end
+
+-- ============================================================
 -- Alerts
 -- ============================================================
 -- `item` is the name of the item whose icon marks the alert on the map.

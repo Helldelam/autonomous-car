@@ -1227,6 +1227,216 @@ scenarios["batteries-emergency"] = {
 	end,
 }
 
+-- The car of the scenario now standing on its surface (a garage gives a new entity back), or nil.
+local function current_car()
+	return T.surface.find_entities_filtered{name = names.car, limit = 1}[1]
+end
+
+-- Armed cars (the research is done at setup). Area A: an idle car (full tank, 10 batteries,
+-- 5 firearm magazines) takes batteries and ammo from a supply chest (300 batteries, 100 firearm and 20
+-- uranium magazines, and an empty chest in the group) just before parking: it swaps its firearm
+-- magazines for the stronger uranium ones. EVENT t=3500 gives what the garage keeps aside for it
+-- (batteries 200, uranium x20, 105 firearm magazines back in the chest), then the ghost selected at
+-- t = 4000 sends it out again with both, and a turret (EVENT lines every 100 ticks).
+scenarios["armed"] = {
+	ticks = 7000,
+	category = "robustness",
+	setup = function()
+		game.forces.player.technologies[names.armed_technology].researched = true
+		local s = new_surface({{0, 0}}, 6)
+		make(s, names.charger, 0, 0)
+		T.garage = make(s, names.garage, 20, -10)
+		T.chest = make(s, names.chest, 0.5, 30.5)
+		fill(T.chest, {["wooden-chest"] = 20, battery = 300, ["firearm-magazine"] = 100, ["uranium-rounds-magazine"] = 20})
+		make(s, names.chest, 2.5, 30.5)
+		make_ghost(s, "wooden-chest", 40.5, 40.5)
+		T.car = make_car(s, 10, 10, 0, 1)
+		_utils.insert_batteries(T.car, 10)
+		_utils.insert_ammo(T.car, {name = "firearm-magazine", quality = "normal"}, 5)
+		T.surface = s
+		T.cars = {T.car}
+	end,
+	events = function(t)
+		if t == 3500 then
+			local data = storage.garage_data[T.garage.unit_number]
+			local ammo = select(2, next(data.ammo))
+			out("EVENT garage t=" .. t .. ": batteries kept " .. tostring(select(2, next(data.batteries))) .. ", ammo kept "
+				.. tostring(ammo and ammo.name) .. " x" .. tostring(ammo and ammo.count) .. ", chest firearm magazines "
+				.. T.chest.get_item_count("firearm-magazine") .. ", car valid " .. tostring(T.car.valid))
+		end
+		if t == 4000 then
+			select_ghosts(35, 35, 45, 45)
+		end
+		if t % 100 == 0 and t >= 1000 then
+			local car = current_car()
+			if car then
+				local ammo = _utils.get_ammo(car)
+				local turret = storage.car_data[car.unit_number].turret
+				out(string.format("EVENT t=%d car at %.0f,%.0f: batteries %d, magazines %s, turret %s", t, car.position.x, car.position.y,
+					_utils.get_battery_count(car), tostring(ammo and ammo.count), tostring(turret ~= nil and turret.valid)))
+			end
+		end
+	end,
+}
+
+-- Armed car defending itself: an idle car with 60 magazines (no garage on the surface, so it
+-- stays put) is attacked by four small biters (firearm rounds are weak against medium ones) from t = 1000; its turret must kill them, and what
+-- it fires comes out of the car's ammo slot (EVENT lines every 100 ticks).
+scenarios["armed-defense"] = {
+	ticks = 3000,
+	category = "robustness",
+	setup = function()
+		game.forces.player.technologies[names.armed_technology].researched = true
+		local s = new_surface({{0, 0}}, 6)
+		T.surface = s
+		T.car = make_car(s, 0, 0, 0, 1)
+		_utils.insert_ammo(T.car, {name = "firearm-magazine", quality = "normal"}, 60)
+		T.cars = {T.car}
+		T.biters = {}
+	end,
+	events = function(t)
+		if t == 1000 then
+			for i = 1, 4 do
+				local biter = T.surface.create_entity{name = "small-biter", position = {20, -6 + 4 * i}, force = "enemy"}
+				biter.commandable.set_command{type = defines.command.attack, target = T.car, distraction = defines.distraction.none}
+				T.biters[i] = biter
+			end
+		end
+		if t % 100 == 0 and t >= 1000 then
+			local alive = 0
+			for _, biter in pairs(T.biters) do
+				if biter.valid then
+					alive = alive + 1
+				end
+			end
+			local car = current_car()
+			local ammo = car and _utils.get_ammo(car)
+			out(string.format("EVENT t=%d biters alive %d, car health %s, magazines %s", t, alive,
+				car and string.format("%.0f", car.health) or "dead", tostring(ammo and ammo.count)))
+		end
+	end,
+}
+
+-- Armed cars with different ammo against two medium biters each: three cars 200 tiles apart
+-- (firearm, piercing and uranium magazines). EVENT lines every 100 ticks: biters alive, car health
+-- and magazines left per car; the first EVENT gives the force's bonuses (the hidden turret gets the
+-- ammo damage and gun speed bonuses, but not the "gun-turret" attack bonus, tied to the turret name).
+scenarios["armed-ammo"] = {
+	ticks = 2500,
+	category = "robustness",
+	setup = function()
+		game.forces.player.technologies[names.armed_technology].researched = true
+		local s = new_surface({{0, 0}, {200, 0}, {400, 0}}, 6)
+		T.surface = s
+		T.ammo_names = {"firearm-magazine", "piercing-rounds-magazine", "uranium-rounds-magazine"}
+		T.cars = {}
+		T.biters = {}
+		for index, ammo_name in ipairs(T.ammo_names) do
+			local car = make_car(s, 200 * (index - 1), 0, 0, 1)
+			_utils.insert_ammo(car, {name = ammo_name, quality = "normal"}, 60)
+			T.cars[index] = car
+			T.biters[index] = {}
+		end
+	end,
+	events = function(t)
+		if t == 1000 then
+			local force = game.forces.player
+			out(string.format("EVENT bonuses: bullet damage %.2f, gun speed %.2f, hidden turret attack %.2f, gun turret attack %.2f",
+				force.get_ammo_damage_modifier("bullet"), force.get_gun_speed_modifier("bullet"),
+				force.get_turret_attack_modifier(names.turret), force.get_turret_attack_modifier("gun-turret")))
+			for index, car in ipairs(T.cars) do
+				for i = 1, 2 do
+					local biter = T.surface.create_entity{name = "medium-biter", position = {200 * (index - 1) + 20, -2 + 4 * i}, force = "enemy"}
+					biter.commandable.set_command{type = defines.command.attack, target = car, distraction = defines.distraction.none}
+					T.biters[index][i] = biter
+				end
+			end
+		end
+		if t % 100 == 0 and t >= 1000 then
+			local parts = {}
+			for index, car in ipairs(T.cars) do
+				local alive = 0
+				for _, biter in pairs(T.biters[index]) do
+					if biter.valid then
+						alive = alive + 1
+					end
+				end
+				local ammo = car.valid and _utils.get_ammo(car)
+				parts[#parts + 1] = string.format("%s: biters %d, health %s, ammo %s", T.ammo_names[index]:sub(1, 5), alive,
+					car.valid and string.format("%.0f", car.health) or "dead", tostring(ammo and ammo.count))
+			end
+			out("EVENT t=" .. t .. " " .. table.concat(parts, " | "))
+		end
+	end,
+}
+
+-- Fleeing from the enemy. Car 1 (west) has a ghost to build 30 tiles from a small worm; a charger
+-- lies on the far side of the car, away from the worm (garage and charger positions below): each time
+-- the car comes within 40 tiles of the worm it must flee to the charger, wait there, come back, and
+-- after config.flee.max_count (3) flights abandon its batch at the 4th (EVENT lines: flee count,
+-- batch, position; the ghost must stay unbuilt). `flee-open`: the only chargers are behind
+-- the worm or past config.flee.max_refuge_distance: no refuge, so each time the car drives 150 tiles straight away
+-- from the worm (EVENT lines: position far from the worm while fleeing), comes back, and abandons after 3 flights.
+scenarios["flee"] = {
+	ticks = 14000,
+	category = "robustness",
+	setup = function()
+		local s = new_surface({{0, 0}}, 6)
+		T.surface = s
+		-- West: car at the origin, ghost 80 tiles east, worm 30 tiles beyond it, charger and garage behind the car.
+		T.refuge = make(s, names.charger, 30, -30)
+		make(s, names.garage, -40, 10)
+		T.chest = make(s, names.chest, 0.5, 20.5)
+		fill(T.chest, {["wooden-chest"] = 20})
+		s.create_entity{name = "small-worm-turret", position = {110, 0}, force = "enemy"}
+		make_ghost(s, "wooden-chest", 80.5, 0.5)
+		T.car = make_car(s, 0, 0, 0.25, 1)
+		T.cars = {T.car}
+	end,
+	events = function(t)
+		if t == 100 then
+			select_ghosts(75, -5, 85, 5)
+		end
+		if t >= 200 and t % 200 == 0 and current_car() then
+			local car = current_car()
+			local data = storage.car_data[car.unit_number]
+			local built = #T.surface.find_entities_filtered{name = "wooden-chest", position = {80.5, 0.5}, radius = 2}
+			out(string.format("EVENT t=%d flights %d%s, batch %s, at %.0f,%.0f | chests built %d", t, data.flee.count,
+				data.flee.active and " (fleeing)" or "", tostring(data.construction ~= nil), car.position.x, car.position.y, built))
+		end
+	end,
+}
+
+scenarios["flee-open"] = {
+	ticks = 14000,
+	category = "robustness",
+	setup = function()
+		local s = new_surface({{0, 0}, {150, 50}, {230, 0}}, 6)
+		T.surface = s
+		-- The worm lies between the car and the only charger (to the west).
+		make(s, names.charger, -40, 0)
+		make(s, names.charger, 230, 0) -- away from the worm but too far to be a refuge
+		T.chest = make(s, names.chest, 0.5, 20.5)
+		fill(T.chest, {["wooden-chest"] = 20})
+		s.create_entity{name = "small-worm-turret", position = {0, 0}, force = "enemy"}
+		make_ghost(s, "wooden-chest", 30.5, 0.5)
+		T.car = make_car(s, 30, 10, 0.25, 1)
+		T.cars = {T.car}
+	end,
+	events = function(t)
+		if t == 100 then
+			select_ghosts(25, -5, 35, 5)
+		end
+		if t >= 200 and t % 200 == 0 and current_car() then
+			local car = current_car()
+			local data = storage.car_data[car.unit_number]
+			local built = #T.surface.find_entities_filtered{name = "wooden-chest", position = {30.5, 0.5}, radius = 2}
+			out(string.format("EVENT t=%d flights %d%s, batch %s, at %.0f,%.0f | chests built %d", t, data.flee.count,
+				data.flee.active and " (fleeing)" or "", tostring(data.construction ~= nil), car.position.x, car.position.y, built))
+		end
+	end,
+}
+
 -- Two idle cars side by side, one at 14 % charge with the only charger 800 tiles away
 -- (under its critical level, out of reach), one full. A ghost is selected at t = 200:
 -- the full car must get the batch, the low one none (EVENT lines at t = 1500).

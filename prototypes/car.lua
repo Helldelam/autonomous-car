@@ -3,7 +3,6 @@
 -- which the scripts use as a battery. Its name, size and trunk come from
 -- config.lua, which the scripts read too. Its colour is not a prototype
 -- property: on_built in control.lua sets it on each car.
--- TODO: let the player arm the car (small capacity) so it defends itself. See "À faire" in CLAUDE.md.
 -- TODO: modified spidertron (legs, no collision), as a replacement or an upgrade of the car; check it fits the game's technologies. See "À faire" in CLAUDE.md.
 local config = require("config")
 local names = config.names
@@ -300,6 +299,9 @@ local car = {
 	rotation_snap_angle = 0.015,
 	weight = 100,
 	inventory_size = config.car_inventory_size,
+	guns = {"vehicle-machine-gun"}, -- gun and ammo slots: the car shoots only once armed (see "Armed car" in CLAUDE.md)
+	allow_passengers = false, -- no player interaction: nobody rides it
+	trash_inventory_size = 0, -- no logistics tab
 	track_particle_triggers = movement_triggers.car,
 	water_reflection = car_reflection(1),
 }
@@ -331,4 +333,23 @@ local recipe = {
 	results = {{type = "item", name = names.car, amount = 1}}
 }
 
-data:extend{car, item, recipe}
+-- Arms the cars: the script reads this research (_utils.is_armed). It has no effect of its own.
+-- TODO: placeholder cost and prerequisites; see "Technologies" in "À faire" in CLAUDE.md.
+local armed_technology = {
+	type = "technology",
+	name = names.armed_technology,
+	icon = icon,
+	icon_size = 64,
+	prerequisites = {"military", "automobilism"},
+	unit = {
+		count = 100,
+		ingredients = {
+			{"automation-science-pack", 1},
+			{"logistic-science-pack", 1}
+		},
+		time = 30
+	},
+	order = "e-a-a"
+}
+
+data:extend{car, item, recipe, armed_technology}

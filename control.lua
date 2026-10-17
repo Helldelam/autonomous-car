@@ -11,6 +11,7 @@ local ghost_control = require("ghost")
 local gui = require("gui")
 local debug_view = require("debug_view")
 local game_trace = require("game_trace")
+local armed = require("armed")
 
 local names = config.names
 
@@ -25,6 +26,7 @@ _utils.register_release_handler("car", function(id)
 	if car_data then
 		travel.release_charger_slot(car_data) -- a car lost on its way to a charger, or at it, must not keep the slot
 		travel.requeue_construction(car_data)
+		armed.release(car_data)
 	end
 	storage.cars[id] = nil
 	storage.car_data[id] = nil
@@ -83,6 +85,10 @@ local function create_car_data(tick)
 		construction = nil, -- current batch, see ghost.lua
 		tasks = _utils.deque.new(), -- what to do when the current step ends; the front task runs first
 
+		-- Fleeing from an enemy (handle_danger): `active` while on the way to the refuge, `count` the flights of this batch.
+		flee = {active = false, count = 0},
+		turret = nil, turret_ammo = nil, -- hidden turret of an armed car and the ammo it holds, see armed.lua
+
 		-- Failure tracking, see travel.lua.
 		charge_detour_count = 0,
 		stuck_retry_count = 0,
@@ -115,7 +121,7 @@ local function on_built(event)
 		storage.charger_data[id] = {users = 0} -- cars charging here or on their way
 	elseif entity.name == names.garage then
 		storage.garages[id] = entity
-		storage.garage_data[id] = {fuel = {}, batteries = {}, alerts = {}} -- fuel[slot], batteries[slot] = fuel level and batteries of the car parked in that slot
+		storage.garage_data[id] = {fuel = {}, batteries = {}, ammo = {}, alerts = {}} -- fuel[slot], batteries[slot], ammo[slot] = fuel level, batteries and ammo of the car parked in that slot
 	elseif entity.name == names.chest then
 		storage.supply_chests[id] = entity
 	end
@@ -226,9 +232,9 @@ local function end_wait(car, car_data, tick)
 			car_data.waiting.since = tick
 		elseif not travel.top_up_before_parking(car, garage.position) then
 			_utils.alert_reset(car_data.alerts, "no_garage")
-			-- Batteries are topped up just before parking, if a chest has some: without
-			-- batteries the car parks all the same.
-			local chest = ghost_control.find_battery_chest(car)
+			-- Batteries and ammo are topped up just before parking, if a chest has some: without
+			-- them the car parks all the same.
+			local chest = ghost_control.find_restock_chest(car)
 			if chest then
 				travel.set_destination(car, chest, {type = "restock"})
 			else
@@ -238,9 +244,36 @@ local function end_wait(car, car_data, tick)
 	end
 end
 
+-- A moving or building car that finds an enemy within config.flee.radius flees (see
+-- travel.start_flee). Past config.flee.max_count flights in one batch it abandons the
+-- batch; with no batch left, it ignores enemies until it has a new one. Measured every
+-- config.slow_check_interval ticks. A car short of fuel is left to handle_critical_fuel.
+-- Returns true when it took over the car for this tick.
+local function handle_danger(car, car_data, tick)
+	local flee = car_data.flee
+	if flee.active or not (car_data.moving.active or car_data.building.active) or not _utils.is_slow_check_due(car, tick)
+		or travel.is_fuel_critical(car) then
+		return false
+	end
+	local exhausted = flee.count >= config.flee.max_count
+	if exhausted and not car_data.construction then
+		return false
+	end
+	local enemy = car.surface.find_nearest_enemy{position = car.position, max_distance = config.flee.radius, force = car.force}
+	if not enemy then
+		return false
+	end
+	if exhausted then
+		ghost_control.abandon(car, "An autonomous car ABANDONED its task: enemies keep coming near its site. Select the ghosts again once the area is safe.")
+		return true
+	end
+	travel.start_flee(car, travel.find_refuge(car, enemy))
+	return true
+end
+
 local function update_car(car, car_data, tick)
 	-- An empty battery, then a critically low tank, come before everything else.
-	if travel.handle_empty(car, tick) or travel.handle_critical_fuel(car, tick) then
+	if travel.handle_empty(car, tick) or travel.handle_critical_fuel(car, tick) or handle_danger(car, car_data, tick) then
 		return
 	end
 
@@ -303,6 +336,7 @@ local function on_tick(event)
 			-- No event tells that the player changed the filter of the battery slot.
 			if _utils.is_slow_check_due(car, event.tick) then
 				_utils.set_battery_filter(car)
+				armed.update(car, storage.car_data[id])
 			end
 			update_car(car, storage.car_data[id], event.tick)
 			if storage.game_trace and car.valid then -- the car is gone when it has just parked in a garage
@@ -403,7 +437,12 @@ local function on_next_task(event)
 	elseif task.type == "deposit" then
 		ghost_control.deposit_items(car, destination)
 	elseif task.type == "restock" then
-		ghost_control.restock_batteries(car, destination)
+		ghost_control.restock(car, destination)
+	elseif task.type == "flee" then
+		-- Safe for now: waits for the danger to pass, then the waiting loop resumes the batch.
+		car_data.flee.active = false
+		_utils.alert_reset(car_data.alerts, "flee")
+		_utils.start_waiting(car_data, event.tick + config.long_delay - config.idle_delay)
 	end
 end
 

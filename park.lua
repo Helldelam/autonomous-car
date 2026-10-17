@@ -53,14 +53,20 @@ function garage_control.parking_tick(car, garage)
 	end
 	local garage_data = storage.garage_data[garage.unit_number]
 	garage_data.fuel[slot] = _utils.get_fuel(car)
-	-- The batteries stay with the car, not in the garage slots.
+	-- The batteries and the ammo stay with the car, not in the garage slots.
 	local batteries = _utils.remove_batteries(car, _utils.get_battery_count(car))
 	garage_data.batteries[slot] = batteries > 0 and batteries or nil
+	local ammo = _utils.remove_ammo(car)
+	garage_data.ammo[slot] = ammo
 
 	-- Once mined the car entity is invalid: on_tick releases its state on the next tick.
 	if not car.mine{inventory = inventory} then
 		_utils.insert_batteries(car, batteries)
 		garage_data.batteries[slot] = nil
+		if ammo then
+			_utils.insert_ammo(car, ammo, ammo.count)
+		end
+		garage_data.ammo[slot] = nil
 		alert_parking_failed(car, garage)
 	end
 end
@@ -111,10 +117,15 @@ function garage_control.release_car(garage)
 		if garage_data.batteries[slot] then
 			_utils.insert_batteries(car, garage_data.batteries[slot])
 		end
+		local ammo = garage_data.ammo[slot]
+		if ammo then
+			_utils.insert_ammo(car, ammo, ammo.count)
+		end
 	end
 	stack.clear()
 	garage_data.fuel[slot] = nil
 	garage_data.batteries[slot] = nil
+	garage_data.ammo[slot] = nil
 	return car
 end
 
