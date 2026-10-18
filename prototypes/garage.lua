@@ -27,8 +27,7 @@ garage.collision_box = {{-1.8, -1.8}, {1.8, 1.8}}
 garage.selection_box = {{-2, -2}, {2, 2}}
 garage.fast_replaceable_group = nil
 garage.inventory_size = config.garage_inventory_size
-garage.inventory_type = "with_custom_stack_size"
-garage.inventory_properties = {stack_size_max = 1, with_bar = true}
+garage.inventory_type = "with_filters_and_bar" -- filters lock the slots above the capacity and the repair pack slots before the research (garage_control.update_inventory)
 garage.picture =
 {
 	layers =
@@ -63,7 +62,7 @@ garage_item.stack_size = 4
 local garage_recipe = {
 	type = "recipe",
 	name = names.garage,
-	enabled = true,
+	enabled = false, -- unlocked by names.technology
 	energy_required = 30,
 	ingredients = {
 		{type = "item", name = "electric-engine-unit", amount = 2},

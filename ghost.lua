@@ -393,11 +393,12 @@ end
 
 -- Splits ghosts into clusters: one ghost type per cluster (all the entities to
 -- mine, or to upgrade, or the ghosts that extend the logistic network, together),
--- small enough for a car trunk (config.car_cargo_size slots). A cluster grows
+-- small enough for the trunk of a car of `force` (config.upgrades.cargo slots). A cluster grows
 -- breadth-first from a seed ghost, nearest neighbours first, so it stays compact.
 -- The first ghost that no longer fits becomes the seed of the next cluster, so
 -- clusters tile the selected area.
-function ghost_control.build_clusters(ghosts)
+function ghost_control.build_clusters(ghosts, force)
+	local capacity = _utils.get_upgrade(force, "cargo") -- trunk slots of the cars of the force that selected them
 	local by_name = {}
 	for _, ghost in pairs(ghosts) do
 		local mode = ghost_control.get_target_mode(ghost)
@@ -425,7 +426,7 @@ function ghost_control.build_clusters(ghosts)
 			-- Adds a ghost to the cluster if its item still fits in the trunk.
 			local function try_add(ghost)
 				local delta, load = count_extra_slots(items, ghost)
-				if slots + delta > config.car_cargo_size then
+				if slots + delta > capacity then
 					return false
 				end
 				table.insert(cluster, ghost)
@@ -668,7 +669,7 @@ function ghost_control.fill_batch(car)
 			local centroid = ghost_control.compute_centroid(cluster.ghosts)
 			if centroid and is_cluster_ready(cluster) and get_cluster_surface(cluster) == car.surface
 				and get_mode(cluster.ghosts) == mode
-				and reserved + get_slots(cluster) <= config.car_cargo_size then
+				and reserved + get_slots(cluster) <= _utils.get_upgrade(car.force, "cargo") then
 				local distance = util.distance(origin, centroid)
 				if not best_index or distance < best_distance then
 					best_index, best_distance = index, distance
@@ -1339,7 +1340,7 @@ function ghost_control.go_to_site(car)
 end
 
 -- Called every tick while the car is stopped at its site: tries one ghost of the
--- site every config.build_interval ticks, so the batch goes up one entity at a
+-- site every config.build_interval ticks (more or less with the build speed research), so the batch goes up one entity at a
 -- time. When none of them is ready, the car goes on to the next cluster, or steps
 -- back if only ghosts on cooldown are left (see go_to_site).
 function ghost_control.building_tick(car, tick)
@@ -1347,7 +1348,7 @@ function ghost_control.building_tick(car, tick)
 	if tick < car_data.building.next_attempt_tick then
 		return
 	end
-	car_data.building.next_attempt_tick = tick + config.build_interval
+	car_data.building.next_attempt_tick = tick + config.build_interval / _utils.get_upgrade(car.force, "build_speed")
 
 	local construction = car_data.construction
 	if not construction or next(construction.ghosts) == nil then

@@ -299,7 +299,7 @@ local car = {
 	rotation_snap_angle = 0.015,
 	weight = 100,
 	inventory_size = config.car_inventory_size,
-	guns = {"vehicle-machine-gun"}, -- gun and ammo slots: the car shoots only once armed (see "Armed car" in CLAUDE.md)
+	guns = {"vehicle-machine-gun"}, -- gun and ammo slots: the car shoots only once the force has researched Military (see "Armed car" in CLAUDE.md)
 	allow_passengers = false, -- no player interaction: nobody rides it
 	trash_inventory_size = 0, -- no logistics tab
 	track_particle_triggers = movement_triggers.car,
@@ -316,16 +316,16 @@ local item = {
 	pick_sound = item_sounds.robotic_inventory_pickup,
 	drop_sound = item_sounds.robotic_inventory_move,
 	place_result = names.car,
-	stack_size = 8
+	stack_size = 1 -- one car per garage slot: the garage has filters, so its slots stack like any inventory
 }
 
 local recipe = {
 	type = "recipe",
 	name = names.car,
-	enabled = true,
+	enabled = false, -- unlocked by names.technology
 	energy_required = 8,
 	ingredients = {
-		{type = "item", name = "engine-unit", amount = 1},
+		{type = "item", name = "electric-engine-unit", amount = 1},
 		{type = "item", name = "iron-plate", amount = 10},
 		{type = "item", name = "advanced-circuit", amount = 5},
 		{type = "item", name = "steel-plate", amount = 2}
@@ -333,23 +333,4 @@ local recipe = {
 	results = {{type = "item", name = names.car, amount = 1}}
 }
 
--- Arms the cars: the script reads this research (_utils.is_armed). It has no effect of its own.
--- TODO: placeholder cost and prerequisites; see "Technologies" in "À faire" in CLAUDE.md.
-local armed_technology = {
-	type = "technology",
-	name = names.armed_technology,
-	icon = icon,
-	icon_size = 64,
-	prerequisites = {"military", "automobilism"},
-	unit = {
-		count = 100,
-		ingredients = {
-			{"automation-science-pack", 1},
-			{"logistic-science-pack", 1}
-		},
-		time = 30
-	},
-	order = "e-a-a"
-}
-
-data:extend{car, item, recipe, armed_technology}
+data:extend{car, item, recipe}

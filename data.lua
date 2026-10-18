@@ -2,9 +2,6 @@
 -- Every prototype name comes from config.names, which the scripts read too.
 local names = require("config").names
 
--- TODO: technologies (TechnologyPrototype) that unlock the mod's items and improve charge and
--- repair speed, garage repair, garage/charger/car capacity, build speed and driving speed.
--- See "À faire" in CLAUDE.md.
 data:extend{
 	{
 		type = "fuel-category",
@@ -28,6 +25,28 @@ data:extend{
 		subgroup = names.subgroup,
 		order = "zz[fuel]",
 	},
+	-- Filter of a locked inventory slot: nothing can be put in it (trunk slots above the cargo
+	-- size, garage slots above the capacity, repair pack slots before the research, ammo slot
+	-- before Military). An ammo slot only takes filters that are ammo of its category, hence
+	-- the ammo type: it deals no damage, and no script or recipe ever puts it in a slot.
+	{
+		type = "ammo",
+		name = names.locked_slot,
+		hidden = true,
+		stack_size = 1,
+		ammo_category = "bullet",
+		magazine_size = 1,
+		ammo_type = {
+			action = {
+				type = "direct",
+				action_delivery = {type = "instant", target_effects = {{type = "damage", damage = {amount = 0, type = "physical"}}}},
+			},
+		},
+		icon = "__autonomous-car__/graphics/locked/icon.png",
+		icon_size = 64,
+		subgroup = "ammo", -- the research lists the ammo of its category by subgroup and order: last
+		order = "zz[locked]",
+	},
 	-- Raised when a car finishes its current step (see _utils.raise_next_task).
 	{
 		type = "custom-event",
@@ -43,3 +62,4 @@ require("prototypes/ghost_selector.lua")
 require("prototypes/missing_items.lua")
 require("prototypes/debug_view.lua")
 require("prototypes/turret.lua")
+require("prototypes/technology.lua")

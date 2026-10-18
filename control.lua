@@ -111,7 +111,7 @@ local function on_built(event)
 		entity.riding_state = {acceleration = defines.riding.acceleration.nothing, direction = defines.riding.direction.straight}
 		-- A new car starts with config.critical_fuel_ratio of a full tank.
 		_utils.set_fuel_item(entity)
-		_utils.set_battery_filter(entity)
+		_utils.set_trunk_limits(entity)
 		if _utils.get_fuel(entity) == 0 then
 			_utils.set_fuel(entity, _utils.get_fuel_capacity(entity) * config.critical_fuel_ratio)
 		end
@@ -119,9 +119,11 @@ local function on_built(event)
 		storage.car_data[id] = create_car_data(event.tick)
 	elseif entity.name == names.charger then
 		storage.chargers[id] = entity
+		charger_control.update_buffer(entity)
 		storage.charger_data[id] = {users = 0} -- cars charging here or on their way
 	elseif entity.name == names.garage then
 		storage.garages[id] = entity
+		garage_control.update_inventory(entity)
 		storage.garage_data[id] = {fuel = {}, batteries = {}, ammo = {}, alerts = {}} -- fuel[slot], batteries[slot], ammo[slot] = fuel level, batteries and ammo of the car parked in that slot
 	elseif entity.name == names.chest then
 		storage.supply_chests[id] = entity
@@ -171,7 +173,7 @@ local function on_area_selected(event)
 
 	-- All the clusters go to the pending pool first, so that a car can take
 	-- several of them along (see ghost_control.fill_batch).
-	for _, cluster in pairs(ghost_control.build_clusters(selected)) do
+	for _, cluster in pairs(ghost_control.build_clusters(selected, player and player.force or game.forces.player)) do
 		table.insert(storage.pending_clusters, cluster)
 	end
 	local any_car = ghost_control.is_any_car_present()
@@ -336,7 +338,7 @@ local function on_tick(event)
 		if car.valid then
 			-- No event tells that the player changed the filter of the battery slot.
 			if _utils.is_slow_check_due(car, event.tick) then
-				_utils.set_battery_filter(car)
+				_utils.set_trunk_limits(car)
 				armed.update(car, storage.car_data[id])
 			end
 			update_car(car, storage.car_data[id], event.tick)
@@ -354,8 +356,10 @@ local function on_tick(event)
 	if event.tick % config.slow_check_interval == 0 then
 		debug_view.refresh()
 	end
+	garage_control.update_inventories(event.tick)
 	if event.tick % config.long_delay == 0 then
 		ghost_control.retry_pending_clusters()
+		charger_control.update_buffers()
 		garage_control.repair_parked_cars()
 	end
 end
@@ -379,6 +383,7 @@ local function init_storage(event)
 	storage.pending_clusters = storage.pending_clusters or {} -- clusters waiting for a free car
 	storage.path_requests = storage.path_requests or {} -- [request id] = unit_number of the car waiting for that path
 	storage.idle_fallbacks = storage.idle_fallbacks or {} -- cars found in no state, see update_car
+	storage.research = storage.research or {} -- [force index] = values read from the research, see _utils.get_upgrade
 	storage.debug_view = storage.debug_view or {} -- [player index] = false or true when the player toggled the debug drawing, see debug_view.lua
 
 	debug_view.sync_shortcuts()
@@ -474,4 +479,11 @@ commands.add_command("car-trace", "Writes a trace of the autonomous cars to scri
 	function(command)
 		game_trace.toggle(game.get_player(command.player_index), tonumber(command.parameter))
 	end)
+-- A research changes the values the script reads for its force (_utils.get_upgrade).
+local function on_research_changed(event)
+	_utils.clear_research_cache(event.research.force)
+end
+
+script.on_event(defines.events.on_research_finished, on_research_changed)
+script.on_event(defines.events.on_research_reversed, on_research_changed)
 script.on_event(defines.events.on_tick, init_storage)

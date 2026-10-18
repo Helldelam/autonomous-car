@@ -3,7 +3,7 @@ local _utils = require("_utils")
 
 -- Armed cars. A car cannot be told to shoot by script (its shooting_state is for
 -- characters only) and has nobody aboard, so a hidden turret (config.names.turret)
--- follows each car once the armed car technology is researched and fires for it.
+-- follows each car once the force has researched Military and fires for it.
 -- The ammo slot of the car is the source of truth: the turret holds a copy, and
 -- what it fires is taken from the slot.
 local armed = {}
@@ -16,11 +16,16 @@ local function destroy_turret(car_data)
 	car_data.turret_ammo = nil
 end
 
--- Makes the turret of a car match its state: created when the force has the
--- technology, moved onto the car, its ammo set to the content of the ammo slot
+-- Makes the turret of a car match its state: created when the force has researched
+-- Military, moved onto the car, its ammo set to the content of the ammo slot
 -- (less what it fired since the last call). A car that is not armed or has no ammo
 -- has no turret (an empty turret shows a red warning icon).
 function armed.update(car, car_data)
+	-- The gun and ammo slots belong to the prototype and cannot be hidden: until Military
+	-- the ammo slot is locked like the other slots that are not available yet.
+	_utils.set_filters(car, car.get_inventory(defines.inventory.car_ammo), function()
+		return not _utils.is_armed(car) and config.names.locked_slot or nil
+	end)
 	if not _utils.is_armed(car) or not _utils.get_ammo(car) then
 		destroy_turret(car_data)
 		return

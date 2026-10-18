@@ -56,7 +56,7 @@ charger_item.stack_size = 5
 local charger_recipe = {
 	type = "recipe",
 	name = names.charger,
-	enabled = true,
+	enabled = false, -- unlocked by names.technology
 	energy_required = 8,
 	ingredients = {
 		{type = "item", name = "battery", amount = 10},

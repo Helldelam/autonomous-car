@@ -84,6 +84,12 @@ local function make(surface, name, x, y)
 	return entity
 end
 
+-- Researches a technology for a force (the mod clears its research cache on research events).
+local function research(force, name)
+	force.technologies[name].researched = true
+	_utils.clear_research_cache(force)
+end
+
 -- Small random shifts, to check that a result does not hang on exact positions:
 -- -Set "test_jitter=<seed>" (0 or nothing: none) moves every car by up to
 -- test_jitter_size tiles and turns it by a hundredth of a turn, and
@@ -410,6 +416,7 @@ scenarios["garage-exit"] = {
 		fill(T.chest, {["wooden-chest"] = 20, ["stone-furnace"] = 1})
 		T.car = make_car(s, -20, -20, 0)
 		T.car.health = T.car.max_health / 2
+		T.garage.get_inventory(defines.inventory.chest).insert{name = config.repair_kit, count = 2} -- the repair needs packs
 		make_ghost(s, "wooden-chest", 80.5, 40.5)
 		T.wall = s.create_entity{name = "stone-wall", position = {80.5, -40.5}, force = "player"}
 		make_ghost(s, "stone-furnace", 81, -41)
@@ -419,7 +426,9 @@ scenarios["garage-exit"] = {
 		if t == 3900 or t == 7900 then
 			local stack = T.garage.get_inventory(defines.inventory.chest).find_item_stack(names.car)
 			if stack then
-				out(string.format("EVENT parked car health %.3f at %d", stack.health, t))
+				local kit = T.garage.get_inventory(defines.inventory.chest)[config.garage_car_slots + 1]
+				out(string.format("EVENT parked car health %.3f at %d, repair packs %d (durability %.0f)", stack.health, t,
+					kit.valid_for_read and kit.count or 0, kit.valid_for_read and kit.durability or 0))
 			else
 				for _, car in pairs(storage.cars) do
 					out(string.format("EVENT car health %.3f of %.3f at %d", car.health, car.max_health, t))
@@ -1194,7 +1203,7 @@ scenarios["batteries-emergency"] = {
 		if t == 600 then
 			_utils.insert_batteries(T.cars[2], 1)
 		end
-		-- Battery slot of car 3 (see _utils.set_battery_filter): the trunk takes 40 slots of 50
+		-- Battery slot of car 3 (see _utils.set_trunk_limits): the trunk takes 40 slots of 50
 		-- chests; at t = 110 its filter is cleared and a chest put in it (the player could do it),
 		-- and control.lua must have put the filter back and moved the chest out by t = 130 (slow_check_interval).
 		local trunk = T.cars[3].valid and T.cars[3].get_inventory(defines.inventory.car_trunk)
@@ -1244,7 +1253,7 @@ scenarios["armed"] = {
 	ticks = 7000,
 	category = "robustness",
 	setup = function()
-		game.forces.player.technologies[names.armed_technology].researched = true
+		research(game.forces.player, "military")
 		local s = new_surface({{0, 0}}, 6)
 		make(s, names.charger, 0, 0)
 		T.garage = make(s, names.garage, 20, -10)
@@ -1284,6 +1293,73 @@ scenarios["armed"] = {
 	end,
 }
 
+-- Research: a force without any research gets cars with 20 cargo slots and no gun, garages of
+-- 30 cars with no repair pack slot, chargers for 2 cars; the researches change all that on
+-- the existing entities. EVENT lines before (t = 300) and after (t = 700) the research: cargo
+-- slots a stack of iron plates can fill (the battery slot and the hidden slots refuse it),
+-- cars and repair packs a garage takes, buffer of the charger in tank units, cars per charger
+-- and hidden turrets on the surface.
+scenarios["technologies"] = {
+	ticks = 800,
+	category = "robustness",
+	setup = function()
+		T.force = game.forces["test-research"] or game.create_force("test-research")
+		local s = new_surface({{0, 0}}, 6)
+		T.surface = s
+		T.car = s.create_entity{name = names.car, position = {0, 0}, force = T.force, raise_built = true}
+		T.garage = s.create_entity{name = names.garage, position = {20, 0}, force = T.force, raise_built = true}
+		T.charger = s.create_entity{name = names.charger, position = {-20, 0}, force = T.force, raise_built = true}
+		T.cars = {T.car}
+	end,
+	events = function(t)
+		local function report(label)
+			local trunk = T.car.get_inventory(defines.inventory.car_trunk)
+			local filled = 0
+			for _ = 1, #trunk do
+				if trunk.insert{name = "iron-plate", count = 100} > 0 then
+					filled = filled + 1
+				end
+			end
+			trunk.remove{name = "iron-plate", count = 100 * #trunk}
+			local garage = T.garage.get_inventory(defines.inventory.chest)
+			local cars = 0
+			while garage.insert{name = names.car, count = 1} > 0 do
+				cars = cars + 1
+			end
+			if cars > 0 then
+				garage.remove{name = names.car, count = cars}
+			end
+			local kits = garage.insert{name = config.repair_kit, count = 1}
+			if kits > 0 then
+				garage.remove{name = config.repair_kit, count = kits}
+			end
+			local ammo_slot = T.car.get_inventory(defines.inventory.car_ammo)
+			local ammo = ammo_slot.insert{name = "firearm-magazine", count = 1}
+			if ammo > 0 then
+				ammo_slot.remove{name = "firearm-magazine", count = ammo}
+			end
+			out(string.format("EVENT t=%d %s: cargo slots %d, ammo slot takes %d, garage cars %d, repair packs %d, charger buffer %.1f tanks for %d cars, speeds charge %.1f build %.1f, turrets %d",
+				t, label, filled, ammo, cars, kits, T.charger.electric_buffer_size / prototypes.item[names.fuel].fuel_value,
+				_utils.get_upgrade(T.force, "chargers"), _utils.get_upgrade(T.force, "charge_speed"), _utils.get_upgrade(T.force, "build_speed"),
+				#T.surface.find_entities_filtered{name = names.turret}))
+		end
+		if t == 300 then
+			report("no research")
+			research(T.force, names.technology)
+			research(T.force, names.repair_technology)
+			research(T.force, "military")
+			for _, key in ipairs{"cargo", "garage", "chargers", "charge_speed", "build_speed"} do
+				research(T.force, names.technology .. "_" .. key .. "_1")
+			end
+		elseif t == 500 then
+			-- The ammo slot opens once the cars have noticed the research (slow check).
+			_utils.insert_ammo(T.car, {name = "firearm-magazine", quality = "normal"}, 5)
+		elseif t == 700 then
+			report("level 1, repair and military")
+		end
+	end,
+}
+
 -- Armed car defending itself: an idle car with 60 magazines (no garage on the surface, so it
 -- stays put) is attacked by four small biters (firearm rounds are weak against medium ones) from t = 1000; its turret must kill them, and what
 -- it fires comes out of the car's ammo slot (EVENT lines every 100 ticks).
@@ -1291,7 +1367,7 @@ scenarios["armed-defense"] = {
 	ticks = 3000,
 	category = "robustness",
 	setup = function()
-		game.forces.player.technologies[names.armed_technology].researched = true
+		research(game.forces.player, "military")
 		local s = new_surface({{0, 0}}, 6)
 		T.surface = s
 		T.car = make_car(s, 0, 0, 0, 1)
@@ -1330,7 +1406,7 @@ scenarios["armed-ammo"] = {
 	ticks = 2500,
 	category = "robustness",
 	setup = function()
-		game.forces.player.technologies[names.armed_technology].researched = true
+		research(game.forces.player, "military")
 		local s = new_surface({{0, 0}, {200, 0}, {400, 0}}, 6)
 		T.surface = s
 		T.ammo_names = {"firearm-magazine", "piercing-rounds-magazine", "uranium-rounds-magazine"}
@@ -3046,6 +3122,27 @@ script.on_nth_tick(1, function(event)
 	if not T or not T.start_tick then
 		-- The mod creates its storage on its first tick (see init_storage).
 		if storage.cars then
+			-- Full trunks (40 slots) for every scenario; "technologies" uses another force.
+			-- The values of the first version of the mod: 40 cargo slots, 50 cars per garage,
+			-- 4 cars per charger, charge and build speed 1, free garage repair (here with packs).
+			-- -Set "test_research=<0, 1 or 2>": every improvement researched to that level instead
+			-- (0: none, repair included).
+			local force = game.forces.player
+			if config.test_research then
+				for key in pairs(config.upgrades) do
+					for level = 1, config.test_research do
+						research(force, names.technology .. "_" .. key .. "_" .. level)
+					end
+				end
+				if config.test_research > 0 then
+					research(force, names.repair_technology)
+				end
+			else
+				for _, name in ipairs{"cargo_1", "cargo_2", "garage_1", "garage_2", "chargers_1", "charge_speed_1", "build_speed_1"} do
+					research(force, names.technology .. "_" .. name)
+				end
+				research(force, names.repair_technology)
+			end
 			for _, name in ipairs(running) do
 				use(name)
 				seed = 12345 -- the same obstacles whatever the other scenarios of the run

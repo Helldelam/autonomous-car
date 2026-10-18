@@ -45,9 +45,28 @@ end
 function charger_control.find_charger(car, target_position)
 	local remaining_fuel = _utils.get_reachable_fuel(car)
 	return _utils.find_closest(storage.chargers, target_position or car.position, function(charger, id)
-		return storage.charger_data[id].users < config.max_charger_users
+		return storage.charger_data[id].users < _utils.get_upgrade(charger.force, "chargers")
 			and remaining_fuel >= charger_control.compute_fuel_to_reach(car, charger.position)
 	end, "charger", car.surface)
+end
+
+-- Sizes the buffer of a charger so that it can fill the tanks of all the cars that may
+-- use it at once, with a margin of half a tank.
+function charger_control.update_buffer(charger)
+	local size = (_utils.get_upgrade(charger.force, "chargers") + 0.5) * prototypes.item[config.names.fuel].fuel_value
+	if charger.electric_buffer_size ~= size then
+		charger.electric_buffer_size = size
+	end
+end
+
+function charger_control.update_buffers()
+	for id, charger in pairs(storage.chargers) do
+		if charger.valid then
+			charger_control.update_buffer(charger)
+		else
+			_utils.release_entity("charger", id)
+		end
+	end
 end
 
 -- Called every tick while the car is charging: moves energy from the charger
@@ -64,7 +83,7 @@ function charger_control.charging_tick(car, charger)
 		return
 	end
 
-	local transfer = _utils.get_fuel_capacity(car) / config.full_charge_duration
+	local transfer = _utils.get_fuel_capacity(car) / config.full_charge_duration * _utils.get_upgrade(car.force, "charge_speed")
 	if charger.energy > transfer then
 		_utils.set_fuel(car, _utils.get_fuel(car) + transfer)
 		charger.energy = charger.energy - transfer

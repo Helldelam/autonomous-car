@@ -20,6 +20,7 @@ config.names = {
 	charger = "autonomous_car_charger",
 	garage = "autonomous_car_garage",
 	chest = "autonomous_car_chest", -- supply chest
+	locked_slot = "autonomous_car_locked_slot", -- hidden item that no inventory takes: the filter of a locked slot (see _utils.set_filters)
 	fuel = "autonomous_car_fuel", -- hidden fuel item of the car, and its fuel category
 	subgroup = "autonomous_car", -- row of the crafting menu
 	ghost_selector = "autonomous_car_ghost_selector", -- selection tool
@@ -29,16 +30,30 @@ config.names = {
 	debug_view_shortcut = "autonomous_car_debug_view_shortcut", -- shows or hides the debug drawing of the selected car
 	next_task_event = "autonomous_car_next_task", -- custom event, see _utils.raise_next_task
 	turret = "autonomous_car_turret", -- hidden turret that follows each armed car and shoots for it, see armed.lua
-	armed_technology = "autonomous_car_armed", -- research that arms the cars
+	technology = "autonomous_car", -- research that unlocks the mod's items; also the prefix of the others (see config.upgrades)
+	repair_technology = "autonomous_car_repair", -- research that makes the garages repair the parked cars, with repair packs
 }
 
 config.car_size = {width = 0.7, length = 1} -- collision box of the car; the maneuver probes are derived from it
-config.car_cargo_size = 40 -- trunk slots for the cargo of a batch: the most a cluster can require
-config.car_inventory_size = config.car_cargo_size + 1 -- trunk slots of the car: the last one only takes batteries (see _utils.set_battery_filter)
+-- Values the researches raise (see _utils.get_upgrade): a list per key, the first value without
+-- research, then one more per research (technology <names.technology>_<key>_<level>, level 1 first).
+-- A cluster of ghosts never needs more cargo slots than the current value.
+config.upgrades = {
+	cargo = {20, 30, 40}, -- trunk slots of a car for its cargo (the battery slot comes after them)
+	garage = {30, 40, 50}, -- cars a garage holds
+	chargers = {2, 4, 8}, -- cars that can use the same charger at once; its buffer follows (charger_control.update_buffer)
+	charge_speed = {0.5, 1, 2}, -- charge transfer per tick, relative to the full charge duration
+	build_speed = {0.5, 1, 2}, -- build attempts per config.build_interval
+}
+config.car_inventory_size = config.upgrades.cargo[#config.upgrades.cargo] + 1 -- trunk slots of the prototype: the most cargo plus the battery slot; the bar hides the others (see _utils.set_trunk_limits)
+config.armed_technology = "military" -- vanilla research after which the cars carry their gun (see _utils.is_armed)
 config.battery_item = "battery" -- item a car burns when its tank is almost empty; the last trunk slot is reserved for it
 config.ammo_items = {"uranium-rounds-magazine", "piercing-rounds-magazine", "firearm-magazine"} -- ammo a car takes from a supply chest, strongest first: it fills an empty slot with the strongest one the chest holds and swaps a weaker one for a stronger one (see ghost_control.restock)
-config.garage_inventory_size = 50 -- slots of a garage, one parked car each
-config.charger_buffer_capacity = "60MJ"
+config.repair_kit_slots = 2 -- slots of a garage for repair packs, after its car slots; locked until config.names.repair_technology is researched
+config.repair_kit = "repair-pack"
+config.garage_car_slots = config.upgrades.garage[#config.upgrades.garage] -- car slots of the prototype: one parked car each, those above the current capacity are locked
+config.garage_inventory_size = config.garage_car_slots + config.repair_kit_slots -- slots of the prototype (see garage_control.update_inventory)
+config.charger_buffer_capacity = "60MJ" -- of the prototype; the script sets the real size from the number of users (charger_control.update_buffer)
 config.charger_input_flow_limit = "1600kW"
 
 -- ============================================================
@@ -312,7 +327,6 @@ config.critical_check_fuel_ratio = 0.8 -- above this fraction of a full tank a c
 config.battery_fuel_ratio = config.critical_fuel_ratio / 2 -- fraction of a full tank that one battery gives
 config.battery_trigger_ratio = config.critical_fuel_ratio / 4 -- below this fraction of a full tank a car burns a battery; an empty car resumes above it
 config.pre_park_fuel_ratio = 0.9 -- an idle car below this fraction tops up before it parks
-config.max_charger_users = 4 -- cars that can use the same charger at once
 
 -- ============================================================
 -- Stuck (see travel.lua, "Stuck")
@@ -333,7 +347,7 @@ config.garage_exit = { -- free spot where a garage releases a car
 	radius = 8, -- how far around the garage to look
 	precision = 0.25, -- step of that search
 }
-config.garage_repair_rate = 0.01 -- fraction of its health a parked car recovers every long_delay (free for now)
+config.garage_repair_rate = 0.01 -- fraction of its health a parked car recovers every long_delay while the garage holds a repair pack, which wears out with it
 
 -- ============================================================
 -- Consistency checks

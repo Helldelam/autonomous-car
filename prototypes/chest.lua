@@ -18,7 +18,7 @@ supply_chest_item.stack_size = 10
 local supply_chest_recipe = {
 	type = "recipe",
 	name = names.chest,
-	enabled = true,
+	enabled = false, -- unlocked by names.technology
 	energy_required = 5,
 	ingredients = {
 		{type = "item", name = "steel-plate", amount = 8},
