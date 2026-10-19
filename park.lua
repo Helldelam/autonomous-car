@@ -45,7 +45,6 @@ local function read_car_stack(stack)
 	}
 end
 
--- TODO: do not park on rails. See "À faire" in CLAUDE.md.
 -- Called every tick while the car is at its garage: stores the car in the list of the
 -- garage and removes it from the map. The trunk must be empty first.
 function garage_control.parking_tick(car, garage)

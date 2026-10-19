@@ -78,6 +78,7 @@ function travel.cancel_trip(car_data)
 	car_data.stuck.destination = nil
 	car_data.moving.active = false
 	car_data.moving.destination = nil
+	car_data.moving.retreat = nil
 	car_data.moving.departure_tick = nil
 	car_data.flee.active = false
 	_utils.alert_reset(car_data.alerts, "flee")
@@ -102,6 +103,8 @@ function travel.begin_leg(car, destination, next_task)
 	car_data.stuck.destination = nil
 	moving.active = true
 	moving.destination = destination
+	moving.retreat = nil -- see movement.start_retreat: one rail check per leg
+	moving.rails_checked = false
 	-- Reference points of the stuck detection (see travel.is_leg_too_long).
 	moving.departure_tick = game.tick
 	moving.departure_distance = util.distance(car.position, destination.position)
@@ -432,6 +435,7 @@ function travel.start_stuck(car, tick)
 	car_data.maneuver.active = false
 	moving.active = false
 	moving.destination = nil
+	moving.retreat = nil
 	moving.departure_tick = nil
 	travel.stop_car(car)
 end

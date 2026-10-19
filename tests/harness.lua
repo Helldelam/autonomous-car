@@ -1729,6 +1729,51 @@ scenarios["logistic-interface"] = {
 	end,
 }
 
+-- A car that arrives beside a rail drives off the rails before it acts (movement.start_retreat):
+-- the chest at the rails is the destination of a collection, the ghosts next to them a chantier.
+-- A second builder far from the rails must not leave its path. Each car samples its distance to
+-- the closest rail whenever it is still after a build (the end report gives the shortest).
+scenarios["rails"] = {
+	ticks = 3000,
+	category = "construction",
+	setup = function()
+		local s = new_surface({{0, 0}}, 3)
+		for x = 0, 48, 2 do
+			s.create_entity{name = "straight-rail", position = {x, 20}, direction = defines.direction.east, force = "player"}
+		end
+		T.chest = make(s, names.chest, 20.5, 22.5) -- beside the rails
+		fill(T.chest, {["wooden-chest"] = 6})
+		for i = 0, 2 do
+			make_ghost(s, "wooden-chest", 30.5 + i * 2, 21.5)
+			make_ghost(s, "wooden-chest", 30.5 + i * 2, 5.5) -- far from the rails
+		end
+		T.builder = make_car(s, 5, 10, 0.25, 1)
+		T.surface = s
+		T.cars = {T.builder}
+		T.closest = math.huge
+	end,
+	events = function(t)
+		local car = T.builder
+		if t == 100 then
+			select_ghosts(25, 0, 40, 30)
+		end
+		if car.valid and t % 30 == 0 and car.speed == 0 and t > 100 then
+			local data = storage.car_data[car.unit_number]
+			if data and data.building.active then
+				local rail = T.surface.find_entities_filtered{type = "straight-rail", position = car.position, radius = 12, limit = 1}[1]
+				if rail then
+					T.closest = math.min(T.closest, math.abs(car.position.y - rail.position.y))
+				end
+			end
+		end
+		if t == 2800 then
+			local ghosts = #T.surface.find_entities_filtered{type = "entity-ghost"}
+			out("EVENT ghosts left " .. ghosts .. " (expected 0), closest building stop to a rail line: "
+				.. (T.closest < math.huge and string.format("%.1f", T.closest) or "none") .. " tiles (expected 1.5 or more)")
+		end
+	end,
+}
+
 -- Entities marked for deconstruction. `name` is a tree, a rock or any building; a
 -- building gets `items` in its first inventory. The mod's get_id key is reported
 -- at setup: it tells whether trees and rocks have a unit_number.

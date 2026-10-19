@@ -96,6 +96,12 @@ config.steering_cost = {
 	margin = 0.5, -- added, per side, for a sample point with an obstacle about a car width beside it: keeps the car off the walls
 }
 config.arrival_distance = 6 -- a car this close to its destination has arrived and can act on it
+config.rails = { -- a car that arrives with a rail beside it first drives off the rails (movement.start_retreat): a train would hit it
+	scan = 3, -- side of the square around the arrived car that is searched for rails
+	clearance = 3, -- the spot it retreats to has no rail closer than this
+	reach = 1.5, -- the car has reached that spot this close to it (arrival_distance is too coarse for a few tiles)
+	search_radius = 8, -- how far from its destination that spot is looked for
+}
 config.emergency_brake_lookahead = 3 -- an obstacle this far straight ahead triggers emergency braking, and keeps a maneuver from ending
 
 -- ============================================================
@@ -379,6 +385,8 @@ assert(config.path.goal.radius < config.arrival_distance,
 	"config.path.goal.radius must be below config.arrival_distance: a path would end where the car has not arrived")
 assert(config.step_back_distance > config.arrival_distance,
 	"config.step_back_distance must be above config.arrival_distance: the car would arrive without moving")
+assert(config.rails.clearance >= config.rails.scan / 2 + config.rails.reach and config.rails.search_radius > config.rails.clearance,
+	"config.rails: a car that stops within reach of its spot must not see rails in its scan (clearance >= scan / 2 + reach), and the search radius must cover the clearance")
 
 -- The first sample point of a heading must lie beyond the car's own box, or the
 -- car would detect itself.
