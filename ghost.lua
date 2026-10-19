@@ -489,7 +489,7 @@ function ghost_control.is_any_car_present()
 		return true
 	end
 	for _, garage in pairs(storage.garages) do
-		if garage.valid and garage_control.find_parked_car(garage) then
+		if garage.valid and garage_control.has_parked_car(garage) then
 			return true
 		end
 	end
@@ -531,7 +531,7 @@ function ghost_control.find_available_car(cluster)
 		return car
 	end
 
-	local garage = _utils.find_closest(storage.garages, centroid, garage_control.find_parked_car, nil, surface)
+	local garage = _utils.find_closest(storage.garages, centroid, garage_control.has_parked_car, nil, surface)
 	if garage then
 		return garage_control.release_car(garage)
 	end
@@ -573,9 +573,9 @@ end
 -- car takes other pending clusters along (see fill_batch), so the scan starts
 -- over after each assignment. Clusters with no valid ghost left are
 -- dropped. Called when the player selects ghosts and every config.long_delay as
--- a fallback: that also notices a car that a player put in a garage by hand,
--- for which there is no event. Returns the number of cars that got a batch, by
--- batch mode ([mode] = count).
+-- a fallback: that also notices a car that a player put in a garage by hand
+-- (see garage_control.update_inventories), for which there is no event. Returns the
+-- number of cars that got a batch, by batch mode ([mode] = count).
 function ghost_control.retry_pending_clusters()
 	local assigned = {}
 	for phase = 1, PHASE.network do -- network is the last phase
@@ -699,15 +699,7 @@ function ghost_control.assign_cluster(car, cluster)
 
 	ghost_control.fill_batch(car)
 
-	-- A car that has just left its garage first tops up its batteries and ammo, if a chest has some
-	-- (ghost_control.restock then goes on with the batch through end_wait).
-	local chest = car_data.just_left_garage and ghost_control.find_restock_chest(car)
-	car_data.just_left_garage = false
-	if chest then
-		travel.set_destination(car, chest, {type = "restock"})
-	else
-		ghost_control.proceed(car)
-	end
+	ghost_control.proceed(car)
 end
 
 -- ============================================================
@@ -950,6 +942,20 @@ function ghost_control.proceed(car)
 		return
 	end
 
+	-- A car that has just left its garage first tops up its batteries and ammo, if a chest has
+	-- some (restock then goes on with the batch through end_wait). The flag stays up until the
+	-- car reaches the chest: a car leaving with a low tank is sent to a charger first, which
+	-- cancels this trip (travel.handle_critical_fuel), and it comes back here afterwards.
+	if car_data.just_left_garage then
+		local chest = ghost_control.find_restock_chest(car)
+		if chest then
+			if travel.set_destination(car, chest, {type = "restock"}) then
+				return
+			end
+		end
+		car_data.just_left_garage = false
+	end
+
 	if next(construction.ghosts) == nil then
 		ghost_control.finish(car)
 	elseif next(construction.items_needed) == nil then
@@ -1004,6 +1010,7 @@ end
 -- and as much ammo as its slots hold (see compute_restock), then goes on (the car is
 -- idle and about to park: its wait is already over, end_wait sends it to its garage).
 function ghost_control.restock(car, chest)
+	storage.car_data[car.unit_number].just_left_garage = false
 	if chest and chest.valid then
 		local group = ghost_control.find_chest_group(chest)
 		for _, item in pairs(compute_restock(car, group)) do
@@ -1440,6 +1447,7 @@ end
 function ghost_control.finish(car)
 	local car_data = storage.car_data[car.unit_number]
 	car_data.construction = nil
+	car_data.just_left_garage = false
 	travel.cancel_trip(car_data)
 	car_data.charge_detour_count = 0
 

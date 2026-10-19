@@ -9,6 +9,7 @@ local charger_control = require("charge")
 local garage_control = require("park")
 local ghost_control = require("ghost")
 local gui = require("gui")
+local garage_gui = require("garage_gui")
 local debug_view = require("debug_view")
 local game_trace = require("game_trace")
 local armed = require("armed")
@@ -87,7 +88,7 @@ local function create_car_data(tick)
 
 		-- Fleeing from an enemy (handle_danger): `active` while on the way to the refuge, `count` the flights of this batch.
 		flee = {active = false, count = 0},
-		just_left_garage = false, -- set by garage_control.release_car: its first batch starts with a restock stop (ghost_control.assign_cluster)
+		just_left_garage = false, -- set by garage_control.release_car: its batch starts with a restock stop (ghost_control.proceed), kept until the car reaches the chest
 		turret = nil, turret_ammo = nil, -- hidden turret of an armed car and the ammo it holds, see armed.lua
 
 		-- Failure tracking, see travel.lua.
@@ -124,7 +125,7 @@ local function on_built(event)
 	elseif entity.name == names.garage then
 		storage.garages[id] = entity
 		garage_control.update_inventory(entity)
-		storage.garage_data[id] = {fuel = {}, batteries = {}, ammo = {}, alerts = {}} -- fuel[slot], batteries[slot], ammo[slot] = fuel level, batteries and ammo of the car parked in that slot
+		storage.garage_data[id] = {cars = {}, alerts = {}} -- cars: the parked cars, first in first out (see park.lua)
 	elseif entity.name == names.chest then
 		storage.supply_chests[id] = entity
 	end
@@ -133,6 +134,10 @@ end
 -- An entity died or was mined.
 local function on_removed(event)
 	local kind = KIND_BY_NAME[event.entity.name]
+	if kind == "garage" then
+		-- mined or destroyed: the parked cars come out as items (on the ground if destroyed)
+		garage_control.return_cars(event.entity, event.buffer, event.player_index and game.get_player(event.player_index))
+	end
 	if kind then
 		_utils.release_entity(kind, event.entity.unit_number)
 	end
@@ -352,6 +357,7 @@ local function on_tick(event)
 
 	if event.tick % config.short_delay == 0 then
 		gui.refresh_all()
+		garage_gui.refresh_all()
 	end
 	if event.tick % config.slow_check_interval == 0 then
 		debug_view.refresh()
@@ -473,7 +479,12 @@ end)
 script.on_event(defines.events.on_player_created, function(event)
 	debug_view.sync_shortcut(game.get_player(event.player_index))
 end)
-script.on_event(defines.events.on_gui_click, gui.on_click)
+script.on_event(defines.events.on_gui_click, function(event)
+	gui.on_click(event)
+	garage_gui.on_click(event)
+end)
+script.on_event(defines.events.on_gui_opened, garage_gui.on_opened)
+script.on_event(defines.events.on_gui_closed, garage_gui.on_closed)
 script.on_event(defines.events.on_script_path_request_finished, movement.on_path_finished)
 commands.add_command("car-trace", "Writes a trace of the autonomous cars to script-output (see game_trace.lua). Optional argument: the unit number of one car. Run it again to stop.",
 	function(command)
