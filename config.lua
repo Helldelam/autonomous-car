@@ -23,7 +23,16 @@ config.names = {
 	delivery_chest = "autonomous_car_delivery_chest", -- supply chest that requests from the logistic network what the cars lack (see logistic.lua)
 	return_chest = "autonomous_car_return_chest", -- supply chest the robots empty: the cars deposit their leftovers in it first
 	link = "autonomous_car_link", -- invisible-collision constant combinator beside a garage or a charger that puts their state on the circuit network (see circuit.lua)
-	locked_slot = "autonomous_car_locked_slot", -- hidden item that no inventory takes: the filter of a locked slot (see _utils.set_filters)
+	signal_subgroup = "autonomous_car_signals", -- row of the signals menu
+	signals = { -- virtual signals of the links (see circuit.lua)
+		free_places = "autonomous_car_signal_free_places", -- garage
+		health = "autonomous_car_signal_health", -- garage
+		charge = "autonomous_car_signal_charge", -- garage: average charge of the parked cars
+		buffer = "autonomous_car_signal_buffer", -- charger: charge of its buffer
+		power = "autonomous_car_signal_power", -- charger
+		users = "autonomous_car_signal_users", -- charger
+	},
+	locked_slot ="autonomous_car_locked_slot", -- hidden item that no inventory takes: the filter of a locked slot (see _utils.set_filters)
 	fuel = "autonomous_car_fuel", -- hidden fuel item of the car, and its fuel category
 	subgroup = "autonomous_car", -- row of the crafting menu
 	ghost_selector = "autonomous_car_ghost_selector", -- selection tool
