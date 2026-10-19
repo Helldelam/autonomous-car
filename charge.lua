@@ -87,6 +87,7 @@ function charger_control.charging_tick(car, charger)
 	if charger.energy > transfer then
 		_utils.set_fuel(car, _utils.get_fuel(car) + transfer)
 		charger.energy = charger.energy - transfer
+		storage.charger_data[charger.unit_number].transferred = storage.charger_data[charger.unit_number].transferred + transfer -- see circuit.lua
 	end
 
 	if _utils.get_fuel_ratio(car) >= 1 then

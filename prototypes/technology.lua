@@ -41,6 +41,8 @@ local technologies = {
 		{type = "unlock-recipe", recipe = names.car},
 		{type = "unlock-recipe", recipe = names.charger},
 		{type = "unlock-recipe", recipe = names.chest},
+		{type = "unlock-recipe", recipe = names.delivery_chest},
+		{type = "unlock-recipe", recipe = names.return_chest},
 		{type = "unlock-recipe", recipe = names.garage}
 	}, "e-a-a", "main"),
 	-- The garages repair the parked cars with repair packs (garage_control.update_inventory).

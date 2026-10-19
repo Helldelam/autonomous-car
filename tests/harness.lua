@@ -1622,6 +1622,113 @@ scenarios["critical-no-batch"] = {
 	end,
 }
 
+-- Signals of the link of a garage or a charger (circuit.lua), as one line.
+local function read_link(data)
+	local link = data.link
+	if not (link and link.valid) then
+		return "no link"
+	end
+	local parts = {}
+	local section = link.get_or_create_control_behavior().get_section(1)
+	for _, filter in pairs(section and section.filters or {}) do
+		parts[#parts + 1] = filter.value.name .. "=" .. filter.min
+	end
+	table.sort(parts)
+	return table.concat(parts, " ")
+end
+
+-- Circuit links (circuit.lua). A garage with two parked cars (health 0.5 and 1, charge 0.8 and 0.6)
+-- puts on its link: cars 2, free places = capacity - 2, health 75, charge 70. A charger (its buffer
+-- is set by hand, not refilled by the harness) shows its charge in %, the cars using it and the power
+-- drawn: at t = 600 the buffer gains 3 MJ as if the network had fed it, and the next link refresh
+-- (30 ticks) shows 6000 kW. A third car charges at t = 1000: users 1. Mining the garage and the charger removes their links.
+scenarios["circuit-links"] = {
+	ticks = 2500,
+	category = "energy",
+	setup = function()
+		local s = new_surface({{0, 0}}, 4)
+		T.garage = make(s, names.garage, 20, 0)
+		local cars = storage.garage_data[T.garage.unit_number].cars
+		cars[1] = {quality = "normal", health = 0.5, fuel = 0.8}
+		cars[2] = {quality = "normal", health = 1, fuel = 0.6}
+		T.charger = s.create_entity{name = names.charger, position = {0, 0}, force = "player", raise_built = true}
+		T.charger.energy = 3e7
+		T.car = make_car(s, 10, 0, 0.25, 0.3)
+		T.surface = s
+		T.cars = {T.car}
+	end,
+	events = function(t)
+		if t == 300 then
+			out("EVENT garage link: " .. read_link(storage.garage_data[T.garage.unit_number]) .. " (capacity "
+				.. garage_control.get_capacity(T.garage) .. ")")
+			out("EVENT charger link: " .. read_link(storage.charger_data[T.charger.unit_number]))
+			out("EVENT garage has a circuit connector: " .. tostring(T.garage.get_wire_connector(defines.wire_connector_id.circuit_red, true) ~= nil)
+				.. ", link entities: " .. #T.surface.find_entities_filtered{name = names.link})
+		end
+		if t == 600 then
+			T.charger.energy = T.charger.energy + 3e6
+		end
+		if (t >= 610 and t <= 700 and t % 30 == 10) or t == 1200 or t == 1500 then
+			out("EVENT t=" .. t .. " charger link: " .. read_link(storage.charger_data[T.charger.unit_number]))
+		end
+		if t == 2000 then
+			local garage_data = storage.garage_data[T.garage.unit_number]
+			local charger_data = storage.charger_data[T.charger.unit_number]
+			local garage_link, charger_link = garage_data.link, charger_data.link
+			T.garage.die()
+			T.charger.die()
+			out("EVENT after removal: garage link valid " .. tostring(garage_link.valid) .. ", charger link valid " .. tostring(charger_link.valid))
+		end
+	end,
+}
+
+-- Logistic interface (logistic.lua). A supply chest holds 2 wooden chests, a delivery chest and a
+-- return chest stand apart. A car takes a batch of 5 wooden chest ghosts: after it took the 2, the
+-- delivery chest requests the 3 left (EVENT t=600); the robots are played at t = 700 by 3 wooden
+-- chests put in the delivery chest, and the car finishes (EVENT ghosts left). A second, idle car
+-- carries 10 iron plates: it deposits them in the return chest although the plain chest is closer.
+scenarios["logistic-interface"] = {
+	ticks = 4000,
+	category = "construction",
+	setup = function()
+		local s = new_surface({{0, 0}}, 4)
+		T.plain = make(s, names.chest, 0.5, 20.5)
+		fill(T.plain, {["wooden-chest"] = 2})
+		T.delivery = make(s, names.delivery_chest, 10.5, 20.5)
+		T.return_chest = make(s, names.return_chest, 40.5, 20.5)
+		for i = 0, 4 do
+			make_ghost(s, "wooden-chest", 30.5 + i * 2, 30.5)
+		end
+		T.car = make_car(s, 5, 0, 0.25, 1)
+		T.idle = make_car(s, 5, 10, 0.25, 1)
+		T.idle.get_inventory(defines.inventory.car_trunk).insert{name = "iron-plate", count = 10}
+		T.surface = s
+		T.cars = {T.car, T.idle}
+	end,
+	events = function(t)
+		if t == 100 then
+			select_ghosts(25, 25, 45, 35)
+		end
+		if t == 600 then
+			local parts = {}
+			local section = T.delivery.get_logistic_sections().get_section(1)
+			for _, filter in pairs(section and section.filters or {}) do
+				parts[#parts + 1] = filter.value.name .. " x" .. filter.min
+			end
+			out("EVENT t=600 delivery requests: " .. table.concat(parts, ", ") .. " (expected wooden-chest x3)")
+		end
+		if t == 700 then
+			fill(T.delivery, {["wooden-chest"] = 3}) -- the robots
+		end
+		if t == 3500 then
+			local ghosts = #T.surface.find_entities_filtered{type = "entity-ghost"}
+			out("EVENT ghosts left " .. ghosts .. " (expected 0), plates in the return chest "
+				.. T.return_chest.get_inventory(defines.inventory.chest).get_item_count("iron-plate")
+				.. ", in the plain chest " .. T.plain.get_inventory(defines.inventory.chest).get_item_count("iron-plate") .. " (expected 10 and 0)")
+		end
+	end,
+}
+
 -- Entities marked for deconstruction. `name` is a tree, a rock or any building; a
 -- building gets `items` in its first inventory. The mod's get_id key is reported
 -- at setup: it tells whether trees and rocks have a unit_number.
@@ -3130,7 +3237,8 @@ local call_counts = {}
 for module_name, module in pairs{
 	movement = movement, travel = travel, charger_control = charger_control,
 	garage_control = garage_control, ghost_control = ghost_control,
-	_utils = _utils, ["_utils.deque"] = _utils.deque, gui = gui, garage_gui = garage_gui,
+	_utils = _utils, ["_utils.deque"] = _utils.deque, gui = gui, garage_gui = garage_gui, car_gui = car_gui,
+	circuit_control = circuit_control, logistic_control = logistic_control,
 } do
 	for name, fn in pairs(module) do
 		if type(fn) == "function" then
