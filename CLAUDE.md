@@ -164,7 +164,7 @@ Section « Clearing » de `movement.lua`, `config.clearing`. Dernier recours ava
   - `autonomous_car_charge_speed_1`, `autonomous_car_charge_speed_2` ;
   - `autonomous_car_build_speed_1`, `autonomous_car_build_speed_2` ;
   - armement : `military` (recherche du jeu).
-- Filtres vérifiés en jeu par le propriétaire (coffre, garage, kits, slot de munitions verrouillé avant Military, par un objet `ammo` caché car ce slot n'accepte que des munitions comme filtre).
+- Validé en jeu par le propriétaire : filtres (coffre, garage, kits, slot de munitions verrouillé avant Military par un objet `ammo` caché, car ce slot n'accepte que des munitions comme filtre), réparation par kit, effets des recherches, icônes.
 
 ### Voiture armée
 
@@ -298,7 +298,7 @@ Aucun pour l'instant.
 
 ### Corrigés, à valider
 
-- **Technologies** (principale, réparation, capacité des voitures, places de garage, chargeurs, vitesses de charge et de construction, Military arme les voitures) : filtres et tourelle validés en jeu ; réparation par kit validée en jeu ; reste à valider les effets des autres recherches (garage, chargeurs, vitesses ; descriptions des vitesses en ×2 puis ×4). Coûts provisoires.
+Aucun pour l'instant. (Technologies : validées en jeu par le propriétaire le 2026-10-19, coûts provisoires.)
 
 #### Validation reportée
 
