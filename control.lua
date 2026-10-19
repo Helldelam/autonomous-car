@@ -11,6 +11,8 @@ local ghost_control = require("ghost")
 local gui = require("gui")
 local garage_gui = require("garage_gui")
 local car_gui = require("car_gui")
+local circuit_control = require("circuit")
+local logistic_control = require("logistic")
 local debug_view = require("debug_view")
 local game_trace = require("game_trace")
 local armed = require("armed")
@@ -34,10 +36,12 @@ _utils.register_release_handler("car", function(id)
 	storage.car_data[id] = nil
 end)
 _utils.register_release_handler("charger", function(id)
+	circuit_control.destroy_link(storage.charger_data[id])
 	storage.chargers[id] = nil
 	storage.charger_data[id] = nil
 end)
 _utils.register_release_handler("garage", function(id)
+	circuit_control.destroy_link(storage.garage_data[id])
 	storage.garages[id] = nil
 	storage.garage_data[id] = nil
 end)
@@ -51,6 +55,8 @@ local KIND_BY_NAME = {
 	[names.charger] = "charger",
 	[names.garage] = "garage",
 	[names.chest] = "chest",
+	[names.delivery_chest] = "chest",
+	[names.return_chest] = "chest",
 }
 
 -- Runtime state of a car, kept in storage.car_data[unit_number].
@@ -122,12 +128,12 @@ local function on_built(event)
 	elseif entity.name == names.charger then
 		storage.chargers[id] = entity
 		charger_control.update_buffer(entity)
-		storage.charger_data[id] = {users = 0} -- cars charging here or on their way
+		storage.charger_data[id] = {users = 0, transferred = 0} -- users: cars charging here or on their way; transferred: energy given to cars since the last circuit.lua refresh
 	elseif entity.name == names.garage then
 		storage.garages[id] = entity
 		garage_control.update_inventory(entity)
 		storage.garage_data[id] = {cars = {}, alerts = {}} -- cars: the parked cars, first in first out (see park.lua)
-	elseif entity.name == names.chest then
+	elseif KIND_BY_NAME[entity.name] == "chest" then
 		storage.supply_chests[id] = entity
 	end
 end
@@ -360,6 +366,10 @@ local function on_tick(event)
 		gui.refresh_all()
 		garage_gui.refresh_all()
 		car_gui.refresh_all()
+		circuit_control.refresh(event.tick)
+	end
+	if event.tick % config.medium_delay == 0 then
+		logistic_control.update_requests()
 	end
 	if event.tick % config.slow_check_interval == 0 then
 		debug_view.refresh()

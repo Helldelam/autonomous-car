@@ -734,7 +734,6 @@ local function can_group_supply(group, items)
 	return false
 end
 
--- TODO: logistic and circuit networks for our buildings (supply chests, chargers, garages). See "À faire" in CLAUDE.md.
 -- Closest supply chest whose group holds at least one of the needed items, or nil.
 function ghost_control.find_supply_chest(car, items_needed)
 	return _utils.find_closest(storage.supply_chests, car.position, function(chest)
@@ -1378,12 +1377,16 @@ local function can_group_store(group, trunk)
 	return false
 end
 
--- Closest supply chest whose group has room for something the car carries, or nil.
+-- Closest supply chest whose group has room for something the car carries, or nil. A return
+-- chest (emptied by the logistic robots) comes first, then any other.
 function ghost_control.find_chest_with_room(car)
 	local trunk = car.get_inventory(defines.inventory.car_trunk)
-	return _utils.find_closest(storage.supply_chests, car.position, function(chest)
+	local function has_room(chest)
 		return can_group_store(ghost_control.find_chest_group(chest), trunk)
-	end, "chest", car.surface)
+	end
+	return _utils.find_closest(storage.supply_chests, car.position, function(chest)
+		return chest.name == config.names.return_chest and has_room(chest)
+	end, "chest", car.surface) or _utils.find_closest(storage.supply_chests, car.position, has_room, "chest", car.surface)
 end
 
 -- Sends the car to the nearest supply chest that has room if its trunk is not
@@ -1416,7 +1419,11 @@ end
 function ghost_control.deposit_items(car, chest)
 	local trunk = car.get_inventory(defines.inventory.car_trunk)
 	if chest and chest.valid then
+		local group = {}
 		for _, member in pairs(ghost_control.find_chest_group(chest)) do
+			table.insert(group, member.name == config.names.return_chest and 1 or #group + 1, member) -- the return chests first
+		end
+		for _, member in ipairs(group) do
 			local inventory = member.get_inventory(defines.inventory.chest)
 			for key, count in pairs(_utils.get_cargo_contents(trunk)) do
 				local inserted = inventory.insert(_utils.make_stack(key, count))
