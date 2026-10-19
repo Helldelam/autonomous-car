@@ -79,6 +79,7 @@ Catégories (66 scénarios) :
 | `charge.lua` | `charger_control` | chargeurs, estimation du carburant |
 | `park.lua` | `garage_control` | garages : liste des voitures garées, réparation lente |
 | `garage_gui.lua` | `garage_gui` | panneau à droite de l'inventaire du garage (liste, bouton de sortie) ; ne dépend que de `config` et `park` |
+| `car_gui.lua` | `car_gui` | panneau en lecture seule à droite de l'inventaire d'une voiture (état, santé, charge, batteries, munitions, batch), redessiné toutes les `short_delay` ; ne fait que lire `car_data` |
 | `armed.lua` | `armed` | tourelle cachée qui tire pour la voiture armée, munitions du slot `car_ammo` |
 | `gui.lua` | `gui` | fenêtre des objets manquants (raccourci `missing_items_shortcut`) |
 | `debug_view.lua` | `debug_view` | affichage de débogage de la voiture sous le curseur ou ouverte (destination, chemin, état, coûts de braquage), redessiné toutes les `slow_check_interval` ticks (raccourci `debug_view_shortcut`, activé par défaut : `config.debug_view_default`) ; ne fait que lire `car_data` (dont `car_data.steering`, écrit par `drive_tick` pour lui) |
@@ -306,7 +307,7 @@ Aucun pour l'instant.
 
 ### Corrigés, à valider
 
-Aucun pour l'instant. (Validés en jeu par le propriétaire le 2026-10-19 : technologies (coûts provisoires), garage en liste avec son panneau, slots de batteries et de munitions, réapprovisionnement à la sortie du garage.)
+Aucun pour l'instant. (Validés en jeu par le propriétaire le 2026-10-19 : technologies (coûts provisoires), garage en liste avec son panneau, slots de batteries et de munitions, panneau de la voiture, réapprovisionnement à la sortie du garage.)
 
 #### Validation reportée
 
