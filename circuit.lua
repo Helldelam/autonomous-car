@@ -6,10 +6,11 @@ local garage_control = require("park")
 -- interface without connector), so each gets a link: a constant combinator beside it, without
 -- collision, that the script fills (see prototypes/link.lua). The slots of a garage and its
 -- supply chests are read from their own connector.
--- Garage: the item "car" = parked cars, signal-F = free places, signal-H = average health (%),
--- signal-C = average charge (%). Charger: signal-C = charge of its buffer (%), signal-W = power
--- drawn from the electric network by the charger (kW), signal-U = cars using it.
+-- Garage: the item "car" = parked cars, then the signals of config.names.signals: free_places,
+-- health (average, %), charge (average, %). Charger: buffer (charge of its buffer, %), power (drawn from
+-- the electric network by the charger, kW), users (cars using it).
 local circuit_control = {}
+local signals = config.names.signals
 
 -- Where the link stands, relative to the building (the garage connector is at its south-west corner).
 local OFFSETS = {
@@ -77,9 +78,9 @@ local function refresh_garage(garage, data)
 	local count = #cars
 	set_signals(ensure_link(garage, data, "garage"), data, {
 		{type = "item", name = config.names.car, count = count},
-		{type = "virtual", name = "signal-F", count = garage_control.get_capacity(garage) - count},
-		{type = "virtual", name = "signal-H", count = count > 0 and round(health / count * 100) or 0},
-		{type = "virtual", name = "signal-C", count = count > 0 and round(fuel / count * 100) or 0},
+		{type = "virtual", name = signals.free_places, count = garage_control.get_capacity(garage) - count},
+		{type = "virtual", name = signals.health, count = count > 0 and round(health / count * 100) or 0},
+		{type = "virtual", name = signals.charge, count = count > 0 and round(fuel / count * 100) or 0},
 	})
 end
 
@@ -93,9 +94,9 @@ local function refresh_charger(charger, data, tick)
 	end
 	data.power, data.last_energy, data.last_tick, data.transferred = power, energy, tick, 0
 	set_signals(ensure_link(charger, data, "charger"), data, {
-		{type = "virtual", name = "signal-C", count = round(energy / charger.electric_buffer_size * 100)},
-		{type = "virtual", name = "signal-W", count = power},
-		{type = "virtual", name = "signal-U", count = data.users},
+		{type = "virtual", name = signals.buffer, count = round(energy / charger.electric_buffer_size * 100)},
+		{type = "virtual", name = signals.power, count = power},
+		{type = "virtual", name = signals.users, count = data.users},
 	})
 end
 
