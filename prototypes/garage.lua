@@ -1,5 +1,5 @@
 -- Garage: a large chest with a slot for a car to park, a battery slot and an ammo slot (they refill the selected parked car) and slots for repair packs; the parked
--- cars are a list kept by the script (park.lua), shown by garage_gui.lua.
+-- cars are a list kept by the script (scripts/garage.lua), shown by scripts/gui/garage.lua.
 local config = require("config")
 local names = config.names
 local icon = "__autonomous-car__/graphics/garage/icon.png"

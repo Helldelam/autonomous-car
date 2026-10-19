@@ -1,5 +1,5 @@
 local config = require("config")
-local _utils = require("_utils")
+local _utils = require("scripts._utils")
 
 -- The panel next to the inventory of a car: what it is doing, its health, charge, batteries and
 -- ammo, and its batch. It only reads the car and its state.

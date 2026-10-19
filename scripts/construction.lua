@@ -1,8 +1,8 @@
 local util = require("util")
 local config = require("config")
-local _utils = require("_utils")
-local garage_control = require("park")
-local travel = require("travel")
+local _utils = require("scripts._utils")
+local garage_control = require("scripts.garage")
+local travel = require("scripts.travel")
 
 -- Construction: tracking ghosts, grouping them into clusters, assigning the
 -- clusters to cars, and running a batch on a car.

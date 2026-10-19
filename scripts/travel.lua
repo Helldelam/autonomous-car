@@ -1,7 +1,7 @@
 local util = require("util")
 local config = require("config")
-local _utils = require("_utils")
-local charger_control = require("charge")
+local _utils = require("scripts._utils")
+local charger_control = require("scripts.charger")
 
 -- Trips: starting a leg, detours to a charger, and what happens when a car
 -- cannot reach its goal, gets stuck or runs out of battery.
@@ -264,7 +264,7 @@ end
 -- Takes the construction batch away from a car and puts its remaining ghosts
 -- back in the pending pool, cluster by cluster: merged into one, the next car
 -- would build them all from its first stop (see ghost_control.go_to_site). It
--- lives here rather than in ghost.lua because ghost.lua requires this module,
+-- lives here rather than in construction.lua because construction.lua requires this module,
 -- not the other way round.
 function travel.requeue_construction(car_data)
 	local construction = car_data.construction

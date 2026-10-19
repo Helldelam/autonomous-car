@@ -1,5 +1,5 @@
 local config = require("config")
-local _utils = require("_utils")
+local _utils = require("scripts._utils")
 
 -- The small window that lists the items the cars are waiting for: the player
 -- shows or hides it with a shortcut. It reads the batches in storage and
@@ -14,7 +14,7 @@ local CLOSE = "autonomous_car_missing_close"
 -- ============================================================
 
 -- The items that cars wait for because no supply chest holds them (see
--- construction.missing_since in ghost.lua):
+-- construction.missing_since in construction.lua):
 -- [item key, see _utils.make_item_key] = {count = still to collect, cars = number of cars waiting for it}.
 local function find_missing_items()
 	local missing = {}

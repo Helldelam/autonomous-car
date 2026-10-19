@@ -1,9 +1,9 @@
 local config = require("config")
-local _utils = require("_utils")
+local _utils = require("scripts._utils")
 
 -- Link with the logistic network: what the batches of the cars still lack is requested by the
 -- delivery chests (requester chests), whose robots fill them; the cars then collect it as from
--- any supply chest (ghost.lua). The return chests (active providers) need no code here: the cars
+-- any supply chest (construction.lua). The return chests (active providers) need no code here: the cars
 -- deposit in them first (ghost_control.find_chest_with_room).
 local logistic_control = {}
 
@@ -12,7 +12,7 @@ local logistic_control = {}
 -- The return chests do not count: the robots are emptying them.
 local function count_other_supply(delivery, keys)
 	local held = {}
-	for id, chest in pairs(storage.supply_chests) do
+	for _, chest in pairs(storage.supply_chests) do
 		if chest.valid and chest ~= delivery and chest.surface == delivery.surface and chest.name ~= config.names.return_chest then
 			local inventory = chest.get_inventory(defines.inventory.chest)
 			for key in pairs(keys) do

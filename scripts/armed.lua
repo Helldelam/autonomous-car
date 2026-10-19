@@ -1,5 +1,5 @@
 local config = require("config")
-local _utils = require("_utils")
+local _utils = require("scripts._utils")
 
 -- Armed cars. A car cannot be told to shoot by script (its shooting_state is for
 -- characters only) and has nobody aboard, so a hidden turret (config.names.turret)

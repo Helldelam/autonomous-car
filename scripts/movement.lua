@@ -1,6 +1,6 @@
 local util = require("util")
 local config = require("config")
-local _utils = require("_utils")
+local _utils = require("scripts._utils")
 
 -- Driving. Each tick, for a moving car, movement.update_mode picks the driving
 -- mode (fast, normal or slow), then movement.drive_tick sets the acceleration
@@ -652,7 +652,7 @@ function movement.drive_tick(car, tick)
 	local left_density = density_weight * measure_density_ahead(car, x, y, lx, ly, target_distance)
 	straight, right, left = straight + straight_density, right + right_density, left + left_density
 
-	-- The costs of this tick, for the debug drawing (see debug_view.lua).
+	-- The costs of this tick, for the debug drawing (see scripts/debug/debug_view.lua).
 	local steering = car_data.steering
 	if not steering then
 		steering = {}

@@ -470,7 +470,7 @@ scenarios["garage-exit"] = {
 -- A car on its way to a charger is given a batch whose only ghost cannot be
 -- built. It must not be available for a batch on its way (it used to be, and
 -- its queued "charging" task was then run on arrival from its step back, which
--- ended in a script error in charge.lua).
+-- ended in a script error in scripts/charger.lua).
 scenarios["stale-task"] = {
 	category = "robustness",
 	setup = function()
@@ -1932,7 +1932,7 @@ end
 --                      is next to some of them; wooden chest ghosts on two of them wait for
 --                      the fill), landfill ghosts only in the middle of the second one
 --                      (out of reach: the batch must be abandoned with an alert)
--- Order of the work (see PHASE in ghost.lua): the groups below are in phase
+-- Order of the work (see PHASE in construction.lua): the groups below are in phase
 -- order and a group must not progress while an earlier one is not finished
 -- (PHASE VIOLATION). Nothing may be lost either: plates and modules are counted
 -- in the world at the end.

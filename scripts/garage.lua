@@ -1,10 +1,10 @@
 local config = require("config")
-local _utils = require("_utils")
+local _utils = require("scripts._utils")
 
 -- Garages: a parked car is a record in a first-in first-out list of the garage
 -- (storage.garage_data[id].cars: quality, health ratio, fuel ratio, batteries, ammo), not an
 -- item. The inventory of the garage only has a slot where the player (or an inserter) puts a
--- car to park it, and the repair pack slots; garage_gui.lua shows the list.
+-- car to park it, and the repair pack slots; scripts/gui/garage.lua shows the list.
 local garage_control = {}
 
 local CAR_SLOT = 1 -- the slot that takes a car to park

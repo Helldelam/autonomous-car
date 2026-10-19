@@ -1,4 +1,4 @@
--- Shortcut that shows or hides the window of missing items (see gui.lua).
+-- Shortcut that shows or hides the window of missing items (see scripts/gui/missing_items.lua).
 -- TODO: custom icon; it borrows the info icon of the game for now.
 
 local names = require("config").names

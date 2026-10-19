@@ -305,14 +305,14 @@ config.very_long_delay = 3600 -- (60s)
 config.slow_check_interval = 6 -- (0.1s)
 	-- debug_view.refresh: period of the debug drawing
 
--- Debug drawing of the car under the cursor or opened (see debug_view.lua): its
+-- Debug drawing of the car under the cursor or opened (see scripts/debug/debug_view.lua): its
 -- destination, path, state and steering costs. Each player toggles it with a
 -- shortcut; this is the state of a player who has not touched it.
 -- TODO: off by default before release (see "À faire" in CLAUDE.md).
 config.debug_view_default = true
 
 -- ============================================================
--- Construction (see ghost.lua)
+-- Construction (see construction.lua)
 -- ============================================================
 
 config.cluster_radius = 10 -- max distance between two neighbouring ghosts of a cluster
@@ -323,12 +323,12 @@ config.step_back_distance = 30 -- how far a car backs away when every ghost left
 config.chest_group_radius = 1.5 -- supply chests this close to each other form one group: reaching one gives access to all
 
 -- ============================================================
--- Fuel and charging (see charge.lua, travel.lua)
+-- Fuel and charging (see scripts/charger.lua, travel.lua)
 -- ============================================================
 
 config.full_charge_duration = 900 -- (15s) time to fill an empty tank; the transfer per tick is derived from it and the tank capacity
 -- High estimate of the fuel a trip of d tiles burns, used to decide whether it needs a charging detour and where the
--- critical level lies (see charge.lua; measured on 364 trips of 5 to 11000 tiles, `range-*` scenarios):
+-- critical level lies (see scripts/charger.lua; measured on 364 trips of 5 to 11000 tiles, `range-*` scenarios):
 -- fixed + near_per_tile * min(d, near_distance) + far_per_tile * the rest.
 -- Covers about 90% of the short trips of the test scenarios (traps included) and all the long ones.
 config.fuel_estimate = {
@@ -357,7 +357,7 @@ config.stuck = {
 }
 
 -- ============================================================
--- Garage (see park.lua)
+-- Garage (see scripts/garage.lua)
 -- ============================================================
 
 config.garage_exit = { -- free spot where a garage releases a car

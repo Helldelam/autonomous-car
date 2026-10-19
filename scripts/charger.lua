@@ -1,6 +1,6 @@
 local util = require("util")
 local config = require("config")
-local _utils = require("_utils")
+local _utils = require("scripts._utils")
 
 -- Chargers: finding one a car can reach, and filling the car's tank from it.
 local charger_control = {}
