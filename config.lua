@@ -49,10 +49,9 @@ config.car_inventory_size = config.upgrades.cargo[#config.upgrades.cargo] + 1 --
 config.armed_technology = "military" -- vanilla research after which the cars carry their gun (see _utils.is_armed)
 config.battery_item = "battery" -- item a car burns when its tank is almost empty; the last trunk slot is reserved for it
 config.ammo_items = {"uranium-rounds-magazine", "piercing-rounds-magazine", "firearm-magazine"} -- ammo a car takes from a supply chest, strongest first: it fills an empty slot with the strongest one the chest holds and swaps a weaker one for a stronger one (see ghost_control.restock)
-config.repair_kit_slots = 2 -- slots of a garage for repair packs, after its car slots; locked until config.names.repair_technology is researched
+config.repair_kit_slots = 2 -- slots of a garage for repair packs, after its car, battery and ammo slots; locked until config.names.repair_technology is researched
 config.repair_kit = "repair-pack"
-config.garage_car_slots = config.upgrades.garage[#config.upgrades.garage] -- car slots of the prototype: one parked car each, those above the current capacity are locked
-config.garage_inventory_size = config.garage_car_slots + config.repair_kit_slots -- slots of the prototype (see garage_control.update_inventory)
+config.garage_inventory_size = 3 + config.repair_kit_slots -- slots of the prototype: the slot that takes a car to park, the battery slot and the ammo slot (they refill the selected car), then the repair pack slots (see garage_control.update_inventory)
 config.charger_buffer_capacity = "60MJ" -- of the prototype; the script sets the real size from the number of users (charger_control.update_buffer)
 config.charger_input_flow_limit = "1600kW"
 

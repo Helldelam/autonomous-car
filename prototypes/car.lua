@@ -316,7 +316,7 @@ local item = {
 	pick_sound = item_sounds.robotic_inventory_pickup,
 	drop_sound = item_sounds.robotic_inventory_move,
 	place_result = names.car,
-	stack_size = 1 -- one car per garage slot: the garage has filters, so its slots stack like any inventory
+	stack_size = 1 -- the item carries the state of a car out of a garage (tags, health)
 }
 
 local recipe = {

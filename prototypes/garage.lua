@@ -1,4 +1,5 @@
--- Garage: a large chest that stores parked cars as items, one per slot.
+-- Garage: a large chest with a slot for a car to park, a battery slot and an ammo slot (they refill the selected parked car) and slots for repair packs; the parked
+-- cars are a list kept by the script (park.lua), shown by garage_gui.lua.
 local config = require("config")
 local names = config.names
 local icon = "__autonomous-car__/graphics/garage/icon.png"
@@ -27,7 +28,7 @@ garage.collision_box = {{-1.8, -1.8}, {1.8, 1.8}}
 garage.selection_box = {{-2, -2}, {2, 2}}
 garage.fast_replaceable_group = nil
 garage.inventory_size = config.garage_inventory_size
-garage.inventory_type = "with_filters_and_bar" -- filters lock the slots above the capacity and the repair pack slots before the research (garage_control.update_inventory)
+garage.inventory_type = "with_filters_and_bar" -- filters keep the car slot to cars and lock the repair pack slots before the research (garage_control.update_inventory)
 garage.picture =
 {
 	layers =

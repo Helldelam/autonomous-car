@@ -362,7 +362,10 @@ scenarios["failures"] = {
 		end
 		if not T.garage3_filled and heading_to(T.car3, T.garage3) then
 			T.garage3_filled = true
-			T.garage3.get_inventory(defines.inventory.chest).insert{name = "wooden-chest", count = 50}
+			local cars = storage.garage_data[T.garage3.unit_number].cars
+			for _ = #cars + 1, garage_control.get_capacity(T.garage3) do
+				table.insert(cars, {quality = "normal", health = 1, fuel = 1})
+			end
 			out("EVENT garage3 filled at " .. game.tick)
 		end
 		if not T.car4_loaded and heading_to(T.car4, T.garage4) then
@@ -424,10 +427,10 @@ scenarios["garage-exit"] = {
 	events = function(t)
 		local inventory = T.chest.get_inventory(defines.inventory.chest)
 		if t == 3900 or t == 7900 then
-			local stack = T.garage.get_inventory(defines.inventory.chest).find_item_stack(names.car)
-			if stack then
-				local kit = T.garage.get_inventory(defines.inventory.chest)[config.garage_car_slots + 1]
-				out(string.format("EVENT parked car health %.3f at %d, repair packs %d (durability %.0f)", stack.health, t,
+			local parked = storage.garage_data[T.garage.unit_number].cars[1]
+			if parked then
+				local kit = T.garage.get_inventory(defines.inventory.chest)[4] -- the first repair pack slot
+				out(string.format("EVENT parked car health %.3f at %d, repair packs %d (durability %.0f)", parked.health, t,
 					kit.valid_for_read and kit.count or 0, kit.valid_for_read and kit.durability or 0))
 			else
 				for _, car in pairs(storage.cars) do
@@ -1105,7 +1108,8 @@ scenarios["maze"] = {
 
 -- A car with 5 batteries is idle: just before parking it goes to the supply chest for batteries, which
 -- holds 300 (it takes what its slot lacks, 195), then parks and keeps them aside (EVENT garage: 200).
--- It leaves again for the ghost selected at t = 4000, with 200 at once, and builds (EVENT lines every 100 ticks).
+-- It leaves again for the ghost selected at t = 4000, with 200 at once, at a critical charge: it charges first,
+-- then restocks at the chest, then builds (EVENT lines every 100 ticks).
 scenarios["batteries-garage"] = {
 	ticks = 7000,
 	category = "robustness",
@@ -1124,13 +1128,68 @@ scenarios["batteries-garage"] = {
 	end,
 	events = function(t)
 		if t == 3500 then
-			out("EVENT garage t=" .. t .. ": batteries kept " .. tostring(select(2, next(storage.garage_data[T.garage.unit_number].batteries)))
+			out("EVENT garage t=" .. t .. ": batteries kept " .. tostring(storage.garage_data[T.garage.unit_number].cars[1].batteries)
 				.. ", car valid " .. tostring(T.car.valid))
 		end
 		if t == 4000 then
+			-- Leaves at a critical charge: it goes to the charger first, which cancels its trip to the
+			-- chest, and must still restock afterwards (batteries in the car back to 200 by t = 5500).
+			storage.garage_data[T.garage.unit_number].cars[1].fuel = 0.05
 			select_ghosts(35, 35, 45, 45)
 		end
-		if t >= 4000 and t <= 5000 and t % 100 == 0 then
+		-- The car list of the garage: a car item put in the car slot is taken into the list
+		-- (health and tag kept), handed out as an item that carries its state, taken back, and
+		-- given in the buffer of a mined garage.
+		if t == 6000 then
+			local cars = storage.garage_data[T.garage.unit_number].cars
+			table.insert(cars, 1, {quality = "normal", health = 0.5, fuel = 0.7, batteries = 3, ammo = {name = "firearm-magazine", quality = "normal", count = 4}})
+			-- Two slots are not enough for the car, its batteries and its ammo: refused, nothing taken.
+			local small = game.create_inventory(2)
+			local inventory = game.create_inventory(3)
+			local count = #cars
+			out("EVENT list: two slots, handed out " .. tostring(garage_control.hand_out_car(T.garage, {get_main_inventory = function() return small end}, 1))
+				.. ", cars " .. count .. " -> " .. #cars .. ", items in the inventory " .. small.get_item_count())
+			out("EVENT list: three slots, handed out " .. tostring(garage_control.hand_out_car(T.garage, {get_main_inventory = function() return inventory end}, 1))
+				.. ", cars " .. count .. " -> " .. #cars)
+			local stack = inventory.find_item_stack(names.car)
+			out(string.format("EVENT item: %s health %.2f fuel %.2f, batteries %d, magazines %d", stack.name, stack.health,
+				stack.get_tag("state").fuel, inventory.get_item_count("battery"), inventory.get_item_count("firearm-magazine")))
+			T.garage.get_inventory(defines.inventory.chest)[1].set_stack(stack)
+			small.destroy()
+			inventory.destroy()
+		elseif t == 6100 then
+			local cars = storage.garage_data[T.garage.unit_number].cars
+			local entry = cars[#cars]
+			out(string.format("EVENT list: car slot taken, %d cars, last health %.2f fuel %.2f batteries %s, slot empty %s", #cars,
+				entry.health, entry.fuel, tostring(entry.batteries), tostring(not T.garage.get_inventory(defines.inventory.chest)[1].valid_for_read)))
+			-- The battery slot refills a parked car up to a stack (200): 197 of 200 go in, 3 stay.
+			local slots = T.garage.get_inventory(defines.inventory.chest)
+			slots[2].set_stack{name = "battery", count = 200}
+			out("EVENT load: moved " .. tostring(garage_control.load_car(T.garage, #cars)) .. ", car batteries " .. entry.batteries
+				.. ", left in the slot " .. slots[2].count .. ", ammo slot filter " .. tostring(slots.get_filter(3) and slots.get_filter(3).name))
+			-- A buffer of one slot, a player inventory of one slot: the first car goes to the buffer or
+			-- the player, the others to the ground (with their batteries and ammo as separate items).
+			local buffer, inventory = game.create_inventory(1), game.create_inventory(1)
+			local player = {get_main_inventory = function() return inventory end}
+			garage_control.return_cars(T.garage, buffer, player)
+			local given, tagged = 0, 0
+			for _, source in pairs{buffer, inventory} do
+				for slot = 1, #source do
+					if source[slot].valid_for_read then
+						given = given + 1
+						tagged = tagged + (source[slot].get_tag("state") and 1 or 0)
+					end
+				end
+			end
+			local ground = T.garage.surface.find_entities_filtered{name = "item-on-ground", position = T.garage.position, radius = 10}
+			out("EVENT buffer: " .. given .. " cars given, " .. tagged .. " with state, " .. #ground .. " on the ground, for " .. #cars .. " in the list")
+			buffer.destroy()
+			inventory.destroy()
+			for _, item in pairs(ground) do
+				item.destroy()
+			end
+		end
+		if t >= 4000 and t <= 5500 and t % 100 == 0 then
 			local count, x, y = "none", 0, 0
 			for _, car in pairs(storage.cars) do
 				if car.valid then
@@ -1269,9 +1328,9 @@ scenarios["armed"] = {
 	end,
 	events = function(t)
 		if t == 3500 then
-			local data = storage.garage_data[T.garage.unit_number]
-			local ammo = select(2, next(data.ammo))
-			out("EVENT garage t=" .. t .. ": batteries kept " .. tostring(select(2, next(data.batteries))) .. ", ammo kept "
+			local parked = storage.garage_data[T.garage.unit_number].cars[1]
+			local ammo = parked.ammo
+			out("EVENT garage t=" .. t .. ": batteries kept " .. tostring(parked.batteries) .. ", ammo kept "
 				.. tostring(ammo and ammo.name) .. " x" .. tostring(ammo and ammo.count) .. ", chest firearm magazines "
 				.. T.chest.get_item_count("firearm-magazine") .. ", car valid " .. tostring(T.car.valid))
 		end
@@ -1322,13 +1381,7 @@ scenarios["technologies"] = {
 			end
 			trunk.remove{name = "iron-plate", count = 100 * #trunk}
 			local garage = T.garage.get_inventory(defines.inventory.chest)
-			local cars = 0
-			while garage.insert{name = names.car, count = 1} > 0 do
-				cars = cars + 1
-			end
-			if cars > 0 then
-				garage.remove{name = names.car, count = cars}
-			end
+			local cars = garage_control.get_capacity(T.garage)
 			local kits = garage.insert{name = config.repair_kit, count = 1}
 			if kits > 0 then
 				garage.remove{name = config.repair_kit, count = kits}
@@ -2064,7 +2117,7 @@ scenarios["network-parked"] = {
 	end,
 	events = function(t)
 		if t == 2900 then
-			out("EVENT car parked: " .. tostring(T.garage.get_inventory(defines.inventory.chest).find_item_stack(names.car) ~= nil))
+			out("EVENT car parked: " .. tostring(garage_control.has_parked_car(T.garage)))
 		end
 		if t == 3000 then
 			select_all(70, 30, 90, 50)
@@ -3034,7 +3087,7 @@ local function trace_summary(tick)
 	end
 	for _, garage in pairs(storage.garages) do
 		if garage.valid and T.surfaces[garage.surface.index] then
-			parked = parked + garage.get_inventory(defines.inventory.chest).get_item_count(names.car)
+			parked = parked + #storage.garage_data[garage.unit_number].cars
 		end
 	end
 	for _, cluster in pairs(storage.pending_clusters) do
@@ -3077,7 +3130,7 @@ local call_counts = {}
 for module_name, module in pairs{
 	movement = movement, travel = travel, charger_control = charger_control,
 	garage_control = garage_control, ghost_control = ghost_control,
-	_utils = _utils, ["_utils.deque"] = _utils.deque, gui = gui,
+	_utils = _utils, ["_utils.deque"] = _utils.deque, gui = gui, garage_gui = garage_gui,
 } do
 	for name, fn in pairs(module) do
 		if type(fn) == "function" then
