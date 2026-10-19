@@ -187,36 +187,108 @@ end
 -- ============================================================
 -- Batteries
 -- ============================================================
--- The last trunk slot only takes batteries (set_battery_filter): the player
--- puts them there to recharge an empty car (travel.handle_empty). They are not
--- cargo: the helpers below tell the cargo of a car from them.
+-- The battery slot only takes batteries (set_trunk_limits): the player puts them there
+-- to recharge an empty car (travel.handle_empty). They are not cargo: the helpers below
+-- tell the cargo of a car from them.
+-- The prototype has the slots of the largest trunk (config.upgrades.cargo). The slots
+-- above the cargo size the force has researched are locked by a filter that nothing
+-- matches (config.names.locked_slot), and the battery slot comes right after the cargo slots,
+-- so a research enlarges every car, existing ones included, without replacing it. The
+-- trunk of a car has no bar (set_bar fails: "does not have a bar").
 
 local BATTERY = {name = config.battery_item, quality = "normal"}
 
--- Locks the last trunk slot of a car to batteries. Safe to call again: the
--- player may have changed the filter, and no event tells, so on_tick calls it
--- every config.slow_check_interval. What a changed filter let into the slot goes to the
--- cargo slots, or to the ground.
-function _utils.set_battery_filter(car)
-	local trunk = car.get_inventory(defines.inventory.car_trunk)
-	local slot = #trunk
-	local filter = trunk.get_filter(slot)
-	if filter and filter.name == config.battery_item then
-		return
+-- Research cache of a force: the values below are read from the technologies once and
+-- kept in storage.research until a research changes (clear_research_cache).
+local function get_research_cache(force)
+	local cache = storage.research[force.index]
+	if not cache then
+		cache = {}
+		storage.research[force.index] = cache
 	end
-	local stack = trunk[slot]
+	return cache
+end
+
+-- Value of `key` of config.upgrades for the cars, chargers and garages of `force`:
+-- the one of the last level whose research is done.
+function _utils.get_upgrade(force, key)
+	local cache = get_research_cache(force)
+	local value = cache[key]
+	if not value then
+		local values = config.upgrades[key]
+		value = values[1]
+		for level = 2, #values do
+			if force.technologies[config.names.technology .. "_" .. key .. "_" .. (level - 1)].researched then
+				value = values[level]
+			end
+		end
+		cache[key] = value
+	end
+	return value
+end
+
+-- True once the force has researched `name`, a technology that only the script reads.
+function _utils.is_researched(force, name)
+	local cache = get_research_cache(force)
+	if cache[name] == nil then
+		cache[name] = force.technologies[name].researched
+	end
+	return cache[name]
+end
+
+-- Forgets what the script read from the research of a force whose research changed.
+function _utils.clear_research_cache(force)
+	if storage.research then
+		storage.research[force.index] = nil
+	end
+end
+
+-- Puts a filter on an inventory slot (nil clears it). What the slot held and does not match
+-- goes to the other slots, or to the ground.
+local function set_slot_filter(entity, inventory, slot, name)
+	local stack = inventory[slot]
 	local other
-	if stack.valid_for_read and stack.name ~= config.battery_item then
+	if name and stack.valid_for_read and stack.name ~= name then
 		other = {name = stack.name, quality = stack.quality, count = stack.count}
 		stack.clear()
 	end
-	trunk.set_filter(slot, config.battery_item)
+	inventory.set_filter(slot, name)
 	if other then
-		local inserted = trunk.insert(other)
+		local inserted = inventory.insert(other)
 		if inserted < other.count then
-			car.surface.spill_item_stack{position = car.position, stack = {name = other.name, quality = other.quality, count = other.count - inserted}}
+			entity.surface.spill_item_stack{position = entity.position, stack = {name = other.name, quality = other.quality, count = other.count - inserted}}
 		end
 	end
+end
+
+-- True if the filter of `slot` is `name` (nil: no filter).
+local function has_filter(inventory, slot, name)
+	local filter = inventory.get_filter(slot)
+	return (filter and filter.name) == name
+end
+
+-- Sets the filter of every slot of an inventory to `wanted(slot)`, only where it differs.
+function _utils.set_filters(entity, inventory, wanted)
+	for slot = 1, #inventory do
+		local name = wanted(slot)
+		if not has_filter(inventory, slot, name) then
+			set_slot_filter(entity, inventory, slot, name)
+		end
+	end
+end
+
+-- Sets the filters of the trunk of a car: batteries only in the battery slot, nothing in the
+-- slots after it. Safe to call again: the player may have changed a filter, and no event
+-- tells, so on_tick calls it every config.slow_check_interval. Every slot is compared.
+function _utils.set_trunk_limits(car)
+	local trunk = car.get_inventory(defines.inventory.car_trunk)
+	local battery_slot = _utils.get_upgrade(car.force, "cargo") + 1
+	_utils.set_filters(car, trunk, function(slot)
+		if slot == battery_slot then
+			return config.battery_item
+		end
+		return slot > battery_slot and config.names.locked_slot or nil
+	end)
 end
 
 -- Batteries a car can burn at most, as fuel: the battery slot adds to the charge.
@@ -264,9 +336,10 @@ end
 -- An armed car has one ammo slot (the car_ammo inventory of its gun, which only
 -- takes bullet ammo). armed.lua gives it a hidden turret that fires that ammo.
 
--- True once the force of the car has researched the armed car technology.
+-- True once the force of the car has researched config.armed_technology (cached, see
+-- get_research_cache).
 function _utils.is_armed(car)
-	return car.force.technologies[config.names.armed_technology].researched
+	return _utils.is_researched(car.force, config.armed_technology)
 end
 
 -- Stack in the ammo slot of a car ({name, quality, count}), or nil.
