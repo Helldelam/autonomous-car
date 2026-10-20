@@ -277,8 +277,7 @@ config.medium_delay = 180 -- (3s)
 	-- ghost_control.attempt_one_ghost: cooldown of a ghost that failed to revive, times the number of failures
 	-- movement.update_mode: slow mode lasts this long after an emergency stop on an obstacle, a maneuver or the end of a path
 	-- movement.start_path_request: wait between two path requests
-config.idle_delay = 300 -- (5s) long on purpose during development, so idle waits are easy to see
-	-- TODO: lower to 60-120 before release; it also bounds the maneuvers, clearings and U-turns. See "À faire" in CLAUDE.md.
+config.idle_delay = 300 -- (5s)
 	-- control.lua: wait before an idle car looks for a new task or a garage (ghost_control.go_idle, travel.handle_empty and a
 	--   new car set it as already elapsed, so that the car decides on the next tick)
 	-- movement.maneuver_tick: longest a maneuver may last, its single try; past it the car asks for a path, then clears its

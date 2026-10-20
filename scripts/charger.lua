@@ -38,7 +38,6 @@ function charger_control.compute_fuel_needed(car, position)
 	return charger_control.compute_fuel_to_reach(car, position) + charger_control.compute_fuel_reserve(car, position)
 end
 
--- TODO: build chargers automatically to reach a distant destination. See "À faire" in CLAUDE.md.
 -- Closest charger to `target_position` (the car itself by default) that has a
 -- free slot and that the car has enough fuel, with its batteries, to reach. Returns
 -- nil if there is none.

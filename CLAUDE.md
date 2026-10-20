@@ -169,8 +169,7 @@ Section « Clearing » de `movement.lua`, `config.clearing` : dernier recours av
 - Coffres d'interface (`prototypes/interface_chests.lua`) : deux coffres d'approvisionnement de plus (suivis comme `names.chest` dans `storage.supply_chests`, mêmes groupes), recette = coffre d'approvisionnement + coffre vanilla correspondant (qui les lie à la recherche logistique) :
   - **livraison** (`names.delivery_chest`, demandeur) : `logistic_control.update_requests` demande (section 1), pour chaque voiture dont c'est le coffre de livraison le plus proche, ce qui reste à collecter de son batch (`items_needed`) moins le contenu des autres coffres d'approvisionnement de la surface (hors retour) ; requête = contenu + déficit. Les robots livrent, les voitures collectent comme dans tout coffre ;
   - **retour** (`names.return_chest`, fournisseur actif) : vidé par les robots ; `find_chest_with_room` et `deposit_items` le préfèrent (le plus proche qui a de la place ; rempli en premier dans un groupe).
-- Les scénarios jouent la livraison par un ajout dans le coffre (vrais robots vérifiés en jeu seulement). Tâches de transport sans chantier : voir « À faire ».
-
+- Les scénarios jouent la livraison par un ajout dans le coffre (vrais robots vérifiés en jeu seulement).
 ### Voiture armée
 
 - Une seule voiture : le prototype a toujours `guns = {"vehicle-machine-gun"}` (slot `car_ammo` visible) et `allow_passengers = false` ; elle est armée quand la force a Military (`config.armed_technology`, `_utils.is_armed`, cache `storage.armed`). Un prototype armé à part aurait changé les `unit_number` (état et garages à migrer).
@@ -267,16 +266,10 @@ Une ligne par étude : le problème → la solution gardée et son effet ; ce qu
 
 Idées retenues par le propriétaire, pas encore commencées ; chacune a un `-- TODO` à l'endroit indiqué.
 
-- **Tâches de transport entre réseaux** : une voiture porte des objets entre un coffre d'avant-poste et un coffre d'interface, sans chantier (seuils de stock, arbitrage avec les chantiers). (`logistic.lua`, `logistic_control.update_requests`)
-- **Points de recharge automatiques** : construire des chargeurs pour atteindre une destination éloignée, sans modifier le réseau électrique. (`scripts/charger.lua`, `charger_control.find_charger`)
 - **Technologies facultatives** : vitesse de réparation des garages, vitesse de déplacement (sans perturber les trajets), capacité des kits. (`prototypes/technology.lua`)
-- **Autres types de robots** (facultatif) : logistique, objets et liquides. (`scripts/construction.lua`, `ghost_control.register_ghost`)
 - **Véhicule araignée** (spidertron modifié), en remplacement (pas forcément nécessaire) ou en amélioration : il passe bien mieux dans les espaces denses et ne subit aucune collision ; à accorder avec les technologies du jeu (le spidertron est tardif). (`prototypes/car.lua`)
-- **Répulsion des joueurs** : une voiture s'éloigne d'un joueur proche, pour ne pas le tuer. (`movement.lua`, `refresh_neighbours`)
 - **Construction automatique d'une mine** : sans ghosts, le joueur sélectionne un gisement et les voitures posent et optimisent seules foreuses, réseau électrique et, si besoin (uranium), tuyaux ; de même pour le pétrole et les sources du même genre ; éventuellement une gare, les liaisons aux réseaux électrique et ferré restant au joueur. Haut niveau de recherche, peut-être un bâtiment de plus : une tour de contrôle dont la consommation dépend de la distance et de la taille du chantier. (`scripts/construction.lua`, `ghost_control.register_ghost`)
-- **Secours d'une voiture coincée** : une voiture va la récupérer ou la relancer (risque de bloquer toutes les voitures) ; plus tard, chercher un train en panne. (`travel.lua`, `travel.start_stuck`)
 - **Limiter la charge par tick** si le mod devient coûteux : répartir sur plusieurs ticks, sans gêner le joueur, le tri des entités à la sélection, la construction des clusters et des batchs, la répartition et le départ des voitures. (`control.lua`, `on_area_selected`)
-- **Délai d'inactivité avant publication** : ramener `idle_delay` de 300 à 60-120 ticks (long exprès en développement, pour bien voir les attentes) ; il borne aussi manœuvres, dégagements et demi-tours : à mesurer avant. (`config.lua`)
 - **Affichage de débogage éteint par défaut** avant publication : `config.debug_view_default = false` (`scripts/debug/debug_view.lua`). (`config.lua`)
 - **Graphismes provisoires** : coffre d'approvisionnement, icône du sélecteur, icône du raccourci des objets manquants (`prototypes/missing_items.lua`), restes du garage et du chargeur (images déjà dans `graphics/*/remnants`, pas encore utilisées). (`prototypes/`)
 

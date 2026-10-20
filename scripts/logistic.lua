@@ -7,7 +7,6 @@ local _utils = require("scripts._utils")
 -- deposit in them first (ghost_control.find_chest_with_room).
 local logistic_control = {}
 
--- TODO: transport tasks (delivery and pick-up) between a remote supply chest and an interface chest. See "À faire" in CLAUDE.md.
 -- Items of the supply chests of a surface other than the delivery chest `delivery`, by item key.
 -- The return chests do not count: the robots are emptying them.
 local function count_other_supply(delivery, keys)
