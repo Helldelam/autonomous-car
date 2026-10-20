@@ -133,7 +133,8 @@ local function on_built(event)
 	elseif entity.name == names.garage then
 		storage.garages[id] = entity
 		garage_control.update_inventory(entity)
-		storage.garage_data[id] = {cars = {}, alerts = {}} -- cars: the parked cars, first in first out (see scripts/garage.lua)
+		-- cars: the parked cars, first in first out; exit_tick, exit_count: first exit of the current window and cars out since (see scripts/garage.lua)
+		storage.garage_data[id] = {cars = {}, alerts = {}, exit_count = 0}
 	elseif KIND_BY_NAME[entity.name] == "chest" then
 		storage.supply_chests[id] = entity
 	end
@@ -161,34 +162,41 @@ end
 
 -- The player dragged the ghost selector over an area: tracks the selected
 -- ghosts and entities marked for deconstruction or upgrade, splits them into clusters, and gives each cluster to a car or queues it.
--- TODO: if the mod gets too costly, spread the sorting, clustering and assignment over several ticks. See "À faire" in CLAUDE.md.
+-- Registering, clustering and giving out may take several ticks (storage.selection_job,
+-- config.selection_ghosts_per_tick, config.assignments_per_tick); no new selection is taken
+-- until the clusters exist.
+local finish_selection
 local function on_area_selected(event)
 	if event.item ~= names.ghost_selector then
 		return
 	end
 
 	local player = game.get_player(event.player_index)
-	local selected = {}
-	for _, entity in pairs(event.entities) do
-		-- Only the targets that are newly tracked: one selected before is with a car
-		-- or in the pending pool already.
-		if ghost_control.register_ghost(entity) then
-			table.insert(selected, entity)
-		end
-	end
-
-	if #selected == 0 then
+	if storage.selection_job then
 		if player then
-			player.print("No new ghost or entity marked for deconstruction or upgrade outside the robot network found in the selection.")
+			player.print({"autonomous-car-messages.selection-busy"})
 		end
 		return
 	end
 
-	-- All the clusters go to the pending pool first, so that a car can take
-	-- several of them along (see ghost_control.fill_batch).
-	for _, cluster in pairs(ghost_control.build_clusters(selected, player and player.force or game.forces.player)) do
-		table.insert(storage.pending_clusters, cluster)
+	-- Only the targets that are newly tracked count: one selected before is with a car
+	-- or in the pending pool already. All the clusters go to the pending pool first, so
+	-- that a car can take several of them along (see ghost_control.fill_batch). A big
+	-- selection takes several ticks: the cars are served when the last cluster exists.
+	local job = ghost_control.start_selection(event.entities, player and player.force or game.forces.player)
+	job.player_index = event.player_index
+	if ghost_control.step_selection(job) then
+		finish_selection(job)
+	else
+		storage.selection_job = job
+		if player then
+			player.print({"autonomous-car-messages.selection-clustering", #event.entities})
+		end
 	end
+end
+
+-- Offers the pending clusters to the cars and tells the player (if any) what happened.
+local function give_out_clusters(player)
 	local any_car = ghost_control.is_any_car_present()
 	local assigned = ghost_control.retry_pending_clusters()
 	local queued = #storage.pending_clusters
@@ -197,24 +205,36 @@ local function on_area_selected(event)
 		-- One line per batch type, none for a type without batch (landfill counts as construction).
 		local build_count = (assigned.build or 0) + (assigned.landfill or 0)
 		if (assigned.deconstruct or 0) > 0 then
-			player.print(assigned.deconstruct .. " destruction batch(es) assigned.")
+			player.print({"autonomous-car-messages.assigned-deconstruct", assigned.deconstruct})
 		end
 		if build_count > 0 then
-			player.print(build_count .. " construction batch(es) assigned.")
+			player.print({"autonomous-car-messages.assigned-build", build_count})
 		end
 		if (assigned.upgrade or 0) > 0 then
-			player.print(assigned.upgrade .. " upgrade batch(es) assigned.")
+			player.print({"autonomous-car-messages.assigned-upgrade", assigned.upgrade})
 		end
 		if (assigned.network or 0) > 0 then
-			player.print(assigned.network .. " logistic network batch(es) assigned.")
+			player.print({"autonomous-car-messages.assigned-network", assigned.network})
 		end
 		if queued > 0 then
-			if any_car then
-				player.print(queued .. " batch(es) queued, waiting for a car to become available.")
+			if storage.assignment_backlog then
+				player.print({"autonomous-car-messages.selection-giving-out", queued})
+			elseif any_car then
+				player.print({"autonomous-car-messages.queued-waiting", queued})
 			else
-				player.print(queued .. " batch(es) queued: no autonomous car available at all, build one.")
+				player.print({"autonomous-car-messages.queued-no-car", queued})
 			end
 		end
+	end
+end
+
+-- The clusters of a selection all exist: serves them, or tells the player that nothing was new.
+function finish_selection(job)
+	local player = game.get_player(job.player_index)
+	if job.count > 0 then
+		give_out_clusters(player)
+	elseif player then
+		player.print({"autonomous-car-messages.selection-empty"})
 	end
 end
 
@@ -280,7 +300,7 @@ local function handle_danger(car, car_data, tick)
 		return false
 	end
 	if exhausted then
-		ghost_control.abandon(car, "An autonomous car ABANDONED its task: enemies keep coming near its site. Select the ghosts again once the area is safe.")
+		ghost_control.abandon(car, {"autonomous-car-messages.alert-abandoned-danger"})
 		return true
 	end
 	travel.start_flee(car, travel.find_refuge(car, enemy))
@@ -333,7 +353,8 @@ local function update_car(car, car_data, tick)
 		end
 	elseif car_data.waiting.active then
 		travel.stop_car(car)
-		if tick - car_data.waiting.since >= config.idle_delay then
+		-- Up to short_delay later, by car: cars that began waiting on the same tick do not all decide on the same one.
+		if tick - car_data.waiting.since >= config.idle_delay + car.unit_number % config.short_delay then
 			end_wait(car, car_data, tick)
 		end
 	else
@@ -367,19 +388,26 @@ local function on_tick(event)
 		gui.refresh_all()
 		garage_gui.refresh_all()
 		car_gui.refresh_all()
-		circuit_control.refresh(event.tick)
-	end
-	if event.tick % config.medium_delay == 0 then
-		logistic_control.update_requests()
 	end
 	if event.tick % config.slow_check_interval == 0 then
 		debug_view.refresh()
 	end
+	-- The periodic work of the buildings is spread: each garage, charger or chest does its own
+	-- (offset by its id, see _utils.is_slow_check_due) on its tick of the period.
+	circuit_control.refresh(event.tick)
+	logistic_control.update_requests(event.tick)
 	garage_control.update_inventories(event.tick)
-	if event.tick % config.long_delay == 0 then
+	garage_control.repair_parked_cars(event.tick)
+	charger_control.update_buffers(event.tick)
+	local long_tick = event.tick % config.long_delay == 0
+	ghost_control.refresh_pending_clusters(long_tick)
+	if long_tick or storage.assignment_backlog or (storage.assignment_wake_tick and event.tick >= storage.assignment_wake_tick) then
 		ghost_control.retry_pending_clusters()
-		charger_control.update_buffers()
-		garage_control.repair_parked_cars()
+	end
+	local job = storage.selection_job
+	if job and ghost_control.step_selection(job) then
+		storage.selection_job = nil
+		finish_selection(job)
 	end
 end
 
@@ -400,6 +428,8 @@ local function init_storage(event)
 	storage.target_by_registration = storage.target_by_registration or {} -- [registration number] = id of a tracked entity without unit_number
 	storage.ghost_to_car = storage.ghost_to_car or {} -- [ghost unit_number] = unit_number of its car
 	storage.pending_clusters = storage.pending_clusters or {} -- clusters waiting for a free car
+	-- storage.selection_job (nil when idle): the selection being handled, see ghost_control.start_selection
+	storage.assignment_backlog = storage.assignment_backlog or false -- true while pending clusters are given out over several ticks, see ghost_control.retry_pending_clusters
 	storage.path_requests = storage.path_requests or {} -- [request id] = unit_number of the car waiting for that path
 	storage.idle_fallbacks = storage.idle_fallbacks or {} -- cars found in no state, see update_car
 	storage.research = storage.research or {} -- [force index] = values read from the research, see _utils.get_upgrade
@@ -505,7 +535,7 @@ script.on_event(defines.events.on_gui_closed, function(event)
 	car_gui.on_closed(event)
 end)
 script.on_event(defines.events.on_script_path_request_finished, movement.on_path_finished)
-commands.add_command("car-trace", "Writes a trace of the autonomous cars to script-output (see game_trace.lua). Optional argument: the unit number of one car. Run it again to stop.",
+commands.add_command("car-trace", {"autonomous-car-messages.command-car-trace"},
 	function(command)
 		game_trace.toggle(game.get_player(command.player_index), tonumber(command.parameter))
 	end)

@@ -277,6 +277,7 @@ config.medium_delay = 180 -- (3s)
 	-- ghost_control.attempt_one_ghost: cooldown of a ghost that failed to revive, times the number of failures
 	-- movement.update_mode: slow mode lasts this long after an emergency stop on an obstacle, a maneuver or the end of a path
 	-- movement.start_path_request: wait between two path requests
+	-- garage_control.can_release_car: window in which a garage lets at most garage_exit.exits cars out
 config.idle_delay = 300 -- (5s)
 	-- control.lua: wait before an idle car looks for a new task or a garage (ghost_control.go_idle, travel.handle_empty and a
 	--   new car set it as already elapsed, so that the car decides on the next tick)
@@ -316,6 +317,9 @@ config.debug_view_default = true
 -- ============================================================
 
 config.cluster_radius = 10 -- max distance between two neighbouring ghosts of a cluster
+config.selection_ghosts_per_tick = 200 -- ghosts read, put in a grid or clustered in one tick (ghost_control.step_selection), and the most a cluster holds: a big selection is handled over several ticks
+config.assignments_per_tick = 2 -- cars that get a batch in one tick (ghost_control.retry_pending_clusters): filling a batch reads every ghost, so a big selection is given out over several ticks
+config.logistic_per_tick = 20 -- cars looked at, then delivery chests given their requests, in one tick (logistic_control.update_requests)
 config.build_interval = 6 -- ticks between two build attempts, so a batch visibly goes up one entity at a time
 config.max_revive_attempts = 3 -- failed attempts on a ghost before it goes back to the pending pool
 config.step_back_distance = 30 -- how far a car backs away when every ghost left is on a retry cooldown.
@@ -363,6 +367,7 @@ config.stuck = {
 config.garage_exit = { -- free spot where a garage releases a car
 	radius = 8, -- how far around the garage to look
 	precision = 0.25, -- step of that search
+	exits = 4, -- cars a garage lets out within medium_delay of its first exit: more would collide and start their trip badly
 }
 config.garage_repair_rate = 0.01 -- fraction of its health a parked car recovers every long_delay while the garage holds a repair pack, which wears out with it
 

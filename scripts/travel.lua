@@ -232,7 +232,7 @@ function travel.start_flee(car, refuge)
 	car_data.flee.count = car_data.flee.count + 1
 	travel.begin_leg(car, refuge, {type = "flee"})
 	_utils.alert_once(car_data.alerts, "flee", car.force, car,
-		"An autonomous car is fleeing from an enemy.", config.names.car)
+		{"autonomous-car-messages.alert-flee"}, config.names.car)
 end
 
 -- ============================================================
@@ -287,11 +287,11 @@ function travel.mark_unreachable(car)
 
 	car_data.unreachable_since = car_data.unreachable_since or game.tick
 	_utils.alert_once(car_data.alerts, "unreachable", car.force, car,
-		"An autonomous car cannot find a way to recharge enough to reach its destination.", config.names.car)
+		{"autonomous-car-messages.alert-unreachable"}, config.names.car)
 
 	if game.tick - car_data.unreachable_since >= config.very_long_delay then
 		_utils.alert(car.force, car,
-			"An autonomous car has ABANDONED its current task after failing for a long time - check the area for obstructions or missing chargers.", config.names.car)
+			{"autonomous-car-messages.alert-abandoned-unreachable"}, config.names.car)
 		travel.requeue_construction(car_data)
 		car_data.unreachable_since = nil
 		car_data.charge_detour_count = 0 -- the next task gets its full detour budget
@@ -425,10 +425,10 @@ function travel.start_stuck(car, tick)
 
 	if can_retry then
 		_utils.alert_once(car_data.alerts, "stuck", car.force, car,
-			"An autonomous car is stuck. It will try again in a few seconds unless you free it.", config.names.car)
+			{"autonomous-car-messages.alert-stuck"}, config.names.car)
 	else
 		_utils.alert_once(car_data.alerts, "stuck_final", car.force, car,
-			"An autonomous car is stuck for good. It will abandon its task soon: free it or check the area.", config.names.car)
+			{"autonomous-car-messages.alert-stuck-final"}, config.names.car)
 	end
 
 	stuck.active = true
@@ -524,9 +524,7 @@ function travel.handle_empty(car, tick)
 		travel.cancel_trip(car_data)
 		car_data.waiting.active = false
 		_utils.alert_once(car_data.alerts, "battery_empty", car.force, car,
-			"An autonomous car has run out of battery and cannot move: put a battery in the battery slot "
-				.. "(last slot of its trunk), or recover it.",
-			config.names.car)
+			{"autonomous-car-messages.alert-battery-empty"}, config.names.car)
 	end
 
 	travel.stop_car(car)

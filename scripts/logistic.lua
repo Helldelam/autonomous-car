@@ -42,29 +42,52 @@ local function set_requests(delivery, needed)
 	section.filters = filters
 end
 
--- Called every config.medium_delay ticks. Each car with a batch counts for its closest delivery
--- chest on its surface; a chest without such car requests nothing.
-function logistic_control.update_requests()
-	local needs = {}
-	local any = false
+-- Starts a pass (storage.logistic_job): the cars and the delivery chests to look at, and what the
+-- cars need per chest. nil if there is no delivery chest.
+local function start_job()
+	local needs, chests = {}, {}
 	for id, chest in pairs(storage.supply_chests) do
 		if chest.valid and chest.name == config.names.delivery_chest then
 			needs[id] = {}
-			any = true
+			chests[#chests + 1] = id
 		end
 	end
-	if not any then
+	if #chests == 0 then
+		return nil
+	end
+	local cars = {}
+	for id in pairs(storage.cars) do
+		cars[#cars + 1] = id
+	end
+	return {needs = needs, cars = cars, chests = chests, index = 0}
+end
+
+-- Called every tick; a pass starts every config.medium_delay ticks and takes config.logistic_per_tick
+-- cars, then as many chests, per tick. Each car with a batch counts for its closest delivery
+-- chest on its surface; a chest without such car requests nothing.
+function logistic_control.update_requests(tick)
+	if not storage.logistic_job and tick % config.medium_delay == 0 then
+		storage.logistic_job = start_job()
+	end
+	local job = storage.logistic_job
+	if not job then
 		return
 	end
 
-	for id, car in pairs(storage.cars) do
-		local construction = car.valid and storage.car_data[id].construction
+	local budget = config.logistic_per_tick
+	local cars = job.cars
+	while job.index < #cars and budget > 0 do
+		job.index = job.index + 1
+		budget = budget - 1
+		local id = cars[job.index]
+		local car = storage.cars[id]
+		local construction = car and car.valid and storage.car_data[id].construction
 		if construction and next(construction.items_needed) then
 			local delivery = _utils.find_closest(storage.supply_chests, car.position, function(chest)
 				return chest.name == config.names.delivery_chest
 			end, "chest", car.surface)
-			if delivery then
-				local total = needs[delivery.unit_number]
+			local total = delivery and job.needs[delivery.unit_number] -- not in the pass if built since it started
+			if total then
 				for key, count in pairs(construction.items_needed) do
 					total[key] = (total[key] or 0) + count
 				end
@@ -72,10 +95,17 @@ function logistic_control.update_requests()
 		end
 	end
 
-	for id, needed in pairs(needs) do
+	-- All the cars are counted: the chests get their requests.
+	while job.index >= #cars and budget > 0 do
+		local id = table.remove(job.chests)
+		if not id then
+			storage.logistic_job = nil
+			return
+		end
+		budget = budget - 1
 		local chest = storage.supply_chests[id]
 		if chest and chest.valid then
-			set_requests(chest, needed)
+			set_requests(chest, job.needs[id])
 		end
 	end
 end

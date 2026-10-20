@@ -1,5 +1,6 @@
 local config = require("config")
 local garage_control = require("scripts.garage")
+local _utils = require("scripts._utils")
 
 -- Circuit network output of the garages and the chargers. A garage or a charger cannot show its
 -- state on a wire by itself (the cars of a garage are a list of the script, a charger is an energy
@@ -100,15 +101,15 @@ local function refresh_charger(charger, data, tick)
 	})
 end
 
--- Called every config.short_delay ticks.
+-- Called every tick: each garage and charger is refreshed every config.short_delay ticks.
 function circuit_control.refresh(tick)
 	for id, garage in pairs(storage.garages) do
-		if garage.valid then
+		if garage.valid and _utils.is_slow_check_due(garage, tick, config.short_delay) then
 			refresh_garage(garage, storage.garage_data[id])
 		end
 	end
 	for id, charger in pairs(storage.chargers) do
-		if charger.valid then
+		if charger.valid and _utils.is_slow_check_due(charger, tick, config.short_delay) then
 			refresh_charger(charger, storage.charger_data[id], tick)
 		end
 	end

@@ -57,7 +57,7 @@ function garage_control.parking_tick(car, garage)
 
 	if not garage_control.has_room(garage) then
 		_utils.alert_once(car_data.alerts, "garage_full", car.force, garage,
-			"No room left in this garage for the car trying to park.", config.names.garage)
+			{"autonomous-car-messages.alert-garage-full"}, config.names.garage)
 		stop_parking(car_data)
 		return
 	end
@@ -65,7 +65,7 @@ function garage_control.parking_tick(car, garage)
 
 	if not _utils.is_cargo_empty(car) then
 		_utils.alert_once(car_data.alerts, "not_empty", car.force, car,
-			"An autonomous car still carries items and cannot park until its trunk is empty.", config.names.car)
+			{"autonomous-car-messages.alert-not-empty"}, config.names.car)
 		return
 	end
 	_utils.alert_reset(car_data.alerts, "not_empty")
@@ -93,6 +93,31 @@ function garage_control.has_parked_car(garage)
 	return #storage.garage_data[garage.unit_number].cars > 0
 end
 
+-- True if the garage's window of exits is full: garage_exit.exits cars left within medium_delay of the first one.
+local function is_exit_window_full(garage_data)
+	return garage_data.exit_tick ~= nil and game.tick - garage_data.exit_tick < config.medium_delay
+		and garage_data.exit_count >= config.garage_exit.exits
+end
+
+-- True if the garage holds a car that may leave now.
+function garage_control.can_release_car(garage)
+	local garage_data = storage.garage_data[garage.unit_number]
+	return #garage_data.cars > 0 and not is_exit_window_full(garage_data)
+end
+
+-- The tick at which the first garage whose window of exits is full lets cars out again, or nil if none waits.
+function garage_control.get_next_release_tick()
+	local next_tick
+	for id, garage in pairs(storage.garages) do
+		local garage_data = storage.garage_data[id]
+		if garage.valid and #garage_data.cars > 0 and is_exit_window_full(garage_data) then
+			local tick = garage_data.exit_tick + config.medium_delay
+			next_tick = math.min(next_tick or tick, tick)
+		end
+	end
+	return next_tick
+end
+
 -- Puts a new car on the map from the record `entry`; returns it, or nil if nothing could be created.
 local function create_car(garage, entry, position)
 	-- raise_built makes control.lua track the new car before create_entity returns.
@@ -116,21 +141,22 @@ end
 
 -- Takes the first parked car out of the garage (the one that has waited longest) and puts it
 -- back on the map with its fuel, batteries, ammo and health. Returns the new car, or nil if
--- the garage holds no car or has no free spot around it.
+-- the garage holds no car, has let out its share of cars lately (can_release_car) or has no
+-- free spot around it.
 function garage_control.release_car(garage)
 	if not (garage and garage.valid) then
 		return nil
 	end
 
 	local garage_data = storage.garage_data[garage.unit_number]
-	if #garage_data.cars == 0 then
+	if #garage_data.cars == 0 or is_exit_window_full(garage_data) then
 		return nil
 	end
 	local position = garage.surface.find_non_colliding_position(config.names.car, garage.position,
 		config.garage_exit.radius, config.garage_exit.precision)
 	if not position then
 		_utils.alert_once(garage_data.alerts, "no_room", garage.force, garage,
-			"No room for a car to leave this garage.", config.names.garage)
+			{"autonomous-car-messages.alert-garage-exit-blocked"}, config.names.garage)
 		return nil
 	end
 	_utils.alert_reset(garage_data.alerts, "no_room")
@@ -138,6 +164,11 @@ function garage_control.release_car(garage)
 	local car = create_car(garage, garage_data.cars[1], position)
 	if car then
 		table.remove(garage_data.cars, 1)
+		-- The first exit of a window stamps it; the window is over medium_delay later.
+		if garage_data.exit_tick == nil or game.tick - garage_data.exit_tick >= config.medium_delay then
+			garage_data.exit_tick, garage_data.exit_count = game.tick, 0
+		end
+		garage_data.exit_count = garage_data.exit_count + 1
 	end
 	return car
 end
@@ -344,12 +375,13 @@ local function repair_cars(garage)
 	end
 end
 
--- Called every config.long_delay (see on_tick in control.lua).
-function garage_control.repair_parked_cars()
+-- Called every tick: each garage repairs every config.long_delay ticks.
+function garage_control.repair_parked_cars(tick)
 	for id, garage in pairs(storage.garages) do
 		if not garage.valid then
 			_utils.release_entity("garage", id)
-		elseif _utils.is_researched(garage.force, config.names.repair_technology) then
+		elseif _utils.is_slow_check_due(garage, tick, config.long_delay)
+			and _utils.is_researched(garage.force, config.names.repair_technology) then
 			repair_cars(garage)
 		end
 	end
@@ -364,7 +396,7 @@ end
 
 function garage_control.alert_no_garage(car)
 	_utils.alert_once(storage.car_data[car.unit_number].alerts, "no_garage", car.force, car,
-		"No available garage found for an autonomous car to park in.", config.names.garage)
+		{"autonomous-car-messages.alert-no-garage"}, config.names.garage)
 end
 
 return garage_control

@@ -43,7 +43,7 @@ local travel = require("scripts.travel")
 --   mode            "build", "landfill", "deconstruct", "upgrade" or "network": what the whole batch does
 --   blocked_since   tick the batch began waiting for an earlier phase, or nil
 --
--- control.lua enters through register_ghost, on_ghost_destroyed, build_clusters,
+-- control.lua enters through register_ghost, on_ghost_destroyed, start_selection, step_selection,
 -- is_any_car_present, retry_pending_clusters, try_assign_pending, proceed,
 -- collect_items, deposit_items, deposit_leftovers, building_tick and abandon.
 -- The other functions are steps of those: they sit on the table too, so that
@@ -362,15 +362,63 @@ local function count_extra_slots(items, ghost)
 	return extra, load
 end
 
--- The candidates within config.cluster_radius of a ghost, closest first.
-local function find_neighbours(ghost, candidates)
+-- The ghosts a group still has to cluster sit in a grid of square cells of
+-- config.cluster_radius: the neighbours of a ghost are in the 3 x 3 cells around it,
+-- whatever the size of the selection. A group is
+--   order  all its ghosts, the seeds are taken from the end
+--   cells  [cell key] = array of the ghosts of the cell that are not in a cluster yet
+--   slot, key  [ghost] = its index in its cell, and the key of its cell
+--   taken  [ghost] = true when it is not in the grid
+--   left   number of ghosts in the grid
+--   next_seed  the first ghost that did not fit in the last cluster
+local function get_cell_key(x, y)
+	return (x + 32768) * 65536 + (y + 32768)
+end
+
+local function insert_in_grid(group, ghost, key)
+	local cell = group.cells[key]
+	if not cell then
+		cell = {}
+		group.cells[key] = cell
+	end
+	cell[#cell + 1] = ghost
+	group.slot[ghost], group.key[ghost], group.taken[ghost] = #cell, key, nil
+	group.left = group.left + 1
+end
+
+local function take_from_grid(group, ghost)
+	local cell = group.cells[group.key[ghost]]
+	local index, last = group.slot[ghost], cell[#cell]
+	cell[index] = last
+	group.slot[last] = index
+	cell[#cell] = nil
+	group.taken[ghost] = true
+	group.left = group.left - 1
+end
+
+-- The ghosts of the grid within config.cluster_radius of a ghost, closest first.
+local function find_neighbours(group, ghost)
 	local neighbours, distances = {}, {}
 	local position = ghost.position
-	for _, candidate in pairs(candidates) do
-		local distance = util.distance(position, candidate.position)
-		if distance <= config.cluster_radius then
-			table.insert(neighbours, candidate)
-			distances[candidate] = distance
+	local cell_x = math.floor(position.x / config.cluster_radius)
+	local cell_y = math.floor(position.y / config.cluster_radius)
+	for dx = -1, 1 do
+		for dy = -1, 1 do
+			local cell = group.cells[get_cell_key(cell_x + dx, cell_y + dy)]
+			if cell then
+				for index = #cell, 1, -1 do -- backwards: a ghost taken out is replaced by the last one, already seen
+					local candidate = cell[index]
+					if candidate.valid then -- checked at use: a ghost may be gone since the selection
+						local distance = util.distance(position, candidate.position)
+						if distance <= config.cluster_radius then
+							table.insert(neighbours, candidate)
+							distances[candidate] = distance
+						end
+					else
+						take_from_grid(group, candidate)
+					end
+				end
+			end
 		end
 	end
 	table.sort(neighbours, function(a, b)
@@ -379,84 +427,154 @@ local function find_neighbours(ghost, candidates)
 	return neighbours
 end
 
--- Removes the first occurrence of `value` from an array. True if it was there.
-local function remove_value(list, value)
-	for index, other in ipairs(list) do
-		if other == value then
-			table.remove(list, index)
-			return true
-		end
-	end
-	return false
-end
-
 -- Splits ghosts into clusters: one ghost type per cluster (all the entities to
 -- mine, or to upgrade, or the ghosts that extend the logistic network, together),
 -- small enough for the trunk of a car of `force` (config.upgrades.cargo slots). A cluster grows
 -- breadth-first from a seed ghost, nearest neighbours first, so it stays compact.
 -- The first ghost that no longer fits becomes the seed of the next cluster, so
 -- clusters tile the selected area.
-function ghost_control.build_clusters(ghosts, force)
-	local capacity = _utils.get_upgrade(force, "cargo") -- trunk slots of the cars of the force that selected them
-	local by_name = {}
-	for _, ghost in pairs(ghosts) do
-		local mode = ghost_control.get_target_mode(ghost)
-		local name = (mode == "build" or mode == "landfill") and ("ghost " .. ghost.ghost_name) or mode
-		by_name[name] = by_name[name] or {}
-		table.insert(by_name[name], ghost)
+-- A big selection is handled over several ticks, in three phases (`job.phase`) that share
+-- the budget of config.selection_ghosts_per_tick ghosts per tick: "register" (start tracking the
+-- selected entities and sort them by ghost type), "grid" (put them in the grids) and "cluster"
+-- (puts the finished clusters in storage.pending_clusters). Once the budget is spent, no new
+-- cluster is started; one never stops halfway, and holds at most that many ghosts, so a tick
+-- clusters twice the budget at worst.
+-- start_selection returns the job, step_selection (called every tick until it returns true)
+-- runs it; `job.count` is then the number of targets newly tracked.
+function ghost_control.start_selection(entities, force)
+	return {
+		phase = "register",
+		entities = entities,
+		index = 0, -- entities read so far, then ghosts of the group put in the grid
+		count = 0, -- entities newly tracked
+		by_name = {}, -- [group name] = array of ghosts, one group per ghost type
+		capacity = _utils.get_upgrade(force, "cargo"), -- trunk slots of the cars of the force that selected them
+		groups = {}, -- grids of the groups, see above
+		group = 1, -- the group being put in the grid, then clustered
+	}
+end
+
+-- Starts tracking the selected entities (as far as the budget allows) and sorts them by group.
+-- Returns the budget left, which is 0 when the phase is not over.
+local function register_selection(job, budget)
+	local entities = job.entities
+	while job.index < #entities and budget > 0 do
+		job.index = job.index + 1
+		budget = budget - 1
+		local ghost = entities[job.index]
+		if ghost_control.register_ghost(ghost) then
+			job.count = job.count + 1
+			local mode = ghost_control.get_target_mode(ghost)
+			local name = (mode == "build" or mode == "landfill") and ("ghost " .. ghost.ghost_name) or mode
+			job.by_name[name] = job.by_name[name] or {}
+			table.insert(job.by_name[name], ghost)
+		end
 	end
+	if job.index >= #entities then
+		job.phase, job.index = "grid", 0
+		for _, order in pairs(job.by_name) do
+			table.insert(job.groups, {order = order, cells = {}, slot = {}, key = {}, taken = {}, left = 0})
+		end
+		job.by_name, job.entities = nil, nil
+	end
+	return budget
+end
 
-	local clusters = {}
-	for _, remaining in pairs(by_name) do
-		local next_seed = nil
-
-		while #remaining > 0 do
-			local seed
-			if next_seed and remove_value(remaining, next_seed) then
-				seed = next_seed
-			else
-				seed = table.remove(remaining)
+-- Puts the ghosts of the groups in their grid, as far as the budget allows.
+local function fill_grids(job, budget)
+	while job.group <= #job.groups do
+		local group = job.groups[job.group]
+		local order = group.order
+		while job.index < #order do
+			if budget <= 0 then
+				return 0
 			end
-			next_seed = nil
+			job.index = job.index + 1
+			budget = budget - 1
+			local ghost = order[job.index]
+			if ghost.valid then
+				local position = ghost.position
+				insert_in_grid(group, ghost, get_cell_key(
+					math.floor(position.x / config.cluster_radius), math.floor(position.y / config.cluster_radius)))
+			else
+				group.taken[ghost] = true -- gone since the selection
+			end
+		end
+		job.group, job.index = job.group + 1, 0
+	end
+	job.phase, job.group = "cluster", 1
+	return budget
+end
+
+-- Runs a selection as far as this tick's budget allows. True when its clusters all exist.
+function ghost_control.step_selection(job)
+	local budget = config.selection_ghosts_per_tick
+	if job.phase == "register" then
+		budget = register_selection(job, budget)
+	end
+	if job.phase == "grid" then
+		budget = fill_grids(job, budget)
+	end
+	if job.phase ~= "cluster" then
+		return false
+	end
+	while job.group <= #job.groups do
+		local group = job.groups[job.group]
+		while group.left > 0 do
+			if budget <= 0 then
+				return false
+			end
+			local seed = group.next_seed
+			if not seed or group.taken[seed] then
+				repeat
+					seed = table.remove(group.order)
+				until not seed or not group.taken[seed]
+			end
+			group.next_seed = nil
+			if not seed then
+				break -- nothing left to take (cannot happen)
+			end
+			take_from_grid(group, seed)
 
 			local cluster = {}
-			local items = {}
-			local slots = 0
-			-- Adds a ghost to the cluster if its item still fits in the trunk.
-			local function try_add(ghost)
-				local delta, load = count_extra_slots(items, ghost)
-				if slots + delta > capacity then
-					return false
+			if seed.valid then
+				local items = {}
+				local slots = 0
+				-- Adds a ghost to the cluster if its item still fits in the trunk.
+				local function try_add(ghost)
+					local delta, load = count_extra_slots(items, ghost)
+					if #cluster >= config.selection_ghosts_per_tick or slots + delta > job.capacity then
+						return false
+					end
+					table.insert(cluster, ghost)
+					slots = slots + delta
+					add_counts(items, load)
+					return true
 				end
-				table.insert(cluster, ghost)
-				slots = slots + delta
-				add_counts(items, load)
-				return true
-			end
 
-			try_add(seed)
-			local frontier = _utils.deque.new()
-			_utils.deque.push_back(frontier, seed)
-			while _utils.deque.length(frontier) > 0 do
-				local current = _utils.deque.pop_front(frontier)
+				try_add(seed)
+				local frontier = _utils.deque.new()
+				_utils.deque.push_back(frontier, seed)
+				while _utils.deque.length(frontier) > 0 do
+					local current = _utils.deque.pop_front(frontier)
 
-				for _, neighbour in ipairs(find_neighbours(current, remaining)) do
-					if remove_value(remaining, neighbour) then
+					for _, neighbour in ipairs(find_neighbours(group, current)) do
+						take_from_grid(group, neighbour)
 						if try_add(neighbour) then
 							_utils.deque.push_back(frontier, neighbour)
 						else
-							next_seed = next_seed or neighbour
-							table.insert(remaining, neighbour) -- left for a later cluster
+							group.next_seed = group.next_seed or neighbour
+							insert_in_grid(group, neighbour, group.key[neighbour]) -- left for a later cluster
 						end
 					end
 				end
+				table.insert(storage.pending_clusters, {ghosts = cluster})
 			end
-
-			table.insert(clusters, {ghosts = cluster})
+			budget = budget - math.max(#cluster, 1)
 		end
+		job.group = job.group + 1
 	end
-
-	return clusters
+	return true
 end
 
 -- Centroid of a set of ghosts (array or map) and the number of valid ones.
@@ -495,42 +613,98 @@ function ghost_control.is_any_car_present()
 	return false
 end
 
+-- A pending cluster keeps what the assignment asks again and again: its centroid, mode,
+-- surface and trunk slots (nothing is added to a cluster once it is pending). They are
+-- measured on first use and renewed by refresh_cluster, so a ghost that has gone since can
+-- make them a little stale, which only changes the order in which clusters and cars are
+-- paired. Before a cluster is given to a car, refresh_cluster drops its gone ghosts.
+
+-- Measures the cluster again: drops its invalid ghosts and caches centroid, mode and
+-- surface. Returns the centroid and the number of valid ghosts (nil, 0 if none is left).
+local function refresh_cluster(cluster)
+	local centroid, count = ghost_control.compute_centroid(cluster.ghosts)
+	cluster.centroid = centroid
+	cluster.mode = centroid and get_mode(cluster.ghosts) or nil
+	local _, ghost = next(cluster.ghosts)
+	cluster.surface = ghost and ghost.surface or nil
+	return centroid, count
+end
+
+-- Centroid of a cluster, or nil if it holds no valid ghost.
+local function get_cluster_centroid(cluster)
+	if not cluster.centroid then
+		refresh_cluster(cluster)
+	end
+	return cluster.centroid
+end
+
+-- What a cluster does with its ghosts (see get_target_mode), or nil.
+local function get_cluster_mode(cluster)
+	if not cluster.mode then
+		refresh_cluster(cluster)
+	end
+	return cluster.mode
+end
+
 -- Phase (see PHASE) of a cluster, or nil if it holds no valid ghost.
 local function get_cluster_phase(cluster)
-	local mode = get_mode(cluster.ghosts)
+	local mode = get_cluster_mode(cluster)
 	return mode and PHASE[mode]
 end
 
 -- Surface of a cluster (its ghosts are all on one), or nil if it holds no ghost.
 local function get_cluster_surface(cluster)
-	local _, ghost = next(cluster.ghosts)
-	return ghost and ghost.valid and ghost.surface or nil
+	if not cluster.surface then
+		refresh_cluster(cluster)
+	end
+	return cluster.surface
 end
 
--- Finds a car for a cluster: the closest waiting car without a batch and with
--- an empty trunk (one still carrying leftovers first unloads them, see
--- end_wait in control.lua) and whose fuel is not critical (a car stopped for
--- lack of a charger would keep the batch without being able to move), otherwise
--- a car released from the closest garage that holds one. Returns nil if there is
--- none, or if the cluster has no valid ghost left.
-function ghost_control.find_available_car(cluster)
-	local centroid = ghost_control.compute_centroid(cluster.ghosts)
+-- The waiting cars that can take a batch, as an array of {car, x, y, surface}: no batch,
+-- an empty trunk (one still carrying leftovers first unloads them, see end_wait in
+-- control.lua) and a fuel that is not critical (a car stopped for lack of a charger would
+-- keep the batch without being able to move). Made once per assignment pass instead of
+-- once per cluster; the cars wait, so their position is kept.
+function ghost_control.list_available_cars()
+	local available = {}
+	for id, car in pairs(storage.cars) do
+		if car.valid then
+			local car_data = storage.car_data[id]
+			if car_data.waiting.active and not car_data.construction
+				and _utils.is_cargo_empty(car)
+				and not travel.is_fuel_critical(car) then
+				local position = car.position
+				table.insert(available, {car = car, x = position.x, y = position.y, surface = car.surface})
+			end
+		end
+	end
+	return available
+end
+
+-- Finds a car for a cluster: the closest of `available` (see list_available_cars;
+-- the car is taken out of it), otherwise a car released from the closest garage that
+-- holds one. Returns nil if there is none, or if the cluster has no valid ghost left.
+function ghost_control.find_available_car(cluster, available)
+	local centroid = get_cluster_centroid(cluster)
 	if not centroid then
 		return nil
 	end
 	local surface = get_cluster_surface(cluster)
 
-	local car = _utils.find_closest(storage.cars, centroid, function(car, id)
-		local car_data = storage.car_data[id]
-		return car_data.waiting.active and not car_data.construction
-			and _utils.is_cargo_empty(car)
-			and not travel.is_fuel_critical(car)
-	end, nil, surface)
-	if car then
-		return car
+	local best_index, best_distance
+	for index, entry in ipairs(available) do
+		if entry.surface == surface then
+			local distance = util.distance(centroid, entry)
+			if not best_index or distance < best_distance then
+				best_index, best_distance = index, distance
+			end
+		end
+	end
+	if best_index then
+		return table.remove(available, best_index).car
 	end
 
-	local garage = _utils.find_closest(storage.garages, centroid, garage_control.has_parked_car, nil, surface)
+	local garage = _utils.find_closest(storage.garages, centroid, garage_control.can_release_car, nil, surface)
 	if garage then
 		return garage_control.release_car(garage)
 	end
@@ -547,25 +721,58 @@ function ghost_control.try_assign_pending(car)
 		return false
 	end
 
-	local best_index, best_distance, best_phase
-	for index, cluster in pairs(storage.pending_clusters) do
-		local centroid = ghost_control.compute_centroid(cluster.ghosts)
-		if centroid and is_cluster_ready(cluster) and get_cluster_surface(cluster) == car.surface then
-			local distance = util.distance(car.position, centroid)
-			local phase = get_cluster_phase(cluster)
-			if not best_index or phase < best_phase or (phase == best_phase and distance < best_distance) then
-				best_index = index
-				best_distance = distance
-				best_phase = phase
+	while true do
+		local best_index, best_distance, best_phase
+		for index, cluster in pairs(storage.pending_clusters) do
+			local centroid = get_cluster_centroid(cluster)
+			if centroid and is_cluster_ready(cluster) and get_cluster_surface(cluster) == car.surface then
+				local distance = util.distance(car.position, centroid)
+				local phase = get_cluster_phase(cluster)
+				if not best_index or phase < best_phase or (phase == best_phase and distance < best_distance) then
+					best_index = index
+					best_distance = distance
+					best_phase = phase
+				end
 			end
 		end
-	end
-	if not best_index then
-		return false
-	end
+		if not best_index then
+			return false
+		end
 
-	ghost_control.assign_cluster(car, table.remove(storage.pending_clusters, best_index))
-	return true
+		local cluster = table.remove(storage.pending_clusters, best_index)
+		local _, count = refresh_cluster(cluster)
+		if count > 0 then
+			ghost_control.assign_cluster(car, cluster)
+			return true
+		end
+		-- Every ghost of it is gone: it is dropped, and the next best one is looked for.
+	end
+end
+
+-- Looks again at the pending clusters, config.selection_ghosts_per_tick ghosts per tick (the
+-- ghosts of a big pool are many to read): drops the empty clusters and renews the caches.
+-- A pass starts every config.long_delay (`start`) and goes on over the next ticks until the
+-- last cluster, kept in storage.refresh_index.
+function ghost_control.refresh_pending_clusters(start)
+	local pending = storage.pending_clusters
+	local index = storage.refresh_index
+	if start then
+		index = 1
+	end
+	if not index then
+		return
+	end
+	local budget = config.selection_ghosts_per_tick
+	while budget > 0 and index <= #pending do
+		local _, count = refresh_cluster(pending[index])
+		if count == 0 then
+			table.remove(pending, index)
+		else
+			index = index + 1
+		end
+		budget = budget - math.max(count, 1)
+	end
+	storage.refresh_index = index <= #pending and index or nil
 end
 
 -- Offers every pending cluster to the available cars, earliest phase first. A
@@ -574,25 +781,51 @@ end
 -- dropped. Called when the player selects ghosts and every config.long_delay as
 -- a fallback: that also notices a car that a player put in a garage by hand
 -- (see garage_control.update_inventories), for which there is no event. Returns the
--- number of cars that got a batch, by batch mode ([mode] = count).
+-- number of cars that got a batch, by batch mode ([mode] = count). Nothing is
+-- given out while a selection is being clustered (storage.selection_job). At most
+-- config.assignments_per_tick cars get one per tick (filling a batch reads
+-- every ghost): then storage.assignment_backlog is set, and on_tick calls again on the
+-- next ticks (a cluster is refreshed when it is picked, as its ghosts may have gone
+-- meanwhile; refresh_pending_clusters renews the others over time). A garage lets
+-- out at most config.garage_exit.exits cars per config.medium_delay: the clusters
+-- that wait for it are offered again at storage.assignment_wake_tick.
 function ghost_control.retry_pending_clusters()
 	local assigned = {}
+	if storage.selection_job then
+		return assigned -- the clusters are still being made: the batches are filled once all exist
+	end
+	-- The budget is shared by every call of the tick.
+	if storage.assignment_tick ~= game.tick then
+		storage.assignment_tick, storage.assignment_count = game.tick, 0
+	end
+	local budget = config.assignments_per_tick - storage.assignment_count
+	storage.assignment_backlog = budget <= 0
+	if budget <= 0 then
+		return assigned
+	end
+	local available = ghost_control.list_available_cars()
 	for phase = 1, PHASE.network do -- network is the last phase
 		local index = 1
 		while index <= #storage.pending_clusters do
 			local cluster = storage.pending_clusters[index]
-			local _, count = ghost_control.compute_centroid(cluster.ghosts)
-			if count == 0 then
-				table.remove(storage.pending_clusters, index)
-			elseif get_cluster_phase(cluster) ~= phase or not is_cluster_ready(cluster) then
+			if get_cluster_phase(cluster) ~= phase or not is_cluster_ready(cluster) then
 				index = index + 1
 			else
-				local car = ghost_control.find_available_car(cluster)
+				local car = ghost_control.find_available_car(cluster, available)
 				if car then
 					table.remove(storage.pending_clusters, index)
-					local mode = get_mode(cluster.ghosts) --[[@as string]] -- the cluster has a valid ghost (count > 0)
-					ghost_control.assign_cluster(car, cluster)
-					assigned[mode] = (assigned[mode] or 0) + 1
+					local _, count = refresh_cluster(cluster)
+					if count > 0 then
+						local mode = cluster.mode --[[@as string]] -- the cluster has a valid ghost
+						ghost_control.assign_cluster(car, cluster)
+						assigned[mode] = (assigned[mode] or 0) + 1
+						budget = budget - 1
+						storage.assignment_count = storage.assignment_count + 1
+						if budget == 0 then
+							storage.assignment_backlog = true
+							return assigned
+						end
+					end
 					index = 1
 				else
 					index = index + 1 -- another cluster may be on a surface that has a car
@@ -600,6 +833,9 @@ function ghost_control.retry_pending_clusters()
 			end
 		end
 	end
+	-- Clusters left for lack of a car may wait for a garage whose window of exits is full:
+	-- on_tick looks again when the first of them reopens, not only every long_delay.
+	storage.assignment_wake_tick = #storage.pending_clusters > 0 and garage_control.get_next_release_tick() or nil
 	return assigned
 end
 
@@ -651,24 +887,33 @@ function ghost_control.fill_batch(car)
 	for _, entry in ipairs(construction.clusters) do
 		reserved = reserved + count_items_slots(entry.items)
 	end
-	-- Slots of the pending clusters, counted once: nothing changes them during the call.
-	local slots_of = {}
+	local capacity = _utils.get_upgrade(car.force, "cargo")
+	-- Slots of a pending cluster, counted once (they come from the loads of its ghosts,
+	-- which a refresh drops with the ghosts that have gone).
 	local function get_slots(cluster)
-		slots_of[cluster] = slots_of[cluster] or count_cluster_slots(cluster)
-		return slots_of[cluster]
+		if not cluster.slots then
+			refresh_cluster(cluster)
+			cluster.slots = count_cluster_slots(cluster)
+		end
+		return cluster.slots
 	end
 
+	-- Centroid of the batch, kept as a sum so that adding a cluster does not measure every ghost again.
+	local origin, count_in_batch = ghost_control.compute_centroid(construction.ghosts)
+	if not origin then
+		return
+	end
+	local sum_x, sum_y = origin.x * count_in_batch, origin.y * count_in_batch
+	local surface = car.surface
+
 	while true do
-		local origin = ghost_control.compute_centroid(construction.ghosts)
-		if not origin then
-			return
-		end
+		origin = {x = sum_x / count_in_batch, y = sum_y / count_in_batch}
 		local best_index, best_distance
 		for index, cluster in ipairs(storage.pending_clusters) do
-			local centroid = ghost_control.compute_centroid(cluster.ghosts)
-			if centroid and is_cluster_ready(cluster) and get_cluster_surface(cluster) == car.surface
-				and get_mode(cluster.ghosts) == mode
-				and reserved + get_slots(cluster) <= _utils.get_upgrade(car.force, "cargo") then
+			local centroid = get_cluster_centroid(cluster)
+			if centroid and is_cluster_ready(cluster) and get_cluster_surface(cluster) == surface
+				and get_cluster_mode(cluster) == mode
+				and reserved + get_slots(cluster) <= capacity then
 				local distance = util.distance(origin, centroid)
 				if not best_index or distance < best_distance then
 					best_index, best_distance = index, distance
@@ -679,8 +924,14 @@ function ghost_control.fill_batch(car)
 			return
 		end
 		local cluster = table.remove(storage.pending_clusters, best_index)
-		reserved = reserved + get_slots(cluster)
-		add_cluster(car.unit_number, construction, cluster)
+		-- Its ghosts may have gone since the caches were made: an empty cluster is dropped.
+		local centroid, count = refresh_cluster(cluster)
+		if centroid then
+			reserved = reserved + get_slots(cluster)
+			add_cluster(car.unit_number, construction, cluster)
+			sum_x, sum_y = sum_x + centroid.x * count, sum_y + centroid.y * count
+			count_in_batch = count_in_batch + count
+		end
 	end
 end
 
@@ -747,18 +998,17 @@ end
 local function alert_missing_items(car, construction)
 	for key in pairs(construction.items_needed) do
 		local item_name, quality = _utils.split_item_key(key)
-		_utils.alert_once(construction.alerted_items, key, car.force, car,
-			"An autonomous car is missing item '" .. item_name .. "'" .. (quality and " of quality " .. quality or "")
-			.. " to complete a construction, waiting for supply.",
-			item_name)
+		local item_text = prototypes.item[item_name].localised_name
+		local message = quality
+			and {"autonomous-car-messages.alert-missing-item-quality", item_text, prototypes.quality[quality].localised_name}
+			or {"autonomous-car-messages.alert-missing-item", item_text}
+		_utils.alert_once(construction.alerted_items, key, car.force, car, message, item_name)
 	end
 end
 
 local function alert_build_failed(car, ghost)
 	_utils.alert(car.force, ghost,
-		"An autonomous car could not build, mine or replace an entity after " .. config.max_revive_attempts
-			.. " attempts and gave up on it; it has been put back in the general queue.",
-		config.names.car)
+		{"autonomous-car-messages.alert-build-failed", config.max_revive_attempts}, config.names.car)
 end
 
 -- Puts back in the pending pool the clusters of a batch whose items are not all
@@ -1334,8 +1584,7 @@ function ghost_control.go_to_site(car)
 		travel.set_destination(car, ghost, {type = "building"})
 	elseif any_valid then
 		if is_stranded(construction) then
-			ghost_control.abandon(car, "An autonomous car cannot reach the water to fill in: no landfill ghost of its batch is next to land. "
-				.. "Batch abandoned; select the ghosts again once the shore is reachable.")
+			ghost_control.abandon(car, {"autonomous-car-messages.alert-abandoned-shore"})
 		else
 			ghost_control.step_back(car)
 		end
@@ -1404,7 +1653,7 @@ function ghost_control.deposit_leftovers(car)
 	local chest = ghost_control.find_chest_with_room(car)
 	if not chest then
 		_utils.alert_once(car_data.alerts, "supply_full", car.force, car,
-			"The supply chests are full (or there is none): an autonomous car cannot empty its trunk. Make room in a chest.",
+			{"autonomous-car-messages.alert-supply-full"},
 			config.names.car)
 		return false
 	end
@@ -1474,7 +1723,7 @@ function ghost_control.abandon(car, message)
 	local construction = car_data.construction
 
 	_utils.alert(car.force, car,
-		message or "An autonomous car ABANDONED its task because it stayed stuck: select the ghosts again if the way is clear now.",
+		message or {"autonomous-car-messages.alert-abandoned-stuck"},
 		config.names.car)
 
 	if construction then

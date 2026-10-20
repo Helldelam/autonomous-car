@@ -79,12 +79,12 @@ end
 -- Slow checks
 -- ============================================================
 
--- True on the ticks when a car does its slow measurements (nearby cars, closest
--- charger): every config.slow_check_interval ticks (or every `interval`, for a
--- measure that can wait longer), offset by the id of the car so that the cars do
--- not all measure on the same tick.
-function _utils.is_slow_check_due(car, tick, interval)
-	return (tick + car.unit_number) % (interval or config.slow_check_interval) == 0
+-- True on the ticks when an entity (car, garage, charger) does its periodic work (slow
+-- measurements of a car, circuit signals...): every config.slow_check_interval ticks (or every
+-- `interval`, for a job that can wait longer), offset by the id of the entity so that they
+-- do not all work on the same tick.
+function _utils.is_slow_check_due(entity, tick, interval)
+	return (tick + entity.unit_number) % (interval or config.slow_check_interval) == 0
 end
 
 -- ============================================================
@@ -373,7 +373,8 @@ end
 -- ============================================================
 -- `item` is the name of the item whose icon marks the alert on the map.
 
--- Prints `message` to a force and pins it on `target` as a map alert.
+-- Prints `message` (a localised string, see locale/*/messages.cfg) to a force and pins it on
+-- `target` as a map alert.
 function _utils.alert(force, target, message, item)
 	local icon = {type = "item", name = item}
 	force.print(message)

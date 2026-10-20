@@ -96,7 +96,7 @@ function garage_gui.on_click(event)
 	end
 	local index = frame[LIST].selected_index
 	if not garage_control.hand_out_car(garage, player, index > 0 and index or 1) then
-		player.print({"autonomous-car-gui.garage-no-room"})
+		player.print({"autonomous-car-messages.garage-no-room"})
 	end
 	refresh(frame)
 end

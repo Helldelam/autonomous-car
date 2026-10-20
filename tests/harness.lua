@@ -3273,6 +3273,150 @@ local function trace_summary(tick)
 		tick, cars, parked, ghosts, pending, table.concat(users, ","), table.concat(built, " ")))
 end
 
+-- TEMPORARY scalability scenario: -Set "test_crowd=<n>" cars (default 100) in one field, with
+-- chargers, garages and supply chests in proportion, and three ghosts per car spread over
+-- the field, all selected at t = 100.
+local CROWD_ITEMS = {}
+for _, name in ipairs{"wooden-chest", "iron-chest", "steel-chest", "small-electric-pole", "medium-electric-pole",
+	"transport-belt", "fast-transport-belt", "express-transport-belt", "underground-belt", "inserter",
+	"burner-inserter", "long-handed-inserter", "fast-inserter", "bulk-inserter", "pipe", "pipe-to-ground",
+	"small-lamp", "stone-wall", "gate"} do
+	table.insert(CROWD_ITEMS, {name = name})
+end
+for _, name in ipairs{"stone-furnace", "steel-furnace", "accumulator"} do
+	table.insert(CROWD_ITEMS, {name = name, big = true})
+end
+
+scenarios["crowd"] = {
+	ticks = 6000,
+	category = "movement",
+	setup = function()
+		local n = config.test_crowd or 100
+		local s = new_surface({{0, 0}}, 14)
+		-- Supplies and parking south of the field, the cars between them and the field.
+		for i = 0, math.ceil(n / 4) - 1 do
+			make(s, names.charger, -150 + (i % 20) * 8, 400 + math.floor(i / 20) * 8)
+		end
+		for i = 0, math.ceil(n / 40) - 1 do
+			make(s, names.garage, -150 + i * 12, 440)
+		end
+		for i = 0, math.ceil(n / 4) - 1 do
+			local supplies = {}
+			for _, item in ipairs(CROWD_ITEMS) do
+				supplies[item.name] = 200
+			end
+			fill(make(s, names.chest, -150 + (i % 75) * 4 + 0.5, 380.5 + math.floor(i / 75) * 4), supplies)
+		end
+		local columns = math.ceil(math.sqrt(n))
+		for i = 0, n - 1 do
+			make_car(s, -3.5 * columns / 2 + (i % columns) * 3.5, 250 + math.floor(i / columns) * 6, random(), 1)
+		end
+		-- A block of 40 ghosts per car, 24 tiles apart: a batch fills the trunk (40 slots), so
+		-- each car works a while. One selection per block, like the courses of the other scenarios.
+		T.blocks = {}
+		local placed = 0
+		for i = 0, n - 1 do
+			local bx, by = -216 + (i % columns) * 24, -216 + math.floor(i / columns) * 24
+			T.blocks[#T.blocks + 1] = {bx, by}
+			-- 22 different items: 22 slots, so a second block never fits in the same trunk.
+			for k, item in ipairs(CROWD_ITEMS) do
+				local half = (item.big and not config.test_same) and 0 or 0.5
+				make_ghost(s, config.test_same and "wooden-chest" or item.name,bx + ((k - 1) % 5) * 3 + 1 + half, by + math.floor((k - 1) / 5) * 3 + 1 + half)
+				placed = placed + 1
+			end
+		end
+		out("SETUP crowd: " .. n .. " cars, " .. placed .. " ghosts")
+	end,
+	events = function(t)
+		if t == 100 then
+			if config.test_single then -- -Set "test_single=1": one selection of the whole field
+				local x1, y1, x2, y2 = math.huge, math.huge, -math.huge, -math.huge
+				for _, block in ipairs(T.blocks) do
+					x1, y1 = math.min(x1, block[1] - 1), math.min(y1, block[2] - 1)
+					x2, y2 = math.max(x2, block[1] + 17), math.max(y2, block[2] + 17)
+				end
+				select_ghosts(x1, y1, x2, y2)
+			else
+				for _, block in ipairs(T.blocks) do
+					select_ghosts(block[1] - 1, block[2] - 1, block[1] + 17, block[2] + 17)
+				end
+			end
+		end
+		if t % 1000 == 0 then
+			out("EVENT t=" .. t .. " ghosts left " .. #T.surface.find_entities_filtered{type = "entity-ghost"})
+		end
+	end,
+}
+
+-- TEMPORARY profiling (perf/scale): time of the whole mod tick and of the cars' part.
+local tick_profile, cars_profile, profiled_car_ticks = nil, nil, 0
+local function install_profiler()
+	if tick_profile then
+		return
+	end
+	tick_profile, cars_profile = game.create_profiler(true), game.create_profiler(true)
+	local inner = update_car
+	update_car = function(car, car_data, tick)
+		local timer = game.create_profiler()
+		inner(car, car_data, tick)
+		timer.stop()
+		cars_profile.add(timer)
+		profiled_car_ticks = profiled_car_ticks + 1
+	end
+	-- Cumulative time of some functions (nested calls overlap).
+	local function_profiles, tick_profiles = {}, {} -- tick_profiles: reset every tick, logged on a few ticks (TICKFN)
+	for _, spec in ipairs{
+		{"ghost_control", ghost_control, {"retry_pending_clusters", "find_available_car", "fill_batch", "assign_cluster",
+			"start_selection", "step_selection", "try_assign_pending", "proceed", "register_ghost"}},
+		{"garage_control", garage_control, {"release_car", "update_inventories", "repair_parked_cars"}},
+		{"circuit_control", circuit_control, {"refresh"}},
+		{"logistic_control", logistic_control, {"update_requests"}},
+		{"charger_control", charger_control, {"update_buffers"}},
+	} do
+		for _, name in ipairs(spec[3]) do
+			local fn = spec[2][name]
+			local profile = game.create_profiler(true)
+			function_profiles[spec[1] .. "." .. name] = profile
+			local tick_only = game.create_profiler(true)
+			tick_profiles[spec[1] .. "." .. name] = tick_only
+			spec[2][name] = function(...)
+				local timer = game.create_profiler()
+				local r1, r2, r3 = fn(...)
+				timer.stop()
+				profile.add(timer)
+				tick_only.add(timer)
+				if game.tick == 100 or game.tick == 101 then
+					log({"", "CALL ", game.tick, " ", spec[1], ".", name, " ", timer})
+				end
+				return r1, r2, r3
+			end
+		end
+	end
+	script.on_event(defines.events.on_tick, function(event)
+		for _, profile in pairs(tick_profiles) do
+			profile.reset()
+		end
+		local timer = game.create_profiler()
+		on_tick(event)
+		timer.stop()
+		tick_profile.add(timer)
+		local t = event.tick
+		if t % 600 == 0 or (t >= 99 and t <= 160) or (t >= 1195 and t <= 1260) then
+			log({"", "TICK ", t, " total ", timer})
+			for name, profile in pairs(tick_profiles) do
+				log({"", "TICKFN ", t, " ", name, " ", profile})
+			end
+		end
+		if event.tick % 1000 == 0 then
+			log({"", "PROFILE tick ", event.tick, " cars=", table_size(storage.cars), " car-ticks=", profiled_car_ticks,
+				" whole: ", tick_profile, " cars part: ", cars_profile})
+			for name, profile in pairs(function_profiles) do
+				log({"", "PROFILEFN ", event.tick, " ", name, " ", profile})
+			end
+		end
+	end)
+end
+
 -- ============================================================
 -- Coverage
 -- ============================================================
@@ -3328,6 +3472,7 @@ script.on_nth_tick(1, function(event)
 	if not T or not T.start_tick then
 		-- The mod creates its storage on its first tick (see init_storage).
 		if storage.cars then
+			install_profiler()
 			-- Full trunks (40 slots) for every scenario; "technologies" uses another force.
 			-- The values of the first version of the mod: 40 cargo slots, 50 cars per garage,
 			-- 4 cars per charger, charge and build speed 1, free garage repair (here with packs).
@@ -3352,7 +3497,10 @@ script.on_nth_tick(1, function(event)
 			for _, name in ipairs(running) do
 				use(name)
 				seed = 12345 -- the same obstacles whatever the other scenarios of the run
+				local setup_timer = game.create_profiler()
 				scenarios[name].setup()
+				setup_timer.stop()
+				log({"", "SETUPTIME ", name, " tick ", tick, " ", setup_timer})
 				T.start_tick = tick
 				out("SETUP " .. name .. " at tick " .. tick)
 			end
@@ -3373,7 +3521,12 @@ script.on_nth_tick(1, function(event)
 				end
 			end
 			if scenarios[name].events then
+				local events_timer = game.create_profiler()
 				scenarios[name].events(t)
+				events_timer.stop()
+				if t >= 99 and t <= 102 then
+					log({"", "EVENTSTIME ", name, " t ", t, " ", events_timer})
+				end
 			end
 
 			if tick % 10 == 0 then

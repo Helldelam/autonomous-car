@@ -15,7 +15,7 @@ Mod Factorio 2.0 (Lua 5.2) « Autonomous Car » : une voiture autonome qui trava
 - API : la documentation locale (`doc-html` du jeu, version 2.0.77 le 2026-10-10) fait foi ; celle en ligne peut décrire une version plus récente (cas du paramètre `buffer` de `apply_upgrade`, voir « Construction »). Très rarement (nouvelle version du jeu, contournement d'une limite de l'API), proposer de vérifier si un contournement peut être simplifié.
 - « Problèmes connus » : y ajouter tout problème découvert ; corrigé, il passe dans « Corrigés, à valider » et n'en sort qu'après validation du propriétaire. Seul ce que le joueur voit ou peut faire y entre (pas un refactoring).
 - Idée pour plus tard : une ligne dans « À faire » et un `-- TODO` à l'endroit du code ; retirer les deux une fois fait.
-- Code, commentaires et messages du script (alertes, `print`) en anglais ; ce fichier en français. `locale/` (noms et descriptions des prototypes) en anglais et en français : toute ligne ajoutée ou modifiée l'est dans les deux.
+- Code et commentaires en anglais ; ce fichier en français. Aucun texte destiné au joueur (alerte, `print`, aide d'une commande) en dur dans le script : une chaîne localisée `{"autonomous-car-messages.<clé>", ...}` de `locale/<langue>/messages.cfg` (les noms et descriptions des prototypes et les libellés des fenêtres sont dans `autonomous-car.cfg`). Le jeu choisit lui-même le texte dans la langue de chaque joueur (en multijoueur, chacun la sienne) : le script ne la lit pas. Anglais et français : toute ligne ajoutée ou modifiée l'est dans les deux.
 
 ## Commandes
 
@@ -48,6 +48,8 @@ tests\show.ps1 construction -Car 132           # changements d'état d'une voitu
 - `run.ps1` lance Factorio sans fenêtre ni joueur sur une copie du mod (`%TEMP%\autonomous-car-tests` ; le jeu peut rester ouvert) et affiche par scénario l'erreur de script éventuelle, les événements et le dernier résumé. Trace : `NOSTATE` (filet de sécurité de `update_car`, voir « Tick »), `EMERG` (freinages d'urgence), `PATH` (chemins), `HEALTH` (contacts), `DONE <parcours> <tick>`.
 - `-Reference` : Factorio est déterministe, deux versions équivalentes donnent des traces identiques (à scénarios groupés identiques : les numéros d'entités en dépendent) ; la référence tourne avec son propre `tests/harness.lua` quand elle en a un.
 - Variantes (`-Set`) : `test_jitter=<n>` (départ ± 0,3 tile, orientation ± 0,01 tour), `test_door_shift=1` (portes décalées d'une tile au plus), `test_research=<0, 1 ou 2>` (améliorations recherchées jusqu'à ce niveau, 0 sans réparation ; par défaut cargo et garage au niveau 2, le reste au niveau 1). Mesuré le 2026-10-18 aux niveaux 0 et 2 (`robustness`, `energy`, `doors`, `construction`) : aucune erreur de script, `doors` 91/96 comme la base, seul `modules` laisse 2 ghosts au niveau 0 (coffre de 20 slots, construction deux fois plus lente).
+
+Provisoire dans le harnais (à garder ou retirer à la mise au propre) : le scénario `crowd` (`-Set "test_crowd=<n>"` ; `test_single=1` une seule sélection, `test_same=1` ghosts identiques), hors des catégories ci-dessous, et les profileurs de `install_profiler` (durées par fonction et par tick dans la trace) qui ont servi à mesurer la charge par tick.
 
 Catégories (69 scénarios) :
 - `movement` (14) : obstacles (salles, murs, forêts, labyrinthes, bout de mur `wall-corner`) ; `forests` regroupe 24 parcours sur une grande carte.
@@ -84,7 +86,7 @@ Dossiers (comme les mods les plus téléchargés : RateCalculator, FactorySearch
 | `scripts/gui/missing_items.lua` | `gui` | fenêtre des objets manquants (raccourci `missing_items_shortcut`) |
 | `scripts/debug/debug_view.lua` | `debug_view` | voiture sous le curseur ou ouverte : destination, chemin, état, coûts de braquage (`car_data.steering`, écrit par `drive_tick`), toutes les `slow_check_interval` ; raccourci `debug_view_shortcut`, actif par défaut (`config.debug_view_default`) |
 | `scripts/debug/game_trace.lua` | `game_trace` | `/car-trace [numéro d'unité]` (relancée, elle arrête) écrit `script-output/autonomous-car-trace.txt` : chaque voiture en mouvement toutes les `short_delay / 2` ticks, ligne `EVENT` à chaque changement d'état (`car_data.trace_info`, écrit par `update_mode` seulement pendant la trace) |
-| `locale/en`, `locale/fr` | | noms et descriptions affichés en jeu |
+| `locale/en`, `locale/fr` | | `autonomous-car.cfg` : noms, descriptions et libellés des fenêtres ; `messages.cfg` : messages et alertes (section `autonomous-car-messages`) |
 
 ### État
 
@@ -103,6 +105,14 @@ Dossiers (comme les mods les plus téléchargés : RateCalculator, FactorySearch
 6. `stuck` : `travel.stuck_tick` (réessai, ou abandon via `ghost_control.abandon`)
 7. `waiting` : `end_wait` choisit la suite (reprise du batch, cluster en attente, garage)
 8. sinon : filet de sécurité, la voiture repasse en `waiting` et le cas est enregistré (`storage.idle_fallbacks`) ; c'est un bug ailleurs, que les scénarios signalent par `NOSTATE`
+
+### Charge par tick
+
+Rien ne doit coûter plus que quelques millisecondes en un tick, quelle que soit la taille de la sélection, pour les machines modestes. Mesuré (2026-10-20, scénario `crowd`, 100 × 22 ghosts et 2200 identiques) : avant, le tick de sélection atteignait 1,1 s et un tick de clustering 525 ms ; après, environ 0,4 s à la sélection et 40 ms par tick de clustering, constants. Le « tick max » de 2,9 à 5,7 s des tests est la mise en place du scénario (tick 0), pas le mod.
+- **Sélection** (`ghost_control.start_selection` / `step_selection`, tâche gardée dans `storage.selection_job`, reprise à chaque tick par `on_tick`) : trois phases partageant `config.selection_ghosts_per_tick` (200 ghosts par tick) : `register` (suivi des entités, tri par type), `grid` (grilles), `cluster` (clusters). Une seule sélection à la fois : tant que ses clusters n'existent pas, une autre est refusée avec un message. Aucune affectation avant que tous les clusters existent. Un cluster n'est jamais coupé en cours de route et contient au plus ce même nombre de ghosts : un tick traite au pire le double du budget.
+- **Voisins** : les ghosts d'un groupe (un type de ghost, ou un mode) sont dans une grille de cellules de `cluster_radius` ; les voisins d'un ghost sont dans les 3 × 3 cellules autour, donc coût linéaire (sans grille : proportionnel à ghosts × ghosts restants). Cas non mesuré : une cellule pleine de ghosts d'une tile (environ 0,2 s estimé par tick de 200 ghosts).
+- **Affectation** (`retry_pending_clusters`) : au plus `config.assignments_per_tick` (2) voitures reçoivent un lot par tick, budget partagé par tous les appels du tick ; la suite passe par `storage.assignment_backlog`. Le garage laisse sortir au plus `garage_exit.exits` voitures par `medium_delay` (`can_release_car`) ; `storage.assignment_wake_tick` relance l'affectation à la réouverture de la fenêtre. Les scénarios d'une catégorie partagent une partie, donc le budget : plusieurs sélections au même tick décalent de quelques ticks le départ de certains lots (traces de `phases-single`, `sealed`, `failures`, `doors`, `energy` décalées sans effet sur le résultat).
+- **Tâches périodiques étalées** : chaque garage, chargeur ou voiture fait son travail à son tour de la période (`_utils.is_slow_check_due` : tick + numéro d'unité) : liaisons de circuit (`short_delay`), tampon des chargeurs et réparation (`long_delay`), filtres des garages et des coffres (`slow_check_interval`) ; une voiture en attente décide après `idle_delay` plus son numéro modulo `short_delay`. Requêtes des coffres de livraison (`logistic_control.update_requests`) : une passe tous les `medium_delay`, `config.logistic_per_tick` voitures puis autant de coffres par tick (`storage.logistic_job`). Les clusters en attente sont revus en continu (`refresh_pending_clusters`, une passe tous les `long_delay`, 200 ghosts par tick, `storage.refresh_index`) ; un cluster est de toute façon remesuré quand une voiture le prend.
 
 ### Conduite
 
@@ -195,7 +205,7 @@ Section « Clearing » de `movement.lua`, `config.clearing` : dernier recours av
 
 ### Construction
 
-- Flux : sélection du joueur → `on_area_selected` → `register_ghost` (ignore ce qu'un réseau logistique couvre et ce qui est déjà suivi, avec une voiture ou en attente) → `build_clusters` → `storage.pending_clusters` → `retry_pending_clusters` → `find_available_car` (voiture en `waiting`, coffre vide, carburant non critique ; sinon sortie d'un garage) → `assign_cluster`, qui crée `car_data.construction` et appelle `fill_batch`.
+- Flux : sélection du joueur → `on_area_selected` → tâche `storage.selection_job` (`start_selection`, `step_selection`, voir « Charge par tick ») : `register_ghost` (ignore ce qu'un réseau logistique couvre et ce qui est déjà suivi, avec une voiture ou en attente), tri par type de ghost, grilles, clusters → `storage.pending_clusters` → `finish_selection` → `retry_pending_clusters` → `find_available_car` (voiture en `waiting`, coffre vide, carburant non critique ; sinon sortie d'un garage) → `assign_cluster`, qui crée `car_data.construction` et appelle `fill_batch`.
 - Cibles (les « ghosts » du module) : ghost d'entité ou de tuile, entité marquée pour la déconstruction (arbres, rochers, bâtiments minables, falaises) ou pour la mise à niveau (autre entité ou autre qualité). `ghost_control.get_id` : `unit_number`, ou pour les arbres et rochers, qui n'en ont pas, surface, nom et position (`storage.target_by_registration` relie leur destruction à cette clé).
 - Modes (`get_target_mode`, `construction.mode`) : `build`, `landfill` (ghost de tuile sur l'eau), `deconstruct`, `upgrade`, `network` (ghosts qui étendent le réseau logistique : roboports) ; un seul par batch (`fill_batch` n'ajoute que des clusters de son mode).
 - Phases (`PHASE`) : démontages, remblais (un bâtiment à démonter sur le remblai part avant), mises à niveau et constructions, enfin `network`. Un batch collecte tout de suite (et signale ce qui manque) mais ne part vers son chantier qu'une fois plus aucune cible d'une phase antérieure suivie sur sa surface, en batch ou en attente (`is_waiting_for_phase` ; une marque annulée ne compte pas) ; il attend alors comme pour des objets manquants (`construction.blocked_since`). Après `long_delay`, si un cluster d'une phase antérieure attend faute de voiture, le batch retourne dans la liste et la voiture, une fois ses objets déposés, prend ce cluster (`wait_for_phase`). Attribution par phase (`retry_pending_clusters`, `try_assign_pending`).
@@ -271,7 +281,6 @@ Idées retenues par le propriétaire, pas encore commencées ; chacune a un `-- 
 - **Technologies facultatives** : vitesse de réparation des garages, vitesse de déplacement (sans perturber les trajets), capacité des kits. (`prototypes/technology.lua`)
 - **Véhicule araignée** (spidertron modifié), en remplacement (pas forcément nécessaire) ou en amélioration : il passe bien mieux dans les espaces denses et ne subit aucune collision ; à accorder avec les technologies du jeu (le spidertron est tardif). (`prototypes/car.lua`)
 - **Construction automatique d'une mine** : sans ghosts, le joueur sélectionne un gisement et les voitures posent et optimisent seules foreuses, réseau électrique et, si besoin (uranium), tuyaux ; de même pour le pétrole et les sources du même genre ; éventuellement une gare, les liaisons aux réseaux électrique et ferré restant au joueur. Haut niveau de recherche, peut-être un bâtiment de plus : une tour de contrôle dont la consommation dépend de la distance et de la taille du chantier. (`scripts/construction.lua`, `ghost_control.register_ghost`)
-- **Limiter la charge par tick** si le mod devient coûteux : répartir sur plusieurs ticks, sans gêner le joueur, le tri des entités à la sélection, la construction des clusters et des batchs, la répartition et le départ des voitures. (`control.lua`, `on_area_selected`)
 - **Affichage de débogage éteint par défaut** avant publication : `config.debug_view_default = false` (`scripts/debug/debug_view.lua`). (`config.lua`)
 - **Graphismes provisoires** : coffre d'approvisionnement, icône du sélecteur, icône du raccourci des objets manquants (`prototypes/missing_items.lua`), restes du garage et du chargeur (images déjà dans `graphics/*/remnants`, pas encore utilisées). (`prototypes/`)
 
@@ -283,7 +292,7 @@ Aucun pour l'instant.
 
 ### Corrigés, à valider
 
-Aucun pour l'instant.
+- **Charge par tick** (voir « Charge par tick ») : sélection traitée en plusieurs ticks avec un verrou (message si le joueur sélectionne trop tôt, message « lots en préparation »), affectations et sorties de garage étalées, tâches périodiques étalées, messages et alertes traduits (`messages.cfg`). Validé par scénarios seulement avant l'étalement final : **campagne complète à relancer** (nouvelle base de comparaison : l'attente d'une voiture dure jusqu'à `short_delay` de plus, ce qui décale toutes les traces), puis validation en jeu (grande sélection, plusieurs joueurs, langue du jeu en français).
 
 #### Validation reportée
 

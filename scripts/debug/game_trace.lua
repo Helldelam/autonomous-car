@@ -33,12 +33,12 @@ end
 function game_trace.toggle(player, car_id)
 	if storage.game_trace and not car_id then
 		storage.game_trace = nil
-		player.print("Car trace off (" .. FILE .. " in script-output).")
+		player.print({"autonomous-car-messages.trace-off", FILE})
 		return
 	end
 	storage.game_trace = {car_id = car_id, last = {}}
 	write("TRACE start tick " .. game.tick .. (car_id and (" car " .. car_id) or " all cars"))
-	player.print("Car trace on: " .. FILE .. " in script-output of the Factorio user folder.")
+	player.print({"autonomous-car-messages.trace-on", FILE})
 end
 
 local function describe_target(car, car_data)

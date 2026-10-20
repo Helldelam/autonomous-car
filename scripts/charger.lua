@@ -58,10 +58,13 @@ function charger_control.update_buffer(charger)
 	end
 end
 
-function charger_control.update_buffers()
+-- Called every tick: each charger is checked every config.long_delay ticks.
+function charger_control.update_buffers(tick)
 	for id, charger in pairs(storage.chargers) do
 		if charger.valid then
-			charger_control.update_buffer(charger)
+			if _utils.is_slow_check_due(charger, tick, config.long_delay) then
+				charger_control.update_buffer(charger)
+			end
 		else
 			_utils.release_entity("charger", id)
 		end
@@ -100,7 +103,7 @@ end
 
 function charger_control.alert_no_charger(car)
 	_utils.alert_once(storage.car_data[car.unit_number].alerts, "no_charger", car.force, car,
-		"An autonomous car needs to recharge but no reachable charger is available.",
+		{"autonomous-car-messages.alert-no-charger"},
 		config.names.car)
 end
 
