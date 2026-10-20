@@ -193,8 +193,6 @@ end
 -- car, so they do not all measure on the same tick). A parked or stopped car is
 -- an ordinary obstacle, which can_place_entity already sees. Trains could join
 -- this list later: it only holds what is_in_neighbour_zone needs.
--- TODO: players could join it too, to repel the car from a nearby player so that no car
--- kills one. See "À faire" in CLAUDE.md.
 local function refresh_neighbours(car, car_data, tick)
 	if car_data.neighbours and not _utils.is_slow_check_due(car, tick) then
 		return

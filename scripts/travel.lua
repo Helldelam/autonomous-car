@@ -400,8 +400,6 @@ function travel.is_leg_too_long(car, tick)
 	return tick - moving.departure_tick > max_duration
 end
 
--- TODO: send another car to rescue a stuck car (and could
--- later fetch a broken-down train). See "À faire" in CLAUDE.md.
 -- Stops a stuck car and alerts the player. The car waits for the player to free
 -- it, then tries its leg again (see travel.stuck_tick). It tries again only
 -- while it has retries left and fuel for the leg: otherwise it waits longer, then
