@@ -1,5 +1,5 @@
 -- Interface chests between the cars and the logistic network. Both are supply chests for the cars
--- (see ghost.lua):
+-- (see construction.lua):
 -- - the delivery chest is a requester chest: the script sets its requests from what the batches of
 --   the cars lack (logistic.lua), and the robots fill it;
 -- - the return chest is an active provider chest: the cars deposit their leftovers and what they

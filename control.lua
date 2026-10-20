@@ -1,21 +1,21 @@
 -- Control stage entry point: storage setup, entity tracking, and the per-tick
 -- dispatch of each car's state.
 local config = require("config")
-local colors = require("colors")
-local _utils = require("_utils")
-local movement = require("movement")
-local travel = require("travel")
-local charger_control = require("charge")
-local garage_control = require("park")
-local ghost_control = require("ghost")
-local gui = require("gui")
-local garage_gui = require("garage_gui")
-local car_gui = require("car_gui")
-local circuit_control = require("circuit")
-local logistic_control = require("logistic")
-local debug_view = require("debug_view")
-local game_trace = require("game_trace")
-local armed = require("armed")
+local colors = require("scripts.colors")
+local _utils = require("scripts._utils")
+local movement = require("scripts.movement")
+local travel = require("scripts.travel")
+local charger_control = require("scripts.charger")
+local garage_control = require("scripts.garage")
+local ghost_control = require("scripts.construction")
+local gui = require("scripts.gui.missing_items")
+local garage_gui = require("scripts.gui.garage")
+local car_gui = require("scripts.gui.car")
+local circuit_control = require("scripts.circuit")
+local logistic_control = require("scripts.logistic")
+local debug_view = require("scripts.debug.debug_view")
+local game_trace = require("scripts.debug.game_trace")
+local armed = require("scripts.armed")
 
 local names = config.names
 
@@ -90,7 +90,7 @@ local function create_car_data(tick)
 		slowing = false, -- braking down to entry_speed after leaving fast mode
 		neighbours = nil, -- moving cars nearby, see movement.lua
 
-		construction = nil, -- current batch, see ghost.lua
+		construction = nil, -- current batch, see construction.lua
 		tasks = _utils.deque.new(), -- what to do when the current step ends; the front task runs first
 
 		-- Fleeing from an enemy (handle_danger): `active` while on the way to the refuge, `count` the flights of this batch.
@@ -132,7 +132,7 @@ local function on_built(event)
 	elseif entity.name == names.garage then
 		storage.garages[id] = entity
 		garage_control.update_inventory(entity)
-		storage.garage_data[id] = {cars = {}, alerts = {}} -- cars: the parked cars, first in first out (see park.lua)
+		storage.garage_data[id] = {cars = {}, alerts = {}} -- cars: the parked cars, first in first out (see scripts/garage.lua)
 	elseif KIND_BY_NAME[entity.name] == "chest" then
 		storage.supply_chests[id] = entity
 	end
@@ -402,7 +402,7 @@ local function init_storage(event)
 	storage.path_requests = storage.path_requests or {} -- [request id] = unit_number of the car waiting for that path
 	storage.idle_fallbacks = storage.idle_fallbacks or {} -- cars found in no state, see update_car
 	storage.research = storage.research or {} -- [force index] = values read from the research, see _utils.get_upgrade
-	storage.debug_view = storage.debug_view or {} -- [player index] = false or true when the player toggled the debug drawing, see debug_view.lua
+	storage.debug_view = storage.debug_view or {} -- [player index] = false or true when the player toggled the debug drawing, see scripts/debug/debug_view.lua
 
 	debug_view.sync_shortcuts()
 

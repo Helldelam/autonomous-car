@@ -96,6 +96,12 @@ config.steering_cost = {
 	margin = 0.5, -- added, per side, for a sample point with an obstacle about a car width beside it: keeps the car off the walls
 }
 config.arrival_distance = 6 -- a car this close to its destination has arrived and can act on it
+config.rails = { -- a car that arrives with a rail beside it first drives off the rails (movement.start_retreat): a train would hit it
+	scan = 3, -- side of the square around the arrived car that is searched for rails
+	clearance = 3.5, -- the spot it retreats to has no rail closer than this
+	reach = 2, -- the car has reached that spot this close to it (arrival_distance is too coarse for a few tiles; 1.5 left the car stopping 1.5 to 1.6 short, in a maneuver loop)
+	search_radius = 8, -- how far from its destination that spot is looked for
+}
 config.emergency_brake_lookahead = 3 -- an obstacle this far straight ahead triggers emergency braking, and keeps a maneuver from ending
 
 -- ============================================================
@@ -299,14 +305,14 @@ config.very_long_delay = 3600 -- (60s)
 config.slow_check_interval = 6 -- (0.1s)
 	-- debug_view.refresh: period of the debug drawing
 
--- Debug drawing of the car under the cursor or opened (see debug_view.lua): its
+-- Debug drawing of the car under the cursor or opened (see scripts/debug/debug_view.lua): its
 -- destination, path, state and steering costs. Each player toggles it with a
 -- shortcut; this is the state of a player who has not touched it.
 -- TODO: off by default before release (see "À faire" in CLAUDE.md).
 config.debug_view_default = true
 
 -- ============================================================
--- Construction (see ghost.lua)
+-- Construction (see construction.lua)
 -- ============================================================
 
 config.cluster_radius = 10 -- max distance between two neighbouring ghosts of a cluster
@@ -317,12 +323,12 @@ config.step_back_distance = 30 -- how far a car backs away when every ghost left
 config.chest_group_radius = 1.5 -- supply chests this close to each other form one group: reaching one gives access to all
 
 -- ============================================================
--- Fuel and charging (see charge.lua, travel.lua)
+-- Fuel and charging (see scripts/charger.lua, travel.lua)
 -- ============================================================
 
 config.full_charge_duration = 900 -- (15s) time to fill an empty tank; the transfer per tick is derived from it and the tank capacity
 -- High estimate of the fuel a trip of d tiles burns, used to decide whether it needs a charging detour and where the
--- critical level lies (see charge.lua; measured on 364 trips of 5 to 11000 tiles, `range-*` scenarios):
+-- critical level lies (see scripts/charger.lua; measured on 364 trips of 5 to 11000 tiles, `range-*` scenarios):
 -- fixed + near_per_tile * min(d, near_distance) + far_per_tile * the rest.
 -- Covers about 90% of the short trips of the test scenarios (traps included) and all the long ones.
 config.fuel_estimate = {
@@ -351,7 +357,7 @@ config.stuck = {
 }
 
 -- ============================================================
--- Garage (see park.lua)
+-- Garage (see scripts/garage.lua)
 -- ============================================================
 
 config.garage_exit = { -- free spot where a garage releases a car
@@ -379,6 +385,8 @@ assert(config.path.goal.radius < config.arrival_distance,
 	"config.path.goal.radius must be below config.arrival_distance: a path would end where the car has not arrived")
 assert(config.step_back_distance > config.arrival_distance,
 	"config.step_back_distance must be above config.arrival_distance: the car would arrive without moving")
+assert(config.rails.clearance >= config.rails.scan / 2 + config.rails.reach and config.rails.search_radius > config.rails.clearance,
+	"config.rails: a car that stops within reach of its spot must not see rails in its scan (clearance >= scan / 2 + reach), and the search radius must cover the clearance")
 
 -- The first sample point of a heading must lie beyond the car's own box, or the
 -- car would detect itself.

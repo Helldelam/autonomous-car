@@ -90,13 +90,16 @@ $categories = @($info.Values | ForEach-Object { $_.Category } | Select-Object -U
 function Get-ChangedCategories {
 	$files = @(git -C $modFolder diff --name-only HEAD) + @(git -C $modFolder ls-files --others --exclude-standard)
 	$affected = @{
-		"movement.lua" = @("movement", "robustness", "energy", "doors")
-		"travel.lua" = $categories
-		"ghost.lua" = @("construction", "robustness")
-		"charge.lua" = @("energy", "robustness")
-		"park.lua" = @("energy")
+		"scripts/movement.lua" = @("movement", "robustness", "energy", "doors")
+		"scripts/travel.lua" = $categories
+		"scripts/construction.lua" = @("construction", "robustness")
+		"scripts/charger.lua" = @("energy", "robustness")
+		"scripts/garage.lua" = @("energy", "robustness", "construction")
+		"scripts/armed.lua" = @("robustness")
+		"scripts/circuit.lua" = @("energy")
+		"scripts/logistic.lua" = @("construction")
 		"control.lua" = $categories
-		"_utils.lua" = $categories
+		"scripts/_utils.lua" = $categories
 		"config.lua" = $categories
 		"tests/harness.lua" = $categories
 		"data.lua" = @("energy")
@@ -104,7 +107,7 @@ function Get-ChangedCategories {
 	$picked = @()
 	foreach ($file in $files) {
 		if ($affected.ContainsKey($file)) { $picked += $affected[$file] }
-		elseif ($file -like "prototypes/*") { $picked += "energy" } # loading the prototypes is all there is to check
+		elseif ($file -like "prototypes/*" -or $file -like "scripts/*") { $picked += "energy" } # loading them is all there is to check (prototypes, interface, debug)
 	}
 	return @($categories | Where-Object { $picked -contains $_ })
 }

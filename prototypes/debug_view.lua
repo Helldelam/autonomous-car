@@ -1,4 +1,4 @@
--- Shortcut that shows or hides the debug drawing of the cars (see debug_view.lua).
+-- Shortcut that shows or hides the debug drawing of the cars (see scripts/debug/debug_view.lua).
 -- TODO: custom icon; it borrows the car icon of the game for now.
 
 local names = require("config").names

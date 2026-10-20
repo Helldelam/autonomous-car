@@ -1,5 +1,5 @@
 local config = require("config")
-local garage_control = require("park")
+local garage_control = require("scripts.garage")
 
 -- The panel next to the inventory of a garage: how many cars it holds, the list of the parked
 -- cars (first out first) with their state, and a button that gives the selected car, or the

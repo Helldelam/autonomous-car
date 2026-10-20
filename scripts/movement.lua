@@ -1,6 +1,6 @@
 local util = require("util")
 local config = require("config")
-local _utils = require("_utils")
+local _utils = require("scripts._utils")
 
 -- Driving. Each tick, for a moving car, movement.update_mode picks the driving
 -- mode (fast, normal or slow), then movement.drive_tick sets the acceleration
@@ -41,14 +41,25 @@ local function compute_orientation_to(car, target)
 	return compute_orientation_of(target.x - car.position.x, target.y - car.position.y)
 end
 
+-- What the car drives to: its destination, or while it retreats from rails (see "Rails")
+-- the free spot beside it.
+local function get_goal(car_data)
+	return car_data.moving.retreat or car_data.moving.destination
+end
+
+-- How close to its goal the car has arrived.
+local function get_arrival_distance(car_data)
+	return car_data.moving.retreat and config.rails.reach or config.arrival_distance
+end
+
 -- Where the car steers: the next waypoint of its path (see "Path"), or its
--- destination. Arrival and braking always go by the destination itself.
+-- goal. Arrival and braking always go by the goal itself.
 local function get_target(car_data)
 	local path = car_data.path
 	if path.active then
 		return path.waypoints[path.index]
 	end
-	return car_data.moving.destination.position
+	return get_goal(car_data).position
 end
 
 -- A waypoint is passed once the car is within two car lengths of it, or within
@@ -335,7 +346,7 @@ function movement.update_mode(car, tick)
 		return
 	end
 
-	local destination_position = car_data.moving.destination.position
+	local destination_position = get_goal(car_data).position
 	local distance = util.distance(car.position, destination_position)
 	local orientation = car.orientation
 	local x, y = car.position.x, car.position.y
@@ -389,7 +400,7 @@ function movement.update_mode(car, tick)
 	local obstacle_ahead = not fits_at(car, x + sx * config.emergency_brake_lookahead, y + sy * config.emergency_brake_lookahead, orientation)
 	local cooldown_over = not emergency_brake.since or tick - emergency_brake.since > config.short_delay
 	local allowed = not car_data.path.active -- a path hugs walls and trees within the look-ahead: braking there only stalls the car
-	if (distance < config.arrival_distance or obstacle_ahead) and allowed and not emergency_brake.active and cooldown_over then
+	if (distance < get_arrival_distance(car_data) or obstacle_ahead) and allowed and not emergency_brake.active and cooldown_over then
 		emergency_brake.active = true
 		emergency_brake.since = tick
 		emergency_brake.cause = obstacle_ahead and "obstacle" or "arrival"
@@ -427,26 +438,102 @@ end
 -- Driving
 -- ============================================================
 
+-- ============================================================
+-- Rails
+-- ============================================================
+
+-- Rails at ground level (an elevated rail lets the car pass under it).
+local RAIL_TYPES = {"straight-rail", "curved-rail-a", "curved-rail-b", "half-diagonal-rail", "rail-ramp"}
+
+-- True if a rail lies within `half` tiles of `position` on each side.
+local function is_near_rail(surface, position, half)
+	return #surface.find_entities_filtered{
+		area = {{position.x - half, position.y - half}, {position.x + half, position.y + half}},
+		type = RAIL_TYPES, limit = 1,
+	} > 0
+end
+
+-- A car that has just stopped within arrival distance of its destination is on or beside a rail
+-- (a rail within config.rails.scan of it): a train would hit it. It then drives to the free spot
+-- (no rail within config.rails.clearance) closest to its destination, the closest to the car among
+-- those at the same distance, and arrives only there (`moving.retreat`, with the finer
+-- config.rails.reach). No path request: rails do not stop a car, and a failed drive goes through
+-- the usual maneuver, path and stuck steps. Returns true if the retreat started. Called once per leg.
+local function start_retreat(car, car_data, tick)
+	local surface = car.surface
+	if not is_near_rail(surface, car.position, config.rails.scan / 2) then
+		return false
+	end
+
+	local moving = car_data.moving
+	local destination = moving.destination.position
+	local direction = math.floor(car.orientation * 16 + 0.5) % 16
+	for radius = 0, config.rails.search_radius do
+		local best, best_distance
+		for step = 0, radius == 0 and 0 or 15 do
+			local angle = step / 16 * 2 * pi
+			local position = {x = destination.x + sin(angle) * radius, y = destination.y - cos(angle) * radius}
+			local distance = util.distance(position, car.position)
+			if (not best_distance or distance < best_distance)
+				and surface.can_place_entity{name = car.name, position = position, direction = direction}
+				and not is_near_rail(surface, position, config.rails.clearance) then
+				best, best_distance = position, distance
+			end
+		end
+		if best then
+			moving.retreat = {position = best, valid = true}
+			-- A new stretch of the leg: the path led to the destination, the car stands still
+			-- by design (not blocked), and the leg is judged from here.
+			car_data.path.active = false
+			car_data.path.waypoints = nil
+			car_data.maneuver.ended_tick = tick
+			moving.departure_tick = tick
+			moving.departure_distance = best_distance
+			return true
+		end
+	end
+	return false
+end
+
+-- ============================================================
+-- Driving
+-- ============================================================
+
+-- The car has stopped at its goal: the retreat from the rails, if any, is over.
+local function arrive(car, car_data)
+	car_data.moving.retreat = nil
+	_utils.raise_next_task(car)
+end
+
 -- Sets the acceleration and the steering of a moving car for this tick, and
--- raises the next-task event once it has stopped at its destination.
+-- raises the next-task event once it has stopped at its destination, a rail-free
+-- one (see "Rails").
 function movement.drive_tick(car, tick)
 	local car_data = storage.car_data[car.unit_number]
+	local moving = car_data.moving
+	local distance = util.distance(car.position, get_goal(car_data).position)
+	local arrived = car.speed < config.speed.stopped and distance < get_arrival_distance(car_data)
+	if arrived and not moving.retreat and not moving.rails_checked then
+		moving.rails_checked = true
+		if start_retreat(car, car_data, tick) then
+			distance = util.distance(car.position, moving.retreat.position)
+			arrived = false
+		end
+	end
 	local target = get_target(car_data)
-	local distance = util.distance(car.position, car_data.moving.destination.position)
-	local arrived = car.speed < config.speed.stopped and distance < config.arrival_distance
 
 	if car_data.emergency_brake.active then
 		-- A real stop: a high friction alone slows the car down but does not brake it.
 		car.riding_state = {acceleration = riding.acceleration.braking, direction = car.riding_state.direction}
 		if arrived then
-			_utils.raise_next_task(car)
+			arrive(car, car_data)
 		end
 		return
 	end
 
 	-- Stopped dead short of the destination, a while after the leg began or the
 	-- last maneuver ended: the car hit something and needs a maneuver.
-	if car.speed == 0 and distance >= config.arrival_distance
+	if car.speed == 0 and distance >= get_arrival_distance(car_data)
 		and tick - car_data.maneuver.ended_tick > config.short_delay then
 		movement.start_maneuver(car, tick, true) -- takes over from the next tick
 		return
@@ -565,7 +652,7 @@ function movement.drive_tick(car, tick)
 	local left_density = density_weight * measure_density_ahead(car, x, y, lx, ly, target_distance)
 	straight, right, left = straight + straight_density, right + right_density, left + left_density
 
-	-- The costs of this tick, for the debug drawing (see debug_view.lua).
+	-- The costs of this tick, for the debug drawing (see scripts/debug/debug_view.lua).
 	local steering = car_data.steering
 	if not steering then
 		steering = {}
@@ -584,7 +671,7 @@ function movement.drive_tick(car, tick)
 
 	car.riding_state = {acceleration = acceleration, direction = direction}
 	if arrived then
-		_utils.raise_next_task(car)
+		arrive(car, car_data)
 	end
 end
 
@@ -830,10 +917,10 @@ end
 -- True when the car is out of the situation that called for the maneuver.
 local function is_maneuver_done(car, car_data)
 	local maneuver = car_data.maneuver
-	local target = car_data.moving.destination.position
+	local target = get_goal(car_data).position
 	local x, y = car.position.x, car.position.y
 
-	if util.distance(car.position, target) < config.arrival_distance then
+	if util.distance(car.position, target) < get_arrival_distance(car_data) then
 		return true -- drive_tick lets the car arrive
 	end
 	if maneuver.arcs == 0 then
@@ -959,7 +1046,7 @@ end
 -- Returns true when the car cannot go on (see maneuver_tick).
 local function clearing_tick(car, car_data, maneuver, tick)
 	local clearing = config.clearing
-	if util.distance(car.position, car_data.moving.destination.position) < config.arrival_distance
+	if util.distance(car.position, get_goal(car_data).position) < get_arrival_distance(car_data)
 		or util.distance(car.position, maneuver.origin) >= clearing.travel
 		or tick - maneuver.since > config.idle_delay then
 		maneuver.clearing = false
@@ -1038,7 +1125,7 @@ end
 -- the destination or close to it, where the car fits and the density is lowest (a
 -- turn away from the destination costs `angle_cost` per sector).
 local function choose_path_goal(car, car_data)
-	local destination_position = car_data.moving.destination.position
+	local destination_position = get_goal(car_data).position
 	local goal = config.path.goal
 	local range = goal.range
 	if util.distance(car.position, destination_position) <= range then
@@ -1316,7 +1403,7 @@ local function wait_for_path(car, car_data, maneuver, tick)
 		end
 		local moving = car_data.moving
 		moving.departure_tick = tick
-		moving.departure_distance = length + util.distance(from, moving.destination.position)
+		moving.departure_distance = length + util.distance(from, get_goal(car_data).position)
 		return false
 	end
 	if path.result == "none" or tick - path.requested_tick > config.long_delay then

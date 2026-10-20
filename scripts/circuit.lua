@@ -1,5 +1,5 @@
 local config = require("config")
-local garage_control = require("park")
+local garage_control = require("scripts.garage")
 
 -- Circuit network output of the garages and the chargers. A garage or a charger cannot show its
 -- state on a wire by itself (the cars of a garage are a list of the script, a charger is an energy
@@ -42,11 +42,11 @@ function circuit_control.destroy_link(data)
 	end
 end
 
--- Writes `signals` ({{type, name, count}, ...}) in the link; nothing is written when they did
+-- Writes `values` ({{type, name, count}, ...}) in the link; nothing is written when they did
 -- not change since the last call (`data.link_signals` keeps the last ones as a string).
-local function set_signals(link, data, signals)
+local function set_signals(link, data, values)
 	local parts = {}
-	for _, signal in ipairs(signals) do
+	for _, signal in ipairs(values) do
 		parts[#parts + 1] = signal.name .. "=" .. signal.count
 	end
 	local key = table.concat(parts, ",")
@@ -58,7 +58,7 @@ local function set_signals(link, data, signals)
 	local behavior = link.get_or_create_control_behavior()
 	local section = behavior.get_section(1) or behavior.add_section()
 	local filters = {}
-	for _, signal in ipairs(signals) do
+	for _, signal in ipairs(values) do
 		filters[#filters + 1] = {value = {type = signal.type, name = signal.name, quality = "normal", comparator = "="}, min = signal.count}
 	end
 	section.filters = filters
