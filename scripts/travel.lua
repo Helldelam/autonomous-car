@@ -334,13 +334,20 @@ function travel.is_fuel_critical(car)
 	return fuel < config.critical_check_fuel_ratio * _utils.get_fuel_capacity(car) and reserve ~= nil and fuel < reserve
 end
 
--- Runs for every car, every tick, right after travel.handle_empty. Below the
+-- Runs for every car, right after travel.handle_empty. Below the
 -- critical fuel (see above) the car drops its trip and its queued tasks and
 -- heads for a charger; if none is reachable it stays put and looks again every
 -- config.short_delay. Returns true when it took over the car for this tick.
 function travel.handle_critical_fuel(car, tick)
 	local car_data = storage.car_data[car.unit_number]
 	if car_data.charging.active or is_heading_to_charger(car_data) then
+		return false
+	end
+
+	-- The fuel is looked at with the slow checks, and every tick only while the car is
+	-- held for its retry (see below).
+	local retrying = car_data.critical_fuel_retry_tick and tick < car_data.critical_fuel_retry_tick
+	if not retrying and not _utils.is_slow_check_due(car, tick) then
 		return false
 	end
 
@@ -486,8 +493,9 @@ local function burn_battery_if_low(car, car_data)
 	end
 end
 
--- Runs before everything else for every car, every tick. First burns a battery if
--- the tank is almost empty (see above). A car with a completely empty battery and
+-- Runs before everything else for every car (every tick for an empty one, with the
+-- slow checks for the others). First burns a battery if the tank is almost empty
+-- (see above). A car with a completely empty battery and
 -- no battery to burn cannot move: it drops its trip and its queued tasks, alerts
 -- the player, and does nothing but check whether its battery is back above
 -- config.battery_trigger_ratio (a battery put in its battery slot, or the player
@@ -498,6 +506,11 @@ end
 function travel.handle_empty(car, tick)
 	local car_data = storage.car_data[car.unit_number]
 	local empty = car_data.empty
+
+	-- The tank empties slowly: a car that is not empty looks at it with the slow checks.
+	if not empty.active and not _utils.is_slow_check_due(car, tick) then
+		return false
+	end
 
 	burn_battery_if_low(car, car_data)
 

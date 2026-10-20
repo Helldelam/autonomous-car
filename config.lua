@@ -299,7 +299,8 @@ config.very_long_delay = 3600 -- (60s)
 
 -- Measurements that need not happen every tick are repeated this often, offset
 -- per car (_utils.is_slow_check_due): gates opened ahead, moving cars nearby,
--- built things nearby, critical fuel level. Raise it if the mod slows the game
+-- built things nearby, obstacle density and tile friction of a moving car (so its
+-- driving mode reacts up to this late), critical fuel level. Raise it if the mod slows the game
 -- down: every player gets the same behaviour.
 config.slow_check_interval = 6 -- (0.1s)
 	-- debug_view.refresh: period of the debug drawing

@@ -299,11 +299,15 @@ end
 -- Friction
 -- ============================================================
 
--- Friction modifier of the tile under the car, measured each time the friction is set.
-local function measure_tile_friction(car)
-	local tile = car.surface.get_tile(math.floor(car.position.x), math.floor(car.position.y))
-	local friction = tile.valid and tile.prototype.vehicle_friction_modifier or 1
-	return friction > 0 and friction or 1
+-- Friction modifier of the tile under the car, measured with the slow checks and
+-- remembered between them (car_data.tile_friction).
+local function measure_tile_friction(car, car_data, tick)
+	if not car_data.tile_friction or _utils.is_slow_check_due(car, tick) then
+		local tile = car.surface.get_tile(math.floor(car.position.x), math.floor(car.position.y))
+		local friction = tile.valid and tile.prototype.vehicle_friction_modifier or 1
+		car_data.tile_friction = friction > 0 and friction or 1
+	end
+	return car_data.tile_friction
 end
 
 -- Sets car.friction_modifier from scratch, so that nothing accumulates from one
@@ -311,8 +315,8 @@ end
 -- multiplies it by the friction of the tile under the car, so it is divided by
 -- it here and the car goes as fast on grass as on concrete. `braking_factor`
 -- (emergency braking) is not: it has to brake on any tile.
-local function set_friction(car, mode_friction, braking_factor)
-	car.friction_modifier = mode_friction / measure_tile_friction(car) * (braking_factor or 1)
+local function set_friction(car, car_data, tick, mode_friction, braking_factor)
+	car.friction_modifier = mode_friction / measure_tile_friction(car, car_data, tick) * (braking_factor or 1)
 end
 
 -- ============================================================
@@ -340,7 +344,7 @@ function movement.update_mode(car, tick)
 	open_gates(car, tick)
 	advance_path(car, car_data, tick)
 	if car_data.maneuver.active then
-		set_friction(car, config.friction.maneuver)
+		set_friction(car, car_data, tick, config.friction.maneuver)
 		return
 	end
 
@@ -350,12 +354,15 @@ function movement.update_mode(car, tick)
 	local x, y = car.position.x, car.position.y
 	local sx, sy = compute_heading_vector(orientation)
 
-	-- Density around the car (weight 2), blended with the density one disc
-	-- further ahead (weight 1).
-	local density = 1 / 3 * (2 * measure_obstacle_density(car, x, y)
-		+ measure_obstacle_density(car, x + sx * 2 * config.density.radius, y + sy * 2 * config.density.radius))
-
-	-- Built things are measured with the other slow checks and remembered between them.
+	-- The density, built things nearby and the tile friction are measured with the
+	-- slow checks and remembered between them.
+	if not car_data.density or _utils.is_slow_check_due(car, tick) then
+		-- Density around the car (weight 2), blended with the density one disc
+		-- further ahead (weight 1).
+		car_data.density = 1 / 3 * (2 * measure_obstacle_density(car, x, y)
+			+ measure_obstacle_density(car, x + sx * 2 * config.density.radius, y + sy * 2 * config.density.radius))
+	end
+	local density = car_data.density
 	if _utils.is_slow_check_due(car, tick) then
 		car_data.near_built = measure_built_nearby(car)
 		-- Built things beside a car whose way is open (target ahead, straight line free, not
@@ -421,7 +428,7 @@ function movement.update_mode(car, tick)
 		end
 		if not way_open then
 			if movement.request_guided_path(car, tick) then
-				set_friction(car, config.friction.maneuver)
+				set_friction(car, car_data, tick, config.friction.maneuver)
 				return
 			end
 		else
@@ -429,7 +436,7 @@ function movement.update_mode(car, tick)
 		end
 	end
 
-	set_friction(car, config.friction[mode], emergency_brake.active and config.friction.emergency or 1)
+	set_friction(car, car_data, tick, config.friction[mode], emergency_brake.active and config.friction.emergency or 1)
 end
 
 -- ============================================================
@@ -584,7 +591,7 @@ function movement.drive_tick(car, tick)
 			else
 				local rotation = angle > 0 and 1 or -1
 				local direction = get_arc_rotation{reverse = true, turn = -1} == rotation and riding.direction.left or riding.direction.right
-				set_friction(car, config.friction.maneuver)
+				set_friction(car, car_data, tick, config.friction.maneuver)
 				car.riding_state = {acceleration = riding.acceleration.reversing, direction = direction}
 				return
 			end

@@ -86,6 +86,7 @@ local function create_car_data(tick)
 		mode = "normal", -- "fast", "normal" or "slow", see movement.update_mode
 		slow_until = nil, -- tick until which the mode stays slow (after an emergency stop, a maneuver, a path)
 		near_built = false, -- something built lies near the car, see movement.lua
+		density = nil, tile_friction = nil, -- measured with near_built (slow checks), see movement.update_mode
 		entry_speed = nil, -- speed of the car when it entered fast mode
 		slowing = false, -- braking down to entry_speed after leaving fast mode
 		neighbours = nil, -- moving cars nearby, see movement.lua
