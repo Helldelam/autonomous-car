@@ -1744,7 +1744,7 @@ scenarios["rails"] = {
 		T.chest = make(s, names.chest, 20.5, 22.5) -- beside the rails
 		fill(T.chest, {["wooden-chest"] = 6})
 		for i = 0, 2 do
-			make_ghost(s, "wooden-chest", 30.5 + i * 2, 21.5)
+			make_ghost(s, "wooden-chest", 30.5 + i * 2, config.test_rails_ghost_y or 22.5) -- next to the rails; -Set "test_rails_ghost_y=21.5" puts them against the line, where they are never built (checked 2026-10-20), whatever the rail margin
 			make_ghost(s, "wooden-chest", 30.5 + i * 2, 5.5) -- far from the rails
 		end
 		T.builder = make_car(s, 5, 10, 0.25, 1)

@@ -98,8 +98,8 @@ config.steering_cost = {
 config.arrival_distance = 6 -- a car this close to its destination has arrived and can act on it
 config.rails = { -- a car that arrives with a rail beside it first drives off the rails (movement.start_retreat): a train would hit it
 	scan = 3, -- side of the square around the arrived car that is searched for rails
-	clearance = 3, -- the spot it retreats to has no rail closer than this
-	reach = 1.5, -- the car has reached that spot this close to it (arrival_distance is too coarse for a few tiles)
+	clearance = 3.5, -- the spot it retreats to has no rail closer than this
+	reach = 2, -- the car has reached that spot this close to it (arrival_distance is too coarse for a few tiles; 1.5 left the car stopping 1.5 to 1.6 short, in a maneuver loop)
 	search_radius = 8, -- how far from its destination that spot is looked for
 }
 config.emergency_brake_lookahead = 3 -- an obstacle this far straight ahead triggers emergency braking, and keeps a maneuver from ending

@@ -2,8 +2,6 @@
 
 Mod Factorio 2.0 (Lua 5.2) « Autonomous Car » : une voiture autonome qui travaille hors réseau de robots (construit les ghosts, remblaie, démonte, met à niveau), se recharge et se gare seule. Ce fichier est la seule documentation du projet.
 
-**Version en construction** : le propriétaire a jugé satisfaisants les mécanismes en place (2026-10-10) ; les problèmes ouverts et les fonctions à venir restent à traiter, et un mécanisme peut être repris si un test ou le jeu le montre.
-
 ## Règles de travail
 
 - Comprendre la cause d'un bug au niveau du tick avant de corriger (pas de correctif de symptôme). Changements petits et chirurgicaux ; réutiliser les helpers et l'API Factorio ; pas de second système d'état.
@@ -30,8 +28,6 @@ Pas de build ni d'interpréteur Lua. Dépôt git privé ; `.backup/` (état d'av
 ```powershell
 & (Get-Item "$env:USERPROFILE\.vscode\extensions\sumneko.lua-*\server\bin\lua-language-server.exe")[-1] --check . --checklevel=Warning --logpath="$env:TEMP\lua-check" --metapath="$env:TEMP\lua-check"
 ```
-
-Sous Linux (cloud, sans Factorio) : `apt-get install lua5.2 lua-check`, puis `luac5.2 -p *.lua prototypes/*.lua scripts/*.lua scripts/*/*.lua` (syntaxe) et `luacheck --std lua52 --no-max-line-length --ignore 143 --globals game script storage defines prototypes helpers util data rendering log crash_trigger car_reflection volume_multiplier -- *.lua prototypes/*.lua scripts/*.lua scripts/*/*.lua` (0 warning attendu). Un essai avec une fausse API Factorio ne remplace pas les scénarios.
 
 ### Scénarios de test
 
@@ -195,7 +191,7 @@ Section « Clearing » de `movement.lua`, `config.clearing` : dernier recours av
 - Arrivée : à l'arrêt à moins de `config.arrival_distance`. `drive_tick` lève l'événement `autonomous_car_next_task` ; `on_next_task` (synchrone, à l'intérieur de `drive_tick`) termine le trajet (`moving` désactivé), dépile la tâche et lui passe la destination atteinte : `charging`, `parking`, `building`, `collect`, `deposit`, `restock`, `flee`. La fin de charge lève le même événement.
 - Abandon d'un trajet : `travel.cancel_trip(car_data)` (trajet, manœuvre, attente `stuck`, charge, stationnement, tâches en file, place de chargeur : `release_charger_slot` couvre le trajet vers le chargeur comme la charge) ; `travel.reset_to_waiting` y ajoute l'arrêt de la voiture et le retour en `waiting` (`_utils.start_waiting`).
 - Un nouveau type d'étape est une tâche de plus dans `on_next_task`, pas un nouvel état.
-- Rails : la condition d'arrivée de `drive_tick` cherche un rail au sol (pas surélevé) dans un carré de `config.rails.scan` (3) tiles ; sans rail, l'arrivée part. Avec un rail, `start_retreat` choisit le point libre (`can_place_entity`, sans rail à moins de `rails.clearance` = 3) le plus proche de la destination (anneaux de 0 à `rails.search_radius` tiles ; à égalité, le plus proche de la voiture) et pose `moving.retreat` : un trajet en ligne droite, sans demande de chemin (un rail ne bloque pas une voiture), avec la tolérance `rails.reach` (1,5 ; `arrival_distance` est trop grossière) ; `moving.destination` reste la vraie destination (les tâches la lisent). L'arrivée part au point de repli. Un seul scan par trajet (`moving.rails_checked`, remis à faux par `begin_leg`) ; un repli qui cale suit les recours habituels (manœuvre, chemin d'échec, `stuck`). Ne couvre ni une voiture bloquée en route ni les trains eux-mêmes.
+- Rails : la condition d'arrivée de `drive_tick` cherche un rail au sol (pas surélevé) dans un carré de `config.rails.scan` (3) tiles ; sans rail, l'arrivée part. Avec un rail, `start_retreat` choisit le point libre (`can_place_entity`, sans rail à moins de `rails.clearance` = 3,5) le plus proche de la destination (anneaux de 0 à `rails.search_radius` tiles ; à égalité, le plus proche de la voiture) et pose `moving.retreat` : un trajet en ligne droite, sans demande de chemin (un rail ne bloque pas une voiture), avec la tolérance `rails.reach` (2 ; `arrival_distance` est trop grossière ; à 1,5 la voiture s'arrêtait 1,5 à 1,6 tile avant le point et bouclait en manœuvre 700 ticks) ; `moving.destination` reste la vraie destination (les tâches la lisent). L'arrivée part au point de repli. Un seul scan par trajet (`moving.rails_checked`, remis à faux par `begin_leg`) ; un repli qui cale suit les recours habituels (manœuvre, chemin d'échec, `stuck`). Ne couvre ni une voiture bloquée en route ni les trains eux-mêmes.
 
 ### Construction
 
@@ -292,9 +288,7 @@ Aucun pour l'instant.
 
 ### Corrigés, à valider
 
-- **Voiture arrêtée sur des rails** (voir « Trajets et tâches »). À valider en jeu : une voiture qui arrive à un chargeur, un coffre ou un chantier posé contre une voie roule de quelques tiles pour s'écarter de la voie avant d'agir (aucun déplacement quand il n'y a pas de rail à moins de 1,5 tile), sans gêner sa tâche.
-
-(Validés en jeu le 2026-10-19 : signaux propres des liaisons (noms, icônes), réseaux logique et logistique (connecteur du garage, liaisons et signaux, coffres de livraison et de retour avec de vrais robots), technologies (coûts provisoires), garage en liste avec son panneau, slots de batteries et de munitions, panneau de la voiture, réapprovisionnement à la sortie du garage.)
+Aucun pour l'instant.
 
 #### Validation reportée
 
