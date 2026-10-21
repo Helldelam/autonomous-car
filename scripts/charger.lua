@@ -24,7 +24,7 @@ end
 -- level. Without any charger only the critical level is kept.
 function charger_control.compute_fuel_reserve(car, position)
 	local reserve = config.critical_fuel_ratio * _utils.get_fuel_capacity(car)
-	local charger = _utils.find_closest(storage.chargers, position, nil, "charger", car.surface)
+	local charger = _utils.find_closest("chargers", position, nil, "charger", car.surface)
 	if charger then
 		reserve = reserve + compute_fuel_for_distance(util.distance(position, charger.position))
 	end
@@ -43,7 +43,7 @@ end
 -- nil if there is none.
 function charger_control.find_charger(car, target_position)
 	local remaining_fuel = _utils.get_reachable_fuel(car)
-	return _utils.find_closest(storage.chargers, target_position or car.position, function(charger, id)
+	return _utils.find_closest("chargers", target_position or car.position, function(charger, id)
 		return storage.charger_data[id].users < _utils.get_upgrade(charger.force, "chargers")
 			and remaining_fuel >= charger_control.compute_fuel_to_reach(car, charger.position)
 	end, "charger", car.surface)

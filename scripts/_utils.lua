@@ -51,17 +51,60 @@ end
 -- Closest entity
 -- ============================================================
 
--- Closest valid entity of `entities` ([id] = entity) to `position`, or nil.
--- `accept(entity, id)`, if given, tells whether an entity may be chosen. A
--- stale entity is released as `kind` (see "Entity cleanup") when a kind is
--- given, and just skipped otherwise. Of two entities at the same distance, the
--- first one in the table wins. With a `surface`, entities of other surfaces are
--- skipped: positions of two surfaces cannot be compared.
-function _utils.find_closest(entities, position, accept, kind, surface)
+-- The entities of a group (storage.chargers, storage.garages, storage.supply_chests) are also
+-- listed by region: storage.regions[group].cells[surface index]["x,y"] = {[id] = true}, x and y being
+-- the position divided by config.regions.size. They never move, so they are listed when built
+-- (add_to_regions) and unlisted when released (remove_from_regions, by the release handlers).
+local function get_region_key(position)
+	local size = config.regions.size
+	return math.floor(position.x / size), math.floor(position.y / size)
+end
+
+function _utils.add_to_regions(group, entity)
+	local regions = storage.regions[group]
+	local id = entity.unit_number
+	_utils.remove_from_regions(group, id)
+	local x, y = get_region_key(entity.position)
+	local surface_index = entity.surface.index
+	local key = x .. "," .. y
+	local surface_cells = regions.cells[surface_index]
+	if not surface_cells then
+		surface_cells = {}
+		regions.cells[surface_index] = surface_cells
+	end
+	local cell = surface_cells[key]
+	if not cell then
+		cell = {}
+		surface_cells[key] = cell
+	end
+	cell[id] = true
+	regions.where[id] = {surface_index, key}
+end
+
+function _utils.remove_from_regions(group, id)
+	local regions = storage.regions[group]
+	local where = regions.where[id]
+	if where then
+		regions.cells[where[1]][where[2]][id] = nil
+		regions.where[id] = nil
+	end
+end
+
+-- Closest valid entity of `group` (name of a table of storage, [id] = entity) on `surface` to
+-- `position`, or nil. `accept(entity, id)`, if given, tells whether an entity may be chosen. A stale
+-- entity is released as `kind` (see "Entity cleanup") when a kind is given, and just skipped
+-- otherwise. Of two entities at the same distance, either may win.
+-- The regions around the position are looked at first, own region then ring by ring; ring r is at
+-- least (r - 1) regions away, so the search stops once the best entity is closer than the next ring
+-- can be. Without a proven answer after config.regions.rings rings, every entity of the group is
+-- looked at (the answer is then the same as without regions, just slower).
+function _utils.find_closest(group, position, accept, kind, surface)
+	local entities = storage[group]
 	local best, best_distance
-	for id, entity in pairs(entities) do
-		if entity.valid then
-			if (not surface or entity.surface == surface) and (not accept or accept(entity, id)) then
+	local function consider(id)
+		local entity = entities[id]
+		if entity and entity.valid then
+			if entity.surface == surface and (not accept or accept(entity, id)) then
 				local distance = util.distance(position, entity.position)
 				if not best or distance < best_distance then
 					best = entity
@@ -71,6 +114,37 @@ function _utils.find_closest(entities, position, accept, kind, surface)
 		elseif kind then
 			_utils.release_entity(kind, id)
 		end
+	end
+
+	local surface_cells = storage.regions[group].cells[surface.index]
+	if surface_cells then
+		local size, rings = config.regions.size, config.regions.rings
+		local x, y = get_region_key(position)
+		for ring = 0, rings do
+			if best and best_distance <= (ring - 1) * size then
+				return best
+			end
+			for dx = -ring, ring do
+				for dy = -ring, ring do
+					if math.max(math.abs(dx), math.abs(dy)) == ring then
+						local cell = surface_cells[(x + dx) .. "," .. (y + dy)]
+						if cell then
+							for id in pairs(cell) do
+								consider(id)
+							end
+						end
+					end
+				end
+			end
+		end
+		if best and best_distance <= rings * size then
+			return best
+		end
+	end
+
+	best = nil
+	for id in pairs(entities) do
+		consider(id)
 	end
 	return best
 end

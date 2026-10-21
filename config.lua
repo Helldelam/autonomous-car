@@ -306,6 +306,14 @@ config.very_long_delay = 3600 -- (60s)
 config.slow_check_interval = 6 -- (0.1s)
 	-- debug_view.refresh: period of the debug drawing
 
+-- Regions of the closest-entity search (_utils.find_closest): the chargers, garages and supply chests are
+-- listed per square of `size` tiles, and the search looks at the squares around the position first; the
+-- answer is always the closest entity, the regions only save looking at the far ones.
+config.regions = {
+	size = 64, -- tiles
+	rings = 2, -- squares around the position's own that are looked at before falling back to every entity
+}
+
 -- Debug drawing of the car under the cursor or opened (see scripts/debug/debug_view.lua): its
 -- destination, path, state and steering costs. Each player toggles it with a
 -- shortcut; this is the state of a player who has not touched it.

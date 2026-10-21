@@ -389,7 +389,7 @@ end
 
 -- Closest garage with room left, or nil.
 function garage_control.find_garage(car)
-	return _utils.find_closest(storage.garages, car.position, function(garage)
+	return _utils.find_closest("garages", car.position, function(garage)
 		return garage_control.has_room(garage)
 	end, "garage", car.surface)
 end

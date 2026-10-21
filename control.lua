@@ -38,15 +38,18 @@ end)
 _utils.register_release_handler("charger", function(id)
 	circuit_control.destroy_link(storage.charger_data[id])
 	storage.chargers[id] = nil
+	_utils.remove_from_regions("chargers", id)
 	storage.charger_data[id] = nil
 end)
 _utils.register_release_handler("garage", function(id)
 	circuit_control.destroy_link(storage.garage_data[id])
 	storage.garages[id] = nil
+	_utils.remove_from_regions("garages", id)
 	storage.garage_data[id] = nil
 end)
 _utils.register_release_handler("chest", function(id)
 	storage.supply_chests[id] = nil
+	_utils.remove_from_regions("supply_chests", id)
 end)
 
 -- Kind of each tracked entity, as _utils.release_entity names it.
@@ -128,15 +131,18 @@ local function on_built(event)
 		storage.car_data[id] = create_car_data(event.tick)
 	elseif entity.name == names.charger then
 		storage.chargers[id] = entity
+		_utils.add_to_regions("chargers", entity)
 		charger_control.update_buffer(entity)
 		storage.charger_data[id] = {users = 0, transferred = 0} -- users: cars charging here or on their way; transferred: energy given to cars since the last circuit.lua refresh
 	elseif entity.name == names.garage then
 		storage.garages[id] = entity
+		_utils.add_to_regions("garages", entity)
 		garage_control.update_inventory(entity)
 		-- cars: the parked cars, first in first out; exit_tick, exit_count: first exit of the current window and cars out since (see scripts/garage.lua)
 		storage.garage_data[id] = {cars = {}, alerts = {}, exit_count = 0}
 	elseif KIND_BY_NAME[entity.name] == "chest" then
 		storage.supply_chests[id] = entity
+		_utils.add_to_regions("supply_chests", entity)
 	end
 end
 
@@ -424,6 +430,11 @@ local function init_storage(event)
 	storage.garages = storage.garages or {}
 	storage.garage_data = storage.garage_data or {}
 	storage.supply_chests = storage.supply_chests or {}
+	-- Chargers, garages and supply chests by region, see _utils.find_closest: .cells[surface index]["x,y"] = {[id] = true}, .where[id] = {surface index, "x,y"}
+	storage.regions = storage.regions or {}
+	for _, group in pairs{"chargers", "garages", "supply_chests"} do
+		storage.regions[group] = storage.regions[group] or {cells = {}, where = {}}
+	end
 	storage.ghosts = storage.ghosts or {} -- selected ghosts and entities marked for deconstruction or upgrade outside any robot network, assigned or not
 	storage.target_by_registration = storage.target_by_registration or {} -- [registration number] = id of a tracked entity without unit_number
 	storage.ghost_to_car = storage.ghost_to_car or {} -- [ghost unit_number] = unit_number of its car

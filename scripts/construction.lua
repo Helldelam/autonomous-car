@@ -704,7 +704,7 @@ function ghost_control.find_available_car(cluster, available)
 		return table.remove(available, best_index).car
 	end
 
-	local garage = _utils.find_closest(storage.garages, centroid, garage_control.can_release_car, nil, surface)
+	local garage = _utils.find_closest("garages", centroid, garage_control.can_release_car, nil, surface)
 	if garage then
 		return garage_control.release_car(garage)
 	end
@@ -986,7 +986,7 @@ end
 
 -- Closest supply chest whose group holds at least one of the needed items, or nil.
 function ghost_control.find_supply_chest(car, items_needed)
-	return _utils.find_closest(storage.supply_chests, car.position, function(chest)
+	return _utils.find_closest("supply_chests", car.position, function(chest)
 		return can_group_supply(ghost_control.find_chest_group(chest), items_needed)
 	end, "chest", car.surface)
 end
@@ -1163,7 +1163,7 @@ end
 -- Closest supply chest whose group holds something the car's battery or ammo slot
 -- lacks, or nil (also nil when both are full).
 function ghost_control.find_restock_chest(car)
-	return _utils.find_closest(storage.supply_chests, car.position, function(chest)
+	return _utils.find_closest("supply_chests", car.position, function(chest)
 		local group = ghost_control.find_chest_group(chest)
 		for _, item in pairs(compute_restock(car, group)) do
 			for _, member in pairs(group) do
@@ -1632,9 +1632,9 @@ function ghost_control.find_chest_with_room(car)
 	local function has_room(chest)
 		return can_group_store(ghost_control.find_chest_group(chest), trunk)
 	end
-	return _utils.find_closest(storage.supply_chests, car.position, function(chest)
+	return _utils.find_closest("supply_chests", car.position, function(chest)
 		return chest.name == config.names.return_chest and has_room(chest)
-	end, "chest", car.surface) or _utils.find_closest(storage.supply_chests, car.position, has_room, "chest", car.surface)
+	end, "chest", car.surface) or _utils.find_closest("supply_chests", car.position, has_room, "chest", car.surface)
 end
 
 -- Sends the car to the nearest supply chest that has room if its trunk is not

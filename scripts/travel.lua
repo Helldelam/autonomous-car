@@ -202,8 +202,8 @@ function travel.find_refuge(car, enemy)
 			and util.distance(car.position, entity.position) <= config.flee.max_refuge_distance
 			and fuel >= charger_control.compute_fuel_to_reach(car, entity.position)
 	end
-	local charger = _utils.find_closest(storage.chargers, car.position, is_away, "charger", car.surface)
-	local garage = _utils.find_closest(storage.garages, car.position, is_away, "garage", car.surface)
+	local charger = _utils.find_closest("chargers", car.position, is_away, "charger", car.surface)
+	local garage = _utils.find_closest("garages", car.position, is_away, "garage", car.surface)
 	if charger and garage then
 		return util.distance(car.position, charger.position) <= util.distance(car.position, garage.position) and charger or garage
 	end

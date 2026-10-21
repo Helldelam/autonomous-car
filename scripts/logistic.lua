@@ -83,7 +83,7 @@ function logistic_control.update_requests(tick)
 		local car = storage.cars[id]
 		local construction = car and car.valid and storage.car_data[id].construction
 		if construction and next(construction.items_needed) then
-			local delivery = _utils.find_closest(storage.supply_chests, car.position, function(chest)
+			local delivery = _utils.find_closest("supply_chests", car.position, function(chest)
 				return chest.name == config.names.delivery_chest
 			end, "chest", car.surface)
 			local total = delivery and job.needs[delivery.unit_number] -- not in the pass if built since it started
