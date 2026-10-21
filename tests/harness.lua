@@ -3095,6 +3095,140 @@ scenarios["range-long"] = {
 	end,
 }
 
+local function get_distance(position, entity)
+	return math.sqrt((position.x - entity.position.x) ^ 2 + (position.y - entity.position.y) ^ 2)
+end
+
+-- Distance from `position` to the closest valid charger of the scenario's surface that `accept`
+-- keeps, by a full scan, and that charger (nil, nil without any).
+local function find_closest_charger(position, accept)
+	local best, best_charger
+	for id, charger in pairs(storage.chargers) do
+		if charger.valid and charger.surface == T.surface and (not accept or accept(charger, id)) then
+			local distance = get_distance(position, charger)
+			if not best or distance < best then
+				best, best_charger = distance, charger
+			end
+		end
+	end
+	return best, best_charger
+end
+
+-- The closest-entity search by regions (_utils.find_closest, config.regions) must answer as close as a
+-- full scan. 120 chargers at random around (0, 0), five on region borders; 250 queries, at random and
+-- on the borders, each with no filter, with a filter that keeps the odd unit numbers and with one that
+-- keeps the chargers over 150 tiles away (answers past the rings: full scan). At t = 20 the charger
+-- closest to (0.5, 0.5) is destroyed without any event: the search must release it and drop it from the
+-- regions; at t = 30 the one at (64, 0) dies: the release handler must drop it. A car at 8 % charge at
+-- x = 1020 has a charger 54 tiles west in its own region and one 10 tiles east across the border at
+-- x = 1024: it must head for the east one.
+scenarios["regions"] = {
+	ticks = 600,
+	category = "energy",
+	setup = function()
+		local s = new_surface({{0, 0}, {1000, 0}}, 5)
+		local placed = {}
+		-- Not through make: T.chargers would list all of them in the SUMMARY lines.
+		local function add(x, y)
+			for _, other in pairs(placed) do
+				if math.abs(other[1] - x) < 4 and math.abs(other[2] - y) < 4 then
+					return nil
+				end
+			end
+			placed[#placed + 1] = {x, y}
+			return s.create_entity{name = names.charger, position = {x, y}, force = "player", raise_built = true}
+		end
+		for _, border in pairs{{0, 64}, {-64, -64}, {128, 5}, {-128, 0}} do
+			add(border[1], border[2])
+		end
+		T.border = add(64, 0)
+		for _ = 1, 1000 do
+			if #placed >= 120 then
+				break
+			end
+			add(math.floor(random() * 300) - 150, math.floor(random() * 300) - 150)
+		end
+		T.queries = {}
+		for _ = 1, 200 do
+			table.insert(T.queries, {x = random() * 600 - 300, y = random() * 600 - 300})
+		end
+		for _, x in pairs{-128, -64, 0, 64, 128} do
+			for _, y in pairs{-128, -64, 0, 64, 128} do
+				table.insert(T.queries, {x = x, y = y})
+				table.insert(T.queries, {x = x - 0.01, y = y - 0.01})
+			end
+		end
+
+		T.west = make(s, names.charger, 966, 10)
+		T.east = make(s, names.charger, 1030, 10)
+		T.car = make_car(s, 1020, 10, 0.75, 0.08)
+	end,
+	events = function(t)
+		if t == 10 then
+			local reach = config.regions.rings * config.regions.size
+			local count, beyond, wrong = 0, 0, 0
+			for _, position in pairs(T.queries) do
+				local filters = {
+					[2] = function(charger)
+						return charger.unit_number % 2 == 1
+					end,
+					[3] = function(charger)
+						return get_distance(position, charger) > 150
+					end,
+				}
+				for filter = 1, 3 do
+					local expected = find_closest_charger(position, filters[filter])
+					local answer = _utils.find_closest("chargers", position, filters[filter], "charger", T.surface)
+					local got = answer and get_distance(position, answer)
+					count = count + 1
+					if expected and expected > reach then
+						beyond = beyond + 1
+					end
+					if (got == nil) ~= (expected == nil) or (got and math.abs(got - expected) > 1e-9) then
+						wrong = wrong + 1
+						if wrong <= 3 then
+							out(string.format("EVENT query at %.2f,%.2f, filter %d: answer at %s tiles, closest at %s (wrong)", position.x, position.y,
+								filter, got and string.format("%.3f", got) or "none", expected and string.format("%.3f", expected) or "none"))
+						end
+					end
+				end
+			end
+			out(string.format("EVENT %d queries, %d answered past %d tiles, %d not the closest (expected 0)", count, beyond, reach, wrong))
+		end
+		if t == 20 then
+			local position = {x = 0.5, y = 0.5}
+			local _, stale = find_closest_charger(position, function(charger)
+				return charger ~= T.border -- dies at t = 30
+			end)
+			local id = stale.unit_number
+			stale.destroy()
+			local answer = _utils.find_closest("chargers", position, nil, "charger", T.surface)
+			local expected = find_closest_charger(position)
+			out(string.format("EVENT charger destroyed without event: released %s, out of the regions %s, answer the next closest %s (expected true, true, true)",
+				tostring(storage.chargers[id] == nil), tostring(storage.regions.chargers.where[id] == nil),
+				tostring(answer ~= nil and math.abs(get_distance(position, answer) - expected) <= 1e-9)))
+		end
+		if t == 30 then
+			local id = T.border.unit_number
+			T.border.die()
+			out(string.format("EVENT charger at 64,0 died: released %s, out of the regions %s (expected true, true)",
+				tostring(storage.chargers[id] == nil), tostring(storage.regions.chargers.where[id] == nil)))
+		end
+		if not T.car_choice and T.car.valid then
+			if heading_to(T.car, T.east) then
+				T.car_choice = true
+				out("EVENT car heads for the charger across the border, 10 tiles east (expected) at " .. t)
+			elseif heading_to(T.car, T.west) then
+				T.car_choice = true
+				out("EVENT car heads for the charger of its own region, 54 tiles west (wrong) at " .. t)
+			end
+		end
+		if t == 590 and not T.car_choice then
+			out("EVENT car never left for a charger (wrong)")
+		end
+	end,
+}
+
 scenarios["gate-manual"] = {
 	ticks = 600,
 	category = "movement",
@@ -3375,6 +3509,7 @@ local function install_profiler()
 	end
 	tick_profile, cars_profile = game.create_profiler(true), game.create_profiler(true)
 	local inner = update_car
+	---@diagnostic disable-next-line: lowercase-global (a local of control.lua, see the top of this file)
 	update_car = function(car, car_data, tick)
 		local timer = game.create_profiler()
 		inner(car, car_data, tick)
