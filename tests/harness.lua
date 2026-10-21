@@ -133,11 +133,30 @@ local function fill(chest, items)
 	end
 end
 
+-- Hands the selections to the mod as a player would: one per tick at most, and only when
+-- the previous one is done (storage.selection_job). The scenarios of a category share the
+-- game, so selections made at the same tick wait their turn, in order (selected_queue).
+-- Not in T: T belongs to one scenario, the queue to the whole game.
+local selected_queue = {}
+local last_selection_tick
+
+local function release_queued_selection()
+	if #selected_queue > 0 and last_selection_tick ~= game.tick and not storage.selection_job then
+		last_selection_tick = game.tick
+		on_area_selected{item = names.ghost_selector, player_index = 1, entities = table.remove(selected_queue, 1), tick = game.tick}
+	end
+end
+
+local function submit_selection(entities)
+	table.insert(selected_queue, entities)
+	release_queued_selection()
+end
+
 -- Stands in for a player dragging the ghost selector over an area.
 local function select_ghosts(x1, y1, x2, y2)
 	local ghosts = T.surface.find_entities_filtered{type = "entity-ghost", area = {{x1, y1}, {x2, y2}}}
 	out("SELECT " .. game.tick .. " " .. #ghosts .. " ghosts")
-	on_area_selected{item = names.ghost_selector, player_index = 1, entities = ghosts, tick = game.tick}
+	submit_selection(ghosts)
 end
 
 local function heading_to(car, target)
@@ -1804,7 +1823,7 @@ end
 local function select_all(x1, y1, x2, y2)
 	local entities = T.surface.find_entities_filtered{area = {{x1, y1}, {x2, y2}}}
 	out("SELECT " .. game.tick .. " " .. #entities .. " entities")
-	on_area_selected{item = names.ghost_selector, player_index = 1, entities = entities, tick = game.tick}
+	submit_selection(entities)
 end
 
 local function count_valid(list)
@@ -3289,7 +3308,7 @@ end
 
 scenarios["crowd"] = {
 	ticks = 6000,
-	category = "movement",
+	category = "scalability", -- its own game: its 100 selections would hold the selection lock for the scenarios of another category
 	setup = function()
 		local n = config.test_crowd or 100
 		local s = new_surface({{0, 0}}, 14)
@@ -3520,6 +3539,7 @@ script.on_nth_tick(1, function(event)
 					end
 				end
 			end
+			release_queued_selection()
 			if scenarios[name].events then
 				local events_timer = game.create_profiler()
 				scenarios[name].events(t)
