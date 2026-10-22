@@ -1,6 +1,5 @@
 -- Charger: an electric energy interface whose buffer the cars draw from. Its sprite is the accumulator of
 -- the game in steel blue, without its posts (graphics/charger/make_charger.py); scripts/charger_visual.lua draws them.
--- TODO: use graphics/charger/remnants as the corpse.
 local config = require("config")
 local names = config.names
 local icon = "__autonomous-car__/graphics/charger/icon.png"
@@ -14,6 +13,8 @@ charger.hidden = false
 charger.icons = nil
 charger.icon = icon
 charger.gui_mode = "none"
+-- The remnants of the accumulator, in the same steel blue.
+require("prototypes.corpse")(charger, "accumulator-remnants", "__autonomous-car__/graphics/charger/remnants/charger-remnants.png")
 charger.subgroup = names.subgroup
 charger.energy_production = "0W"
 charger.energy_source.buffer_capacity = config.charger_buffer_capacity

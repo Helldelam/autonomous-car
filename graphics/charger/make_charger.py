@@ -12,6 +12,7 @@ graphics/garage/make_garage.py).
   (shadows always fall to the right), and post-shadow.png, the shadow of one post, drawn by the script.
 - arc.png: 12 frames of electric arcs, drawn at the tip of a post while a car charges on it.
 - icon.png: the charger with its four posts, 64 pixels and mipmaps.
+- remnants/charger-remnants.png: the remnants of the accumulator, recolored like the body.
 
 Run: python -X utf8 graphics/charger/make_charger.py
 """
@@ -170,4 +171,9 @@ if __name__ == "__main__":
         support.save(os.path.join(OUT, "support-" + corner + ".png"))
     build_arcs().save(os.path.join(OUT, "arc.png"))
     build_icon(body, post).save(os.path.join(OUT, "icon.png"))
+    # The remnants of the accumulator, in the same steel blue (its posts are in them).
+    remnants = Image.open(SOURCE.replace("accumulator.png", "remnants\\accumulator-remnants.png")).convert("RGBA")
+    recolor(remnants)
+    os.makedirs(os.path.join(OUT, "remnants"), exist_ok=True)
+    remnants.save(os.path.join(OUT, "remnants", "charger-remnants.png"))
     print("charger.png", body.size, "post.png", post.size, "arc.png", ARC_SIZE, "x", ARC_FRAMES)

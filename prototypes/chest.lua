@@ -12,6 +12,8 @@ supply_chest.name = names.chest
 supply_chest.minable.result = names.chest
 supply_chest.subgroup = names.subgroup
 supply_chest.icon = icon
+-- The remnants of the storage chest (yellow), in the colours of the chest.
+require("prototypes.corpse")(supply_chest, "storage-chest-remnants", graphics .. "remnants/yellow-remnants.png")
 supply_chest.picture = {
 	layers = {
 		{

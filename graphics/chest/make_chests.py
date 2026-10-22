@@ -18,6 +18,7 @@ frames, so scripts/chest_door.lua draws the hatch (door.png squashed) over the i
 """
 import colorsys
 import os
+import random
 from PIL import Image, ImageDraw
 
 OUT = os.path.dirname(os.path.abspath(__file__))
@@ -52,6 +53,63 @@ def recolor(image, hue, value):
                 r, g, b = colorsys.hsv_to_rgb(hue, min(1, s * 1.05), min(1, v * value))
                 pixels[x, y] = (round(r * 255), round(g * 255), round(b * 255), a)
     return image
+
+
+REMNANTS = r"C:\Program Files (x86)\Steam\steamapps\common\Factorio\data\base\graphics\entity\logistic-chest\remnants"
+STEEL_HUE = 0.585
+HUE_RANGES = {"yellow": (0.08, 0.2), "blue": (0.5, 0.68), "purple": (0.7, 0.88)}  # of the colour in the remnants of the game
+
+
+def build_remnants(name, vanilla):
+    """The remnants of the chest of the game of the same colour: its colour kept (turned to the hue
+    of the chest), its metal in the steel blue of the sprites. The dark shadow is left alone."""
+    image = Image.open(os.path.join(REMNANTS, vanilla + "-remnants.png")).convert("RGBA")
+    pixels = image.load()
+    low, high = HUE_RANGES[name]
+    for y in range(image.height):
+        for x in range(image.width):
+            r, g, b, a = pixels[x, y]
+            h, s, v = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
+            if not a or v < 0.15:
+                continue
+            if s > (0.4 if name == "yellow" else 0.28) and low < h < high:
+                if COLORS[name]:
+                    h = COLORS[name][0]
+            else:
+                h, s, v = STEEL_HUE, min(0.4, s * 0.8 + 0.12), min(1, v * 1.5 + 0.1)
+            r, g, b = colorsys.hsv_to_rgb(h, s, v)
+            pixels[x, y] = (round(r * 255), round(g * 255), round(b * 255), a)
+    flatten_lid(image)
+    return image
+
+
+REMNANTS_IRIS = (21, 9, 52, 30)  # the round opening of the lid in the remnants of the game (left, top, right, bottom)
+
+
+def flatten_lid(image):
+    """The lid of the chest has no opening: the round hole of the remnants becomes a flat sheet of the
+    colour of the lid, torn: a crack and a bent corner."""
+    pixels = image.load()
+    random.seed(3)
+    left, top, right, bottom = REMNANTS_IRIS
+
+    def average(y, x):  # the plate over a few columns, so that the fill has no streaks
+        columns = [pixels[column, y] for column in range(x - 3, x + 4)]
+        return [sum(pixel[i] for pixel in columns) / len(columns) for i in range(3)]
+
+    for x in range(left, right + 1):
+        above, below = average(top - 1, x), average(bottom + 1, x)
+        for y in range(top, bottom + 1):
+            t = (y - top) / (bottom - top)
+            noise = random.randint(-6, 6)
+            pixels[x, y] = tuple(max(0, min(255, round(above[i] * (1 - t) + below[i] * t) + noise)) for i in range(3)) + (255,)
+    draw = ImageDraw.Draw(image)
+    dark = tuple(round(c * 0.35) for c in pixels[(left + right) // 2, (top + bottom) // 2][:3]) + (255,)
+    light = tuple(min(255, round(c * 1.25) + 10) for c in pixels[(left + right) // 2, (top + bottom) // 2][:3]) + (255,)
+    draw.line([(26, 11), (30, 17), (29, 20), (35, 26)], fill=dark)  # a crack
+    draw.line([(27, 11), (31, 17), (30, 20), (36, 26)], fill=light)  # its lit edge
+    draw.polygon([(44, 10), (51, 10), (51, 17)], fill=light)  # a bent corner
+    draw.line([(44, 10), (51, 17)], fill=dark)
 
 
 def build_icon(chest):
@@ -93,6 +151,9 @@ if __name__ == "__main__":
         # the hatch alone: scripts/chest_door.lua draws it over the chest when a car uses it
         closed.crop((HATCH[0], HATCH[1], HATCH[2] + 1, HATCH[3] + 1)).save(os.path.join(OUT, name + "-door.png"))
         print(name, sheet.size)
+    os.makedirs(os.path.join(OUT, "remnants"), exist_ok=True)
+    for name, vanilla in (("yellow", "storage-chest"), ("blue", "requester-chest"), ("purple", "active-provider-chest")):
+        build_remnants(name, vanilla).save(os.path.join(OUT, "remnants", name + "-remnants.png"))
     inside = Image.new("RGBA", closed.size, (0, 0, 0, 0))
     draw_inside(inside)
     inside.crop((HATCH[0], HATCH[1], HATCH[2] + 1, HATCH[3] + 1)).save(os.path.join(OUT, "interior.png"))

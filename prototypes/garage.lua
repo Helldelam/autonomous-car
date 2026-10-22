@@ -12,7 +12,20 @@ garage.subgroup = names.subgroup
 garage.icon = icon
 garage.max_health = 3500
 garage.dying_explosion = "steel-chest-explosion"
--- TODO: use graphics/garage/remnants as the corpse.
+-- The ruin drawn by graphics/garage/make_garage.py (376 x 300 pixels at scale 0.5, centred on the garage, its shadow on the right).
+-- TODO: redo the garage (its look is not right), then its remnants with it.
+require("prototypes.corpse")(garage, "steel-chest-remnants", "__autonomous-car__/graphics/garage/remnants/garage-remnants.png",
+	function(corpse, animations)
+		corpse.tile_width = 4
+		corpse.tile_height = 4
+		corpse.selection_box = {{-2, -2}, {2, 2}}
+		for _, animation in pairs(animations) do
+			animation.width = 376
+			animation.height = 300
+			animation.scale = 0.5
+			animation.shift = {0, 0}
+		end
+	end)
 garage.resistances =
 {
 	{

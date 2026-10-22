@@ -20,6 +20,7 @@ local function create_chest(name, source, color)
 	chest.subgroup = names.subgroup
 	chest.icon = graphics .. color .. "-icon.png"
 	chest.animation.layers[1].filename = graphics .. color .. "-sheet.png"
+	require("prototypes.corpse")(chest, source .. "-remnants", graphics .. "remnants/" .. color .. "-remnants.png")
 
 	local item = table.deepcopy(data.raw.item[source])
 	item.name = name
