@@ -15,7 +15,7 @@ local signals = config.names.signals
 
 -- Where the link stands, relative to the building (the garage connector is at its south-west corner).
 local OFFSETS = {
-	garage = {x = 1.5, y = 2.4},
+	garage = {x = 2.4, y = 1.4}, -- beside the garage, not in front of its door
 	charger = {x = 0, y = 1.4},
 }
 

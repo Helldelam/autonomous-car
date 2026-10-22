@@ -1,5 +1,6 @@
 local config = require("config")
 local _utils = require("scripts._utils")
+local garage_door = require("scripts.garage_door")
 
 -- Garages: a parked car is a record in a first-in first-out list of the garage
 -- (storage.garage_data[id].cars: quality, health ratio, fuel ratio, batteries, ammo), not an
@@ -17,6 +18,7 @@ local STATE_TAG = "state" -- tag of a car item that carries the fuel, batteries 
 local function stop_parking(car_data)
 	car_data.parking.active = false
 	car_data.parking.garage = nil
+	car_data.parking.door_tick = nil
 	_utils.start_waiting(car_data)
 end
 
@@ -70,6 +72,16 @@ function garage_control.parking_tick(car, garage)
 	end
 	_utils.alert_reset(car_data.alerts, "not_empty")
 
+	-- The door opens first; the car goes in once it is open.
+	local parking = car_data.parking
+	if not parking.door_tick then
+		parking.door_tick = game.tick
+		garage_door.open(garage)
+	end
+	if game.tick - parking.door_tick < config.garage_door.enter_delay then
+		return
+	end
+
 	local garage_data = storage.garage_data[garage.unit_number]
 	local entry = {
 		quality = car.quality.name,
@@ -110,9 +122,16 @@ function garage_control.get_next_release_tick()
 	local next_tick
 	for id, garage in pairs(storage.garages) do
 		local garage_data = storage.garage_data[id]
-		if garage.valid and #garage_data.cars > 0 and is_exit_window_full(garage_data) then
-			local tick = garage_data.exit_tick + config.medium_delay
-			next_tick = math.min(next_tick or tick, tick)
+		if garage.valid and #garage_data.cars > 0 then
+			local tick
+			if is_exit_window_full(garage_data) then
+				tick = garage_data.exit_tick + config.medium_delay
+			elseif garage_data.release_tick and game.tick < garage_data.release_tick then
+				tick = garage_data.release_tick -- the door is still opening
+			end
+			if tick then
+				next_tick = math.min(next_tick or tick, tick)
+			end
 		end
 	end
 	return next_tick
@@ -160,6 +179,18 @@ function garage_control.release_car(garage)
 		return nil
 	end
 	_utils.alert_reset(garage_data.alerts, "no_room")
+
+	-- The door opens first; the car comes out once it is open (the cluster waits, see get_next_release_tick).
+	-- The door stays open config.garage_door.hold ticks after the last exit: a release_tick older than that is stale.
+	local door = config.garage_door
+	if not garage_data.release_tick or game.tick > garage_data.release_tick + door.hold then
+		garage_data.release_tick = game.tick + door.enter_delay
+		garage_door.open(garage)
+	end
+	if game.tick < garage_data.release_tick then
+		return nil
+	end
+	garage_door.open(garage)
 
 	local car = create_car(garage, garage_data.cars[1], position)
 	if car then

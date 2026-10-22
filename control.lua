@@ -7,6 +7,7 @@ local movement = require("scripts.movement")
 local travel = require("scripts.travel")
 local charger_control = require("scripts.charger")
 local garage_control = require("scripts.garage")
+local garage_door = require("scripts.garage_door")
 local ghost_control = require("scripts.construction")
 local gui = require("scripts.gui.missing_items")
 local garage_gui = require("scripts.gui.garage")
@@ -43,6 +44,7 @@ _utils.register_release_handler("charger", function(id)
 end)
 _utils.register_release_handler("garage", function(id)
 	circuit_control.destroy_link(storage.garage_data[id])
+	garage_door.release(id)
 	storage.garages[id] = nil
 	_utils.remove_from_regions("garages", id)
 	storage.garage_data[id] = nil
@@ -400,6 +402,7 @@ local function on_tick(event)
 	end
 	-- The periodic work of the buildings is spread: each garage, charger or chest does its own
 	-- (offset by its id, see _utils.is_slow_check_due) on its tick of the period.
+	garage_door.update(event.tick)
 	circuit_control.refresh(event.tick)
 	logistic_control.update_requests(event.tick)
 	garage_control.update_inventories(event.tick)
@@ -429,6 +432,7 @@ local function init_storage(event)
 	storage.charger_data = storage.charger_data or {}
 	storage.garages = storage.garages or {}
 	storage.garage_data = storage.garage_data or {}
+	storage.garage_doors = storage.garage_doors or {} -- [garage unit_number] = door being moved, see garage_door.lua
 	storage.supply_chests = storage.supply_chests or {}
 	-- Chargers, garages and supply chests by region, see _utils.find_closest: .cells[surface index]["x,y"] = {[id] = true}, .where[id] = {surface index, "x,y"}
 	storage.regions = storage.regions or {}

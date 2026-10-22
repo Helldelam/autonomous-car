@@ -19,6 +19,8 @@ config.names = {
 	car = "autonomous_car",
 	charger = "autonomous_car_charger",
 	garage = "autonomous_car_garage",
+	garage_door = "autonomous_car_garage_door", -- sprites drawn over a garage while its door moves (see garage_door.lua)
+	garage_interior = "autonomous_car_garage_interior",
 	chest = "autonomous_car_chest", -- supply chest
 	delivery_chest = "autonomous_car_delivery_chest", -- supply chest that requests from the logistic network what the cars lack (see logistic.lua)
 	return_chest = "autonomous_car_return_chest", -- supply chest the robots empty: the cars deposit their leftovers in it first
@@ -371,6 +373,19 @@ config.stuck = {
 -- ============================================================
 -- Garage (see scripts/garage.lua)
 -- ============================================================
+
+-- Door animation of scripts/garage_door.lua. The geometry follows the door box that
+-- graphics/garage/make_garage.py prints, in tiles from the position of the garage: the sprite is
+-- drawn at scale 0.5 (32 pixels per tile) with a shift of (-0.25, -19.5) pixels.
+config.garage_door = {
+	x = -0.008, -- centre of the door
+	top = -0.141, -- top edge of the door, which stays in place while it lifts
+	height = 1.672, -- height of the closed door
+	open_scale = 0.12, -- height of the lifted door, relative to the closed one
+	move_ticks = config.short_delay, -- time to open or to close
+	hold = 2 * config.short_delay, -- time it stays open
+	enter_delay = config.short_delay + 10, -- a car that parks stays in view this long after the door starts to open
+}
 
 config.garage_exit = { -- free spot where a garage releases a car
 	radius = 8, -- how far around the garage to look

@@ -40,19 +40,19 @@ garage.picture =
 		{
 			filename = "__autonomous-car__/graphics/garage/garage.png",
 			priority = "extra-high",
-			width = 128,
-			height = 160,
-			shift = util.by_pixel(-0.25, -0.5),
-			scale = 1
+			width = 256,
+			height = 320,
+			shift = util.by_pixel(-0.25, -19.5), -- the foot of the sprite stands on the lower edge of the selection box
+			scale = 0.5
 		},
 		{
 			filename = "__autonomous-car__/graphics/garage/garage-shadow.png",
 			priority = "extra-high",
-			width = 220,
-			height = 92,
-			shift = util.by_pixel(49, 32),
+			width = 440,
+			height = 184,
+			shift = util.by_pixel(49.75, 14.5), -- the offset of the steel chest shadow from its sprite, times 4
 			draw_as_shadow = true,
-			scale = 1
+			scale = 0.5
 		}
 	}
 }
@@ -78,4 +78,18 @@ local garage_recipe = {
 	results = {{type = "item", name = names.garage, amount = 1}}
 }
 
-data:extend{garage, garage_item, garage_recipe}
+-- Drawn by scripts/garage_door.lua over the closed door of the sprite while it lifts (174 x 107 pixels).
+local function door_sprite(name, file)
+	return {
+		type = "sprite",
+		name = name,
+		filename = "__autonomous-car__/graphics/garage/" .. file,
+		priority = "extra-high",
+		width = 174,
+		height = 107,
+		scale = 0.5
+	}
+end
+
+data:extend{garage, garage_item, garage_recipe,
+	door_sprite(names.garage_door, "door.png"), door_sprite(names.garage_interior, "interior.png")}

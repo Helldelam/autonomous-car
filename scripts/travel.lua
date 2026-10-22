@@ -71,6 +71,7 @@ function travel.cancel_trip(car_data)
 	travel.release_charger_slot(car_data)
 	car_data.parking.active = false
 	car_data.parking.garage = nil
+	car_data.parking.door_tick = nil
 	car_data.building.active = false
 	car_data.maneuver.active = false
 	car_data.path = travel.create_path_state()
