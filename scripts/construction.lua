@@ -3,6 +3,7 @@ local config = require("config")
 local _utils = require("scripts._utils")
 local garage_control = require("scripts.garage")
 local travel = require("scripts.travel")
+local chest_door = require("scripts.chest_door")
 
 -- Construction: tracking ghosts, grouping them into clusters, assigning the
 -- clusters to cars, and running a batch on a car.
@@ -670,7 +671,7 @@ function ghost_control.list_available_cars()
 	for id, car in pairs(storage.cars) do
 		if car.valid then
 			local car_data = storage.car_data[id]
-			if car_data.waiting.active and not car_data.construction
+			if car_data.waiting.active and not car_data.construction and not storage.chest_visits[id]
 				and _utils.is_cargo_empty(car)
 				and not travel.is_fuel_critical(car) then
 				local position = car.position
@@ -1252,6 +1253,56 @@ local function swap_ammo_back(car, group)
 		return false
 	end
 	return true
+end
+
+-- A car reached the supply chest `chest` for a "collect", "deposit" or "restock" task: the hatches of
+-- the chest and of its group open and the car waits config.chest_door.transfer_delay ticks (in the
+-- waiting state, which keeps it out of the batches); then update_chest_visits does the transfer and the
+-- hatches close, unless another car still uses them.
+function ghost_control.start_chest_visit(car, chest, task_type)
+	if not (chest and chest.valid) then -- nothing to open: the task goes on as at an empty chest
+		ghost_control.end_chest_visit(car, chest, task_type)
+		return
+	end
+	local group = ghost_control.find_chest_group(chest)
+	for _, member in pairs(group) do
+		chest_door.begin(member)
+	end
+	local ready = game.tick + config.chest_door.transfer_delay
+	storage.chest_visits[car.unit_number] = {car = car, chest = chest, group = group, task = task_type, ready = ready}
+	_utils.start_waiting(storage.car_data[car.unit_number], ready - config.idle_delay)
+end
+
+-- The transfer of a visit, then what its task does next.
+function ghost_control.end_chest_visit(car, chest, task_type)
+	if task_type == "collect" then
+		ghost_control.collect_items(car, chest)
+	elseif task_type == "deposit" then
+		ghost_control.deposit_items(car, chest)
+	else
+		ghost_control.restock(car, chest)
+	end
+end
+
+-- Called every tick: ends the visits that are due. A car that is gone, or no longer waiting (a danger
+-- or an empty battery took it elsewhere), gets no transfer: the waiting loop decides what it does next.
+function ghost_control.update_chest_visits(tick)
+	for id, visit in pairs(storage.chest_visits) do
+		if tick >= visit.ready then
+			storage.chest_visits[id] = nil
+			local car = visit.car
+			if car.valid then
+				local car_data = storage.car_data[id]
+				if car_data.waiting.active and not car_data.moving.active then
+					car_data.waiting.active = false -- the car is back in the state it had on arrival
+					ghost_control.end_chest_visit(car, visit.chest, visit.task)
+				end
+			end
+			for _, member in pairs(visit.group) do
+				chest_door.finish(member)
+			end
+		end
+	end
 end
 
 -- "restock" task: the car reached the supply chest `chest`. Takes as many batteries

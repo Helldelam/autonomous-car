@@ -25,6 +25,7 @@ config.names = {
 	charger_support = "autonomous_car_charger_support", -- followed by _tl, _tr, _bl or _br: the corner of the post
 	garage_door = "autonomous_car_garage_door", -- sprites drawn over a garage while its door moves (see garage_door.lua)
 	garage_interior = "autonomous_car_garage_interior",
+	chest_interior = "autonomous_car_chest_interior", -- sprite drawn over a supply chest while its hatch opens (see chest_door.lua); the hatch itself is the sprite "<chest name>_door"
 	chest = "autonomous_car_chest", -- supply chest
 	delivery_chest = "autonomous_car_delivery_chest", -- supply chest that requests from the logistic network what the cars lack (see logistic.lua)
 	return_chest = "autonomous_car_return_chest", -- supply chest the robots empty: the cars deposit their leftovers in it first
@@ -416,6 +417,19 @@ config.garage_door = {
 	move_ticks = config.short_delay, -- time to open or to close
 	hold = 2 * config.short_delay, -- time it stays open
 	enter_delay = config.short_delay + 10, -- a car that parks stays in view this long after the door starts to open
+}
+
+-- Hatch animation of scripts/chest_door.lua. The geometry follows graphics/chest/make_chests.py: the chest
+-- sprite is drawn at scale 0.5 (64 pixels per tile) with a shift of (0, -2) pixels, and the hatch is its pixels
+-- 13 to 53 by 36 to 58 (hinges on the left), in tiles from the position of the chest.
+config.chest_door = {
+	left = -0.3125, -- left edge of the hatch, which stays in place (its hinges) while it opens
+	top = -0.0781, -- top edge
+	width = 0.6406, -- width of the closed hatch
+	height = 0.3594,
+	open_scale = 0.12, -- width of the open hatch, relative to the closed one
+	move_ticks = 7, -- time to open or to close, like the logistic chests of the game (opened_duration)
+	transfer_delay = 10, -- time from the arrival of a car to the transfer, the hatch being open by then
 }
 
 config.garage_exit = { -- free spot where a garage releases a car

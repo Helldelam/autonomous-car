@@ -8,6 +8,7 @@ local travel = require("scripts.travel")
 local charger_control = require("scripts.charger")
 local garage_control = require("scripts.garage")
 local garage_door = require("scripts.garage_door")
+local chest_door = require("scripts.chest_door")
 local charger_visual = require("scripts.charger_visual")
 local ghost_control = require("scripts.construction")
 local gui = require("scripts.gui.missing_items")
@@ -52,6 +53,7 @@ _utils.register_release_handler("garage", function(id)
 	storage.garage_data[id] = nil
 end)
 _utils.register_release_handler("chest", function(id)
+	chest_door.release(id)
 	storage.supply_chests[id] = nil
 	_utils.remove_from_regions("supply_chests", id)
 end)
@@ -380,6 +382,7 @@ local function update_car(car, car_data, tick)
 end
 
 local function on_tick(event)
+	ghost_control.update_chest_visits(event.tick) -- before the cars: a visit ends on the tick its car stops waiting
 	for id, car in pairs(storage.cars) do
 		if car.valid then
 			-- No event tells that the player changed the filter of the battery slot.
@@ -407,6 +410,7 @@ local function on_tick(event)
 	-- The periodic work of the buildings is spread: each garage, charger or chest does its own
 	-- (offset by its id, see _utils.is_slow_check_due) on its tick of the period.
 	garage_door.update(event.tick)
+	chest_door.update()
 	charger_visual.refresh(event.tick)
 	circuit_control.refresh(event.tick)
 	logistic_control.update_requests(event.tick)
@@ -438,6 +442,8 @@ local function init_storage(event)
 	storage.garages = storage.garages or {}
 	storage.garage_data = storage.garage_data or {}
 	storage.garage_doors = storage.garage_doors or {} -- [garage unit_number] = door being moved, see garage_door.lua
+	storage.chest_doors = storage.chest_doors or {} -- [chest unit_number] = hatch open or moving, see chest_door.lua
+	storage.chest_visits = storage.chest_visits or {} -- [car unit_number] = a car waiting for the hatch of a chest to open, see ghost_control.start_chest_visit
 	storage.charger_arcs = storage.charger_arcs or {} -- [car unit_number] = arc drawn at a charger post while the car charges, see charger_visual.lua
 	storage.supply_chests = storage.supply_chests or {}
 	-- Chargers, garages and supply chests by region, see _utils.find_closest: .cells[surface index]["x,y"] = {[id] = true}, .where[id] = {surface index, "x,y"}
@@ -508,12 +514,8 @@ local function on_next_task(event)
 	elseif task.type == "building" then
 		car_data.building.active = true
 		car_data.building.next_attempt_tick = event.tick
-	elseif task.type == "collect" then
-		ghost_control.collect_items(car, destination)
-	elseif task.type == "deposit" then
-		ghost_control.deposit_items(car, destination)
-	elseif task.type == "restock" then
-		ghost_control.restock(car, destination)
+	elseif task.type == "collect" or task.type == "deposit" or task.type == "restock" then
+		ghost_control.start_chest_visit(car, destination, task.type)
 	elseif task.type == "flee" then
 		-- Safe for now: waits for the danger to pass, then the waiting loop resumes the batch.
 		car_data.flee.active = false
