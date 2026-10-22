@@ -1,6 +1,7 @@
 local util = require("util")
 local config = require("config")
 local _utils = require("scripts._utils")
+local charger_visual = require("scripts.charger_visual")
 
 -- Chargers: finding one a car can reach, and filling the car's tank from it.
 local charger_control = {}
@@ -64,6 +65,7 @@ function charger_control.update_buffers(tick)
 		if charger.valid then
 			if _utils.is_slow_check_due(charger, tick, config.long_delay) then
 				charger_control.update_buffer(charger)
+				charger_visual.update_posts(charger) -- the places follow the research, like the buffer
 			end
 		else
 			_utils.release_entity("charger", id)

@@ -19,6 +19,10 @@ config.names = {
 	car = "autonomous_car",
 	charger = "autonomous_car_charger",
 	garage = "autonomous_car_garage",
+	charger_post = "autonomous_car_charger_post", -- sprite of a charging post and animation of the arcs at its tip, drawn around a charger (see charger_visual.lua)
+	charger_arc = "autonomous_car_charger_arc",
+	charger_post_shadow = "autonomous_car_charger_post_shadow",
+	charger_support = "autonomous_car_charger_support", -- followed by _tl, _tr, _bl or _br: the corner of the post
 	garage_door = "autonomous_car_garage_door", -- sprites drawn over a garage while its door moves (see garage_door.lua)
 	garage_interior = "autonomous_car_garage_interior",
 	chest = "autonomous_car_chest", -- supply chest
@@ -351,6 +355,33 @@ config.fuel_estimate = {
 	near_distance = 100,
 	far_per_tile = 450, -- per tile beyond (measured 165 to 315 on long trips, at most 490)
 }
+-- Charging posts and arcs drawn around a charger by scripts/charger_visual.lua: one post per place
+-- (config.upgrades.chargers), an arc at the tip of the post a car charges on. Offsets in tiles from the charger.
+config.charger_visual = {
+	-- Corners of the body, in the order the posts appear with the research: 2 places = top left and bottom
+	-- right, 4 = the other diagonal too. With 4 places or fewer the post stands on the corner, alone; with
+	-- 8 it splits in two and a support lies at each corner: a quadrilateral with one vertex at the corner
+	-- and a post on each of the two neighbouring vertices.
+	-- (measured on charger.png: 50 pixels either side of the centre, 135 and 70 pixels above the bottom
+	-- of the sprite, 189 pixels high; 64 pixels per tile)
+	posts = {{x = -0.78, y = -0.98}, {x = 0.78, y = 0.04}, {x = 0.78, y = -0.98}, {x = -0.78, y = 0.04}},
+	-- 8 places: slots i (sideways vertex) and i + 4 (vertical vertex) come from post i; filled below
+	split_posts = {},
+	-- distances of the neighbouring vertices of the support (graphics/charger/source/support.png) from its
+	-- corner vertex, towards the left and the top for the top left corner; the other corners mirror it
+	sideways = {x = 0.34, y = 0.02},
+	vertical = {x = 0.05, y = 0.25},
+	support = {x = 0.15, y = 0.12}, -- centre of the support from its corner vertex, away from the body
+	post_height = 0.64, -- height of the post sprite (graphics/charger/post.png: 90 pixels drawn at scale 0.5 * 41 / 90, 32 pixels per tile)
+	tip = 0.62, -- height of its tip above its foot
+	shadow = {x = 0.35, y = -0.04}, -- centre of the shadow of a post from its foot (graphics/charger/post-shadow.png: it starts at the foot and falls to the right)
+}
+for i, corner in ipairs(config.charger_visual.posts) do
+	local side_x, side_y = corner.x < 0 and -1 or 1, corner.y < -0.5 and -1 or 1 -- which corner it is
+	local visual = config.charger_visual
+	visual.split_posts[i] = {x = corner.x + side_x * visual.sideways.x, y = corner.y + side_y * visual.sideways.y}
+	visual.split_posts[i + #visual.posts] = {x = corner.x - side_x * visual.vertical.x, y = corner.y + side_y * visual.vertical.y}
+end
 config.max_charge_detours = 5 -- consecutive charging detours before the destination is reported unreachable
 config.critical_fuel_ratio = 0.1 -- below this fraction of a full tank a car drops everything to recharge.
 	-- Also the charge of a new car.
@@ -426,5 +457,8 @@ assert(config.slow_lookahead.start >= car_reach,
 
 assert(config.critical_fuel_ratio < config.critical_check_fuel_ratio and config.critical_check_fuel_ratio < config.pre_park_fuel_ratio,
 	"config.critical_check_fuel_ratio must lie between config.critical_fuel_ratio and config.pre_park_fuel_ratio")
+assert(#config.charger_visual.split_posts >= config.upgrades.chargers[#config.upgrades.chargers]
+	and #config.charger_visual.posts < #config.charger_visual.split_posts,
+	"config.charger_visual.split_posts needs a post for every place of the charger at the last level of research")
 
 return config

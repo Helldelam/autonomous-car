@@ -8,6 +8,7 @@ local travel = require("scripts.travel")
 local charger_control = require("scripts.charger")
 local garage_control = require("scripts.garage")
 local garage_door = require("scripts.garage_door")
+local charger_visual = require("scripts.charger_visual")
 local ghost_control = require("scripts.construction")
 local gui = require("scripts.gui.missing_items")
 local garage_gui = require("scripts.gui.garage")
@@ -38,6 +39,7 @@ _utils.register_release_handler("car", function(id)
 end)
 _utils.register_release_handler("charger", function(id)
 	circuit_control.destroy_link(storage.charger_data[id])
+	charger_visual.release(storage.charger_data[id])
 	storage.chargers[id] = nil
 	_utils.remove_from_regions("chargers", id)
 	storage.charger_data[id] = nil
@@ -135,7 +137,9 @@ local function on_built(event)
 		storage.chargers[id] = entity
 		_utils.add_to_regions("chargers", entity)
 		charger_control.update_buffer(entity)
-		storage.charger_data[id] = {users = 0, transferred = 0} -- users: cars charging here or on their way; transferred: energy given to cars since the last circuit.lua refresh
+		-- users: cars charging here or on their way; transferred: energy given to cars since the last circuit.lua refresh; posts: see charger_visual.lua
+		storage.charger_data[id] = {users = 0, transferred = 0, posts = {}}
+		charger_visual.update_posts(entity)
 	elseif entity.name == names.garage then
 		storage.garages[id] = entity
 		_utils.add_to_regions("garages", entity)
@@ -403,6 +407,7 @@ local function on_tick(event)
 	-- The periodic work of the buildings is spread: each garage, charger or chest does its own
 	-- (offset by its id, see _utils.is_slow_check_due) on its tick of the period.
 	garage_door.update(event.tick)
+	charger_visual.refresh(event.tick)
 	circuit_control.refresh(event.tick)
 	logistic_control.update_requests(event.tick)
 	garage_control.update_inventories(event.tick)
@@ -433,6 +438,7 @@ local function init_storage(event)
 	storage.garages = storage.garages or {}
 	storage.garage_data = storage.garage_data or {}
 	storage.garage_doors = storage.garage_doors or {} -- [garage unit_number] = door being moved, see garage_door.lua
+	storage.charger_arcs = storage.charger_arcs or {} -- [car unit_number] = arc drawn at a charger post while the car charges, see charger_visual.lua
 	storage.supply_chests = storage.supply_chests or {}
 	-- Chargers, garages and supply chests by region, see _utils.find_closest: .cells[surface index]["x,y"] = {[id] = true}, .where[id] = {surface index, "x,y"}
 	storage.regions = storage.regions or {}
