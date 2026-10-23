@@ -1472,23 +1472,6 @@ function ghost_control.deconstruct_entity(car, entity)
 	return entity.mine{inventory = car.get_inventory(defines.inventory.car_trunk), raise_destroyed = true}
 end
 
--- Items held by all the inventories of an entity: [name .. "/" .. quality] =
--- {name, quality, count}. Fluids and item data other than quality are ignored.
-local function count_contents(entity)
-	local contents = {}
-	for index = 1, entity.get_max_inventory_index() do
-		local inventory = entity.get_inventory(index)
-		if inventory then
-			for _, item in pairs(inventory.get_contents()) do
-				local key = item.name .. "/" .. item.quality
-				contents[key] = contents[key] or {name = item.name, quality = item.quality, count = 0}
-				contents[key].count = contents[key].count + item.count
-			end
-		end
-	end
-	return contents
-end
-
 -- Puts a stack ({name, quality, count}) in the trunk of the car; what does not
 -- fit is spilled next to the car rather than lost (the batch reserves the room, so
 -- this should not happen).
@@ -1501,12 +1484,13 @@ end
 
 -- Replaces an entity marked for upgrade by the entity it is marked to become
 -- (LuaEntity.apply_upgrade: it moves the settings and as much of the contents as
--- the new entity holds, and destroys the rest, as does the old entity's item: the
--- test probe-upgrade of 2026-10-10 showed neither in the world). The item of the
--- new entity comes from the trunk, and the trunk receives the item of the old
--- entity and the contents that did not follow. Returns false if the trunk has no
--- such item or the upgrade did not happen: nothing has changed then. An entity that
--- is no longer marked counts as done.
+-- the new entity holds). The item of the new entity comes from the trunk, and the
+-- trunk receives what the upgrade leaves: the item of the old entity and the
+-- contents that did not follow. They go through a buffer the size of the old
+-- entity's inventories, not straight to the trunk: apply_upgrade destroys what does
+-- not fit in its buffer (test of 2026-10-23). Returns false if the trunk has no such
+-- item or the upgrade did not happen: nothing has changed then. An entity that is no
+-- longer marked counts as done.
 function ghost_control.upgrade_entity(car, entity)
 	if not entity.to_be_upgraded() then
 		return true
@@ -1518,33 +1502,23 @@ function ghost_control.upgrade_entity(car, entity)
 		return false
 	end
 
-	local before = count_contents(entity)
-	local old_quality = entity.quality.name
-	local products = entity.prototype.mineable_properties.products
-	local replacement = entity.apply_upgrade()
-	if not replacement then
-		return false
-	end
-
-	trunk.remove(_utils.make_stack(key, item_count))
-	-- What mining the old entity gives (a product has `amount`, or `amount_min` and
-	-- `amount_max`: compute_yield reserved the same count).
-	for _, product in pairs(products or {}) do
-		if product.type == "item" then
-			give_to_trunk(car, trunk, {name = product.name, quality = old_quality, count = product.amount or product.amount_max or 1})
+	local slots = #(entity.prototype.mineable_properties.products or {}) -- a stack per item of the old entity
+	for index = 1, entity.get_max_inventory_index() do
+		local inventory = entity.get_inventory(index)
+		if inventory then
+			slots = slots + #inventory
 		end
 	end
-	for name_quality, kept in pairs(count_contents(replacement)) do
-		if before[name_quality] then
-			before[name_quality].count = before[name_quality].count - kept.count
+	local leftovers = game.create_inventory(slots)
+	local replacement = entity.apply_upgrade(nil, leftovers)
+	if replacement then
+		trunk.remove(_utils.make_stack(key, item_count))
+		for _, stack in pairs(leftovers.get_contents()) do
+			give_to_trunk(car, trunk, stack)
 		end
 	end
-	for _, lost in pairs(before) do
-		if lost.count > 0 then
-			give_to_trunk(car, trunk, lost)
-		end
-	end
-	return true
+	leftovers.destroy()
+	return replacement ~= nil
 end
 
 -- Tries to build one ghost (or mine or upgrade one entity): the nearest one of

@@ -46,7 +46,6 @@ config.names = {
 	ghost_selector_shortcut = "autonomous_car_ghost_selector_shortcut",
 	ghost_selector_input = "autonomous_car_ghost_selector_input", -- key binding
 	missing_items_shortcut = "autonomous_car_missing_items_shortcut", -- shows or hides the window of missing items
-	debug_view_shortcut = "autonomous_car_debug_view_shortcut", -- shows or hides the debug drawing of the selected car
 	next_task_event = "autonomous_car_next_task", -- custom event, see _utils.raise_next_task
 	turret = "autonomous_car_turret", -- hidden turret that follows each armed car and shoots for it, see armed.lua
 	technology = "autonomous_car", -- research that unlocks the mod's items; also the prefix of the others (see config.upgrades)
@@ -299,6 +298,7 @@ config.long_delay = 600 -- (10s)
 	-- travel.stuck_tick: wait before a stuck car tries its leg again
 	-- travel.is_leg_too_long: margin added to the expected duration of a leg
 	-- control.lua (on_next_task): a car that fled waits this long at its refuge before resuming
+	-- selection_preview.show: lifetime of the count next to the cursor, should the game not report the end of the selection
 config.very_long_delay = 3600 -- (60s)
 	-- ghost_control.requeue_ghost: a ghost given up after max_revive_attempts waits this long in the pending pool before any
 	--   car may take it again, so that the cars do not all gather on a ghost that cannot be built
@@ -311,7 +311,7 @@ config.very_long_delay = 3600 -- (60s)
 -- driving mode reacts up to this late), critical fuel level. Raise it if the mod slows the game
 -- down: every player gets the same behaviour.
 config.slow_check_interval = 6 -- (0.1s)
-	-- debug_view.refresh: period of the debug drawing
+	-- tooltips.refresh: period of the tooltip lines of the entity under each player's cursor
 
 -- Regions of the closest-entity search (_utils.find_closest): the chargers, garages and supply chests are
 -- listed per square of `size` tiles, and the search looks at the squares around the position first; the
@@ -320,12 +320,6 @@ config.regions = {
 	size = 64, -- tiles
 	rings = 2, -- squares around the position's own that are looked at before falling back to every entity
 }
-
--- Debug drawing of the car under the cursor or opened (see scripts/debug/debug_view.lua): its
--- destination, path, state and steering costs. Each player toggles it with a
--- shortcut; this is the state of a player who has not touched it.
--- TODO: off by default before release (see "À faire" in CLAUDE.md).
-config.debug_view_default = true
 
 -- ============================================================
 -- Construction (see construction.lua)

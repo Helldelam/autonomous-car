@@ -33,6 +33,7 @@ data:extend{
 			mode = {"entity-ghost", "tile-ghost", "any-entity"},
 		},
 		always_include_tiles = true,
+		send_pre_selection_events = true, -- the count next to the cursor while dragging (scripts/gui/selection_preview.lua)
 	},
 	{
 		type = "shortcut",

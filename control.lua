@@ -14,9 +14,10 @@ local ghost_control = require("scripts.construction")
 local gui = require("scripts.gui.missing_items")
 local garage_gui = require("scripts.gui.garage")
 local car_gui = require("scripts.gui.car")
+local tooltips = require("scripts.gui.tooltips")
+local selection_preview = require("scripts.gui.selection_preview")
 local circuit_control = require("scripts.circuit")
 local logistic_control = require("scripts.logistic")
-local debug_view = require("scripts.debug.debug_view")
 local game_trace = require("scripts.debug.game_trace")
 local armed = require("scripts.armed")
 
@@ -184,6 +185,7 @@ local function on_area_selected(event)
 	if event.item ~= names.ghost_selector then
 		return
 	end
+	selection_preview.hide(event)
 
 	local player = game.get_player(event.player_index)
 	if storage.selection_job then
@@ -405,7 +407,7 @@ local function on_tick(event)
 		car_gui.refresh_all()
 	end
 	if event.tick % config.slow_check_interval == 0 then
-		debug_view.refresh()
+		tooltips.refresh()
 	end
 	-- The periodic work of the buildings is spread: each garage, charger or chest does its own
 	-- (offset by its id, see _utils.is_slow_check_due) on its tick of the period.
@@ -460,9 +462,7 @@ local function init_storage(event)
 	storage.path_requests = storage.path_requests or {} -- [request id] = unit_number of the car waiting for that path
 	storage.idle_fallbacks = storage.idle_fallbacks or {} -- cars found in no state, see update_car
 	storage.research = storage.research or {} -- [force index] = values read from the research, see _utils.get_upgrade
-	storage.debug_view = storage.debug_view or {} -- [player index] = false or true when the player toggled the debug drawing, see scripts/debug/debug_view.lua
-
-	debug_view.sync_shortcuts()
+	storage.selection_previews = storage.selection_previews or {} -- [player index] = text drawn next to the cursor while the player drags the selector, see scripts/gui/selection_preview.lua
 
 	script.on_event(defines.events.on_tick, on_tick)
 	on_tick(event)
@@ -534,16 +534,14 @@ script.on_event(defines.events.on_robot_mined_entity, on_removed)
 script.on_event(defines.events.on_object_destroyed, on_object_destroyed)
 script.on_event(defines.events.on_player_selected_area, on_area_selected)
 script.on_event(defines.events.on_player_alt_selected_area, on_area_selected)
+script.on_event(defines.events.on_player_start_selected_area, selection_preview.show)
+script.on_event(defines.events.on_player_change_selected_area, selection_preview.show)
+script.on_event(defines.events.on_player_cancel_selected_area, selection_preview.hide)
 script.on_event(prototypes.custom_event[names.next_task_event], on_next_task)
 script.on_event(defines.events.on_lua_shortcut, function(event)
 	if event.prototype_name == names.missing_items_shortcut then
 		gui.toggle(game.get_player(event.player_index))
-	elseif event.prototype_name == names.debug_view_shortcut then
-		debug_view.toggle(game.get_player(event.player_index))
 	end
-end)
-script.on_event(defines.events.on_player_created, function(event)
-	debug_view.sync_shortcut(game.get_player(event.player_index))
 end)
 script.on_event(defines.events.on_gui_click, function(event)
 	gui.on_click(event)

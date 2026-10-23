@@ -16,30 +16,30 @@ local BATCH = "car_batch"
 -- The active tick states in the order update_car runs them, with the key of their text.
 local STATES = {"empty", "moving", "charging", "parking", "building", "stuck", "waiting"}
 
--- Key of the text that tells what the car is doing.
-local function get_state_key(car_data)
+-- Text that tells what the car is doing (also its tooltip, see gui/tooltips.lua).
+function car_gui.get_state_text(car_data)
 	if car_data.flee.active then
-		return "fleeing"
+		return {"autonomous-car-gui.car-state-fleeing"}
 	end
 	for _, name in ipairs(STATES) do
 		if car_data[name].active then
-			return name
+			return {"autonomous-car-gui.car-state-" .. name}
 		end
 	end
-	return "waiting"
+	return {"autonomous-car-gui.car-state-waiting"}
 end
 
 -- Text about the batch of the car: how many targets are left, and whether it waits for items.
-local function make_batch_text(car_data)
+function car_gui.get_work_text(car_data)
 	local construction = car_data.construction
 	if not construction then
-		return {"autonomous-car-gui.car-no-batch"}
+		return {"autonomous-car-gui.work-none"}
 	end
 	local count = 0
 	for _ in pairs(construction.ghosts) do
 		count = count + 1
 	end
-	return {construction.missing_since and "autonomous-car-gui.car-batch-missing" or "autonomous-car-gui.car-batch", count}
+	return {construction.missing_since and "autonomous-car-gui.work-missing" or "autonomous-car-gui.work-targets", count}
 end
 
 -- Brings the panel up to date with its car.
@@ -51,11 +51,11 @@ local function refresh(frame)
 	end
 	local car_data = storage.car_data[car.unit_number]
 	local ammo = _utils.get_ammo(car)
-	frame[STATE].caption = {"autonomous-car-gui.car-state-" .. get_state_key(car_data)}
+	frame[STATE].caption = car_gui.get_state_text(car_data)
 	frame[HEALTH].caption = {"autonomous-car-gui.car-health", math.floor(car.get_health_ratio() * 100 + 0.5)}
 	frame[FUEL].caption = {"autonomous-car-gui.car-fuel", math.floor(_utils.get_fuel_ratio(car) * 100 + 0.5), _utils.get_battery_count(car)}
 	frame[AMMO].caption = ammo and {"autonomous-car-gui.car-ammo", ammo.count} or {"autonomous-car-gui.car-no-ammo"}
-	frame[BATCH].caption = make_batch_text(car_data)
+	frame[BATCH].caption = {"autonomous-car-gui.car-batch", car_gui.get_work_text(car_data)}
 end
 
 local function open(player, car)
