@@ -13,7 +13,6 @@ garage.icon = icon
 garage.max_health = 3500
 garage.dying_explosion = "steel-chest-explosion"
 -- The ruin drawn by the owner (graphics/garage/source/remnants.png, 600 x 352 pixels at scale 0.5, its shadow on the right).
--- TODO: the garage is not finished (new drawings to validate in game, more changes to come); redo its remnants with it.
 require("prototypes.corpse")(garage, "steel-chest-remnants", "__autonomous-car__/graphics/garage/remnants/garage-remnants.png",
 	function(corpse, animations)
 		corpse.tile_width = 4

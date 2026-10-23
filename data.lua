@@ -21,7 +21,7 @@ data:extend{
 		fuel_categories = {names.fuel},
 		fuel_value = "6MJ",
 		stack_size = 50,
-		icon = "__autonomous-car__/graphics/fuel/icon.png",
+		icon = "__autonomous-car__/graphics/fuel/icon.png", -- transparent: the item is hidden and never shown
 		subgroup = names.subgroup,
 		order = "zz[fuel]",
 	},

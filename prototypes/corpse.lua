@@ -12,7 +12,7 @@ return function(entity, source, filename, edit)
 	corpse.order = nil
 	local animations = corpse.animation[1] and corpse.animation or {corpse.animation} -- one image, or a list of variations
 	for _, animation in pairs(animations) do
-		animation.filename = filename
+		(animation.layers and animation.layers[1] or animation).filename = filename -- the first layer when there are several
 	end
 	if edit then
 		edit(corpse, animations)

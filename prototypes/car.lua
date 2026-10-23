@@ -27,8 +27,7 @@ local car = {
 	max_health = 250,
 	is_military_target = true,
 	deliver_category = "vehicle",
-	corpse = "car-remnants",
-	dying_explosion = "car-explosion",
+	dying_explosion = "gun-turret-explosion", -- the explosion of the car of the game is sized for a car twice as big; this one (metal particles within half a tile) fits
 	alert_icon_shift = util.by_pixel(0, -13),
 	energy_per_hit_point = 1,
 	collision_mask = {layers={player=true}},
@@ -331,5 +330,19 @@ local recipe = {
 	},
 	results = {{type = "item", name = names.car, amount = 1}}
 }
+
+-- The remnants of the car of the game, in the colour of the car (graphics/car/make_car.py bakes its mask layer) and at
+-- the scale of the car (0.25: the game draws its own at 0.5).
+require("prototypes.corpse")(car, "car-remnants", "__autonomous-car__/graphics/car/remnants/car-remnants.png",
+	function(corpse, animations)
+		for _, animation in pairs(animations) do
+			animation.layers[2] = nil -- the mask layer, tinted at runtime
+			animation.layers[1].scale = 0.25
+			animation.layers[1].shift = util.by_pixel(0, 2.25)
+		end
+		corpse.tile_width = 2
+		corpse.tile_height = 2
+		corpse.selection_box = {{-1, -1}, {1, 1}}
+	end)
 
 data:extend{car, item, recipe}
