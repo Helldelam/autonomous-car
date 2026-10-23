@@ -12,7 +12,7 @@ garage.subgroup = names.subgroup
 garage.icon = icon
 garage.max_health = 3500
 garage.dying_explosion = "steel-chest-explosion"
--- The ruin drawn by graphics/garage/make_garage.py (376 x 300 pixels at scale 0.5, centred on the garage, its shadow on the right).
+-- The ruin drawn by the owner (graphics/garage/source/remnants.png, 600 x 352 pixels at scale 0.5, its shadow on the right).
 -- TODO: the garage is not finished (new drawings to validate in game, more changes to come); redo its remnants with it.
 require("prototypes.corpse")(garage, "steel-chest-remnants", "__autonomous-car__/graphics/garage/remnants/garage-remnants.png",
 	function(corpse, animations)
@@ -20,10 +20,10 @@ require("prototypes.corpse")(garage, "steel-chest-remnants", "__autonomous-car__
 		corpse.tile_height = 4
 		corpse.selection_box = {{-2, -2}, {2, 2}}
 		for _, animation in pairs(animations) do
-			animation.width = 376
-			animation.height = 300
+			animation.width = 600
+			animation.height = 352
 			animation.scale = 0.5
-			animation.shift = {0, 0}
+			animation.shift = {1.719, -0.39} -- the garage drawn in the image (x 62 to 316, y 2 to 322) stands where the sprite does
 		end
 	end)
 garage.resistances =
@@ -91,18 +91,25 @@ local garage_recipe = {
 	results = {{type = "item", name = names.garage, amount = 1}}
 }
 
--- Drawn by scripts/garage_door.lua over the closed door of the sprite while it lifts (200 x 129 pixels).
-local function door_sprite(name, file)
+-- Drawn by scripts/garage_door.lua over the closed door of the sprite while it lifts (200 x 129 pixels): the
+-- interior, and the door sliding up under its top edge, one sprite per step of the opening (names.garage_door
+-- .. "_" .. step): the door image without the rows already above the top edge, which are cut off.
+local door = config.garage_door
+local function door_sprite(name, file, hidden)
 	return {
 		type = "sprite",
 		name = name,
 		filename = "__autonomous-car__/graphics/garage/" .. file,
 		priority = "extra-high",
+		y = hidden,
 		width = 200,
-		height = 129,
+		height = door.rows - hidden,
 		scale = 0.5
 	}
 end
 
-data:extend{garage, garage_item, garage_recipe,
-	door_sprite(names.garage_door, "door.png"), door_sprite(names.garage_interior, "interior.png")}
+local sprites = {garage, garage_item, garage_recipe, door_sprite(names.garage_interior, "interior.png", 0)}
+for step = 0, door.move_ticks do
+	sprites[#sprites + 1] = door_sprite(names.garage_door .. "_" .. step, "door.png", door.hidden_rows(step))
+end
+data:extend(sprites)

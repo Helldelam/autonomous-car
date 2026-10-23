@@ -406,12 +406,19 @@ config.stuck = {
 config.garage_door = {
 	x = -0.023, -- centre of the door
 	top = -0.125, -- top edge of the door, which stays in place while it lifts
-	height = 2.016, -- height of the closed door
-	open_scale = 0.12, -- height of the lifted door, relative to the closed one
-	move_ticks = config.short_delay, -- time to open or to close
+	rows = 129, -- height of the door image in pixels (a tile is 64 pixels at scale 0.5)
+	open_scale = 0.12, -- share of the door still seen under its top edge once lifted (its hazard strip), the rest slid out of sight
+	move_ticks = config.short_delay, -- time to open or to close, one sprite per tick (prototypes/garage.lua)
 	hold = 2 * config.short_delay, -- time it stays open
 	enter_delay = config.short_delay + 10, -- a car that parks stays in view this long after the door starts to open
 }
+config.garage_door.height = config.garage_door.rows / 64 -- height of the closed door, in tiles
+
+-- Rows of the door image slid above its top edge (cut off) after `step` of move_ticks ticks of opening.
+function config.garage_door.hidden_rows(step)
+	local door = config.garage_door
+	return math.floor(step / door.move_ticks * door.rows * (1 - door.open_scale) + 0.5)
+end
 
 -- Hatch animation of scripts/chest_door.lua. The geometry follows graphics/chest/make_chests.py: the chest
 -- sprite is drawn at scale 0.5 (64 pixels per tile) with a shift of (0, -2) pixels, and the hatch is its pixels

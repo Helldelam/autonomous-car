@@ -1,25 +1,25 @@
 local config = require("config")
 local names = config.names
 
--- Door of a garage that lifts when a car goes in or out. The sprite of the garage (a container
+-- Door of a garage that slides up when a car goes in or out. The sprite of the garage (a container
 -- has no animation) keeps the closed door; while the door moves, the script draws on top of it
--- a dark interior and the door itself (graphics/garage/door.png, cut from the sprite), squashed
--- upwards like a roller shutter. Nothing else is drawn, so the garage never changes or shakes;
--- a closed door leaves no render object. storage.garage_doors[garage id] = {garage, scale (1 closed),
--- hold_until (tick), interior, door (render objects)}; only the garages that are moving are listed.
+-- a dark interior and the door itself (graphics/garage/door.png, a sprite per step cut by prototypes/garage.lua):
+-- the door slides up and what goes above its original top edge is cut off, like a rigid shutter rolling
+-- into its housing. Nothing else is drawn, so the garage never changes or shakes; a closed door leaves no render
+-- object. storage.garage_doors[garage id] = {garage, step (0 closed, move_ticks open), hold_until (tick),
+-- interior, door (render objects)}; only the garages that are moving are listed.
 local garage_door = {}
 
 local settings = config.garage_door
-local step = (1 - settings.open_scale) / settings.move_ticks -- scale change per tick
 
--- Puts the door at `scale` (1: closed), its top edge staying where it is.
+-- Draws the door after `step` ticks of opening: the image without the rows above the top edge, its top edge staying where it is.
 local function place(door)
 	local position = door.garage.position
+	door.door.sprite = names.garage_door .. "_" .. door.step
 	door.door.target = {
 		x = position.x + settings.x,
-		y = position.y + settings.top + settings.height * door.scale / 2,
+		y = position.y + settings.top + (settings.rows - settings.hidden_rows(door.step)) / 64 / 2,
 	}
-	door.door.y_scale = door.scale
 end
 
 local function destroy(id)
@@ -39,10 +39,10 @@ function garage_door.open(garage)
 		local target = {x = position.x + settings.x, y = position.y + settings.top + settings.height / 2}
 		door = {
 			garage = garage,
-			scale = 1,
+			step = 0,
 			interior = rendering.draw_sprite{sprite = names.garage_interior, target = target, surface = garage.surface,
 				render_layer = "object"},
-			door = rendering.draw_sprite{sprite = names.garage_door, target = target, surface = garage.surface,
+			door = rendering.draw_sprite{sprite = names.garage_door .. "_0", target = target, surface = garage.surface,
 				render_layer = "cargo-hatch"}, -- above the interior (and above a car beside the garage)
 		}
 		storage.garage_doors[garage.unit_number] = door
@@ -57,11 +57,11 @@ function garage_door.update(tick)
 			destroy(id)
 		else
 			local open = tick < door.hold_until
-			local scale = open and math.max(settings.open_scale, door.scale - step) or math.min(1, door.scale + step)
-			if scale ~= door.scale then
-				door.scale = scale
+			local step = open and math.min(settings.move_ticks, door.step + 1) or math.max(0, door.step - 1)
+			if step ~= door.step then
+				door.step = step
 				place(door)
-			elseif scale == 1 and not open then
+			elseif step == 0 and not open then
 				destroy(id)
 			end
 		end
