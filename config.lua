@@ -410,9 +410,9 @@ config.stuck = {
 -- graphics/garage/make_garage.py prints, in tiles from the position of the garage: the sprite is
 -- drawn at scale 0.5 (32 pixels per tile) with a shift of (-0.25, -19.5) pixels.
 config.garage_door = {
-	x = -0.008, -- centre of the door
-	top = -0.141, -- top edge of the door, which stays in place while it lifts
-	height = 1.672, -- height of the closed door
+	x = -0.023, -- centre of the door
+	top = -0.125, -- top edge of the door, which stays in place while it lifts
+	height = 2.016, -- height of the closed door
 	open_scale = 0.12, -- height of the lifted door, relative to the closed one
 	move_ticks = config.short_delay, -- time to open or to close
 	hold = 2 * config.short_delay, -- time it stays open

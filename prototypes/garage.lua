@@ -13,7 +13,7 @@ garage.icon = icon
 garage.max_health = 3500
 garage.dying_explosion = "steel-chest-explosion"
 -- The ruin drawn by graphics/garage/make_garage.py (376 x 300 pixels at scale 0.5, centred on the garage, its shadow on the right).
--- TODO: redo the garage (its look is not right), then its remnants with it.
+-- TODO: the garage is not finished (new drawings to validate in game, more changes to come); redo its remnants with it.
 require("prototypes.corpse")(garage, "steel-chest-remnants", "__autonomous-car__/graphics/garage/remnants/garage-remnants.png",
 	function(corpse, animations)
 		corpse.tile_width = 4
@@ -91,15 +91,15 @@ local garage_recipe = {
 	results = {{type = "item", name = names.garage, amount = 1}}
 }
 
--- Drawn by scripts/garage_door.lua over the closed door of the sprite while it lifts (174 x 107 pixels).
+-- Drawn by scripts/garage_door.lua over the closed door of the sprite while it lifts (200 x 129 pixels).
 local function door_sprite(name, file)
 	return {
 		type = "sprite",
 		name = name,
 		filename = "__autonomous-car__/graphics/garage/" .. file,
 		priority = "extra-high",
-		width = 174,
-		height = 107,
+		width = 200,
+		height = 129,
 		scale = 0.5
 	}
 end
