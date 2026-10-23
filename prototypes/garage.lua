@@ -44,8 +44,8 @@ garage.inventory_size = config.garage_inventory_size
 garage.inventory_type = "with_filters_and_bar" -- filters keep the car slot to cars and lock the repair pack slots before the research (garage_control.update_inventory)
 -- The connector of the steel chest sits at the centre of a 1x1 chest: this one is at the south-west
 -- corner of the garage (the link of circuit.lua is at the south-east corner). Offsets in pixels.
-garage.circuit_connector = circuit_connector_definitions.create_single(universal_connector_template,
-	{variation = 26, main_offset = util.by_pixel(-45, 62), shadow_offset = util.by_pixel(-40.5, 64), show_shadow = true})
+garage.circuit_connector = circuit_connector_definitions.create_vector(universal_connector_template,
+	{{variation = 26, main_offset = util.by_pixel(-45, 62), shadow_offset = util.by_pixel(-40.5, 64), show_shadow = true}})
 garage.picture =
 {
 	layers =

@@ -3507,11 +3507,11 @@ local function install_profiler()
 	if tick_profile then
 		return
 	end
-	tick_profile, cars_profile = game.create_profiler(true), game.create_profiler(true)
+	tick_profile, cars_profile = helpers.create_profiler(true), helpers.create_profiler(true)
 	local inner = update_car
 	---@diagnostic disable-next-line: lowercase-global (a local of control.lua, see the top of this file)
 	update_car = function(car, car_data, tick)
-		local timer = game.create_profiler()
+		local timer = helpers.create_profiler()
 		inner(car, car_data, tick)
 		timer.stop()
 		cars_profile.add(timer)
@@ -3529,12 +3529,12 @@ local function install_profiler()
 	} do
 		for _, name in ipairs(spec[3]) do
 			local fn = spec[2][name]
-			local profile = game.create_profiler(true)
+			local profile = helpers.create_profiler(true)
 			function_profiles[spec[1] .. "." .. name] = profile
-			local tick_only = game.create_profiler(true)
+			local tick_only = helpers.create_profiler(true)
 			tick_profiles[spec[1] .. "." .. name] = tick_only
 			spec[2][name] = function(...)
-				local timer = game.create_profiler()
+				local timer = helpers.create_profiler()
 				local r1, r2, r3 = fn(...)
 				timer.stop()
 				profile.add(timer)
@@ -3550,7 +3550,7 @@ local function install_profiler()
 		for _, profile in pairs(tick_profiles) do
 			profile.reset()
 		end
-		local timer = game.create_profiler()
+		local timer = helpers.create_profiler()
 		on_tick(event)
 		timer.stop()
 		tick_profile.add(timer)
@@ -3651,7 +3651,7 @@ script.on_nth_tick(1, function(event)
 			for _, name in ipairs(running) do
 				use(name)
 				seed = 12345 -- the same obstacles whatever the other scenarios of the run
-				local setup_timer = game.create_profiler()
+				local setup_timer = helpers.create_profiler()
 				scenarios[name].setup()
 				setup_timer.stop()
 				log({"", "SETUPTIME ", name, " tick ", tick, " ", setup_timer})
@@ -3676,7 +3676,7 @@ script.on_nth_tick(1, function(event)
 			end
 			release_queued_selection()
 			if scenarios[name].events then
-				local events_timer = game.create_profiler()
+				local events_timer = helpers.create_profiler()
 				scenarios[name].events(t)
 				events_timer.stop()
 				if t >= 99 and t <= 102 then

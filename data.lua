@@ -18,7 +18,7 @@ data:extend{
 		type = "item",
 		name = names.fuel,
 		hidden = true,
-		fuel_category = names.fuel,
+		fuel_categories = {names.fuel},
 		fuel_value = "6MJ",
 		stack_size = 50,
 		icon = "__autonomous-car__/graphics/fuel/icon.png",

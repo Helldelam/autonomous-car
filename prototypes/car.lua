@@ -31,7 +31,6 @@ local car = {
 	dying_explosion = "car-explosion",
 	alert_icon_shift = util.by_pixel(0, -13),
 	energy_per_hit_point = 1,
-	crash_trigger = crash_trigger(),
 	collision_mask = {layers={player=true}},
 	has_belt_immunity = true,
 	resistances =
@@ -54,7 +53,7 @@ local car = {
 	selection_box = box,
 	damaged_trigger_effect = hit_effects.entity(),
 	effectivity = 0.6,
-	braking_power = "50kW",
+	braking_force = (50 * 1000) / 60, -- a braking power of 50 kW (energy per tick, as the base game car writes its 200 kW)
 	energy_source =
 	{
 		type = "burner",
@@ -74,7 +73,7 @@ local car = {
 		}
 	},
 	consumption = "8kW",
-	friction = 2e-3,
+	friction_force = 2e-3,
 	light =
 	{
 		{

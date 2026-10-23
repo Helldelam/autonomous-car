@@ -428,7 +428,7 @@ config.chest_door = {
 	width = 0.6406, -- width of the closed hatch
 	height = 0.3594,
 	open_scale = 0.12, -- width of the open hatch, relative to the closed one
-	move_ticks = 7, -- time to open or to close, like the logistic chests of the game (opened_duration)
+	move_ticks = 7, -- time to open or to close, like the logistic chests of the game (robot_door.opened_duration)
 	transfer_delay = 10, -- time from the arrival of a car to the transfer, the hatch being open by then
 }
 

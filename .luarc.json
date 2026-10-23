@@ -21,7 +21,6 @@
     "util",
     "circuit_connector_definitions",
     "universal_connector_template",
-    "crash_trigger",
     "car_reflection",
     "volume_multiplier"
   ],

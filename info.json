@@ -3,7 +3,7 @@
   "version": "0.1.3",
   "title": "Autonomous Car",
   "author": "Helldelam",
-  "factorio_version": "2.0",
-  "dependencies": ["base >= 2.0"],
+  "factorio_version": "2.1",
+  "dependencies": ["base >= 2.1"],
   "description": "Adds a small autonomous car that works where no robot network reaches: it builds the ghosts you select, fills in water with landfill, mines what is marked for deconstruction and replaces what is marked for upgrade. It takes the items from supply chests, recharges at its chargers and parks in a garage when it has nothing to do."
 }
