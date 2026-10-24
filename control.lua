@@ -58,6 +58,12 @@ local KIND_BY_NAME = {
 	[names.return_chest] = "chest",
 }
 
+-- Build and removal events reach the script for these entities only.
+local ENTITY_FILTERS = {}
+for _, name in ipairs{names.car, names.charger, names.garage, names.chest, names.delivery_chest, names.return_chest} do
+	table.insert(ENTITY_FILTERS, {filter = "name", name = name})
+end
+
 -- storage.car_data[unit_number].
 local function create_car_data(tick)
 	return {
@@ -467,13 +473,14 @@ local function on_next_task(event)
 	end
 end
 
-script.on_event(defines.events.on_built_entity, on_built)
-script.on_event(defines.events.on_robot_built_entity, on_built)
-script.on_event(defines.events.script_raised_built, on_built)
-script.on_event(defines.events.script_raised_revive, on_built) -- built by a car
-script.on_event(defines.events.on_entity_died, on_removed)
-script.on_event(defines.events.on_player_mined_entity, on_removed)
-script.on_event(defines.events.on_robot_mined_entity, on_removed)
+script.on_event(defines.events.on_built_entity, on_built, ENTITY_FILTERS)
+script.on_event(defines.events.on_robot_built_entity, on_built, ENTITY_FILTERS)
+script.on_event(defines.events.script_raised_built, on_built, ENTITY_FILTERS)
+script.on_event(defines.events.script_raised_revive, on_built, ENTITY_FILTERS) -- built by a car
+script.on_event(defines.events.on_entity_died, on_removed, ENTITY_FILTERS)
+script.on_event(defines.events.on_player_mined_entity, on_removed, ENTITY_FILTERS)
+script.on_event(defines.events.on_robot_mined_entity, on_removed, ENTITY_FILTERS)
+script.on_event(defines.events.script_raised_destroy, on_removed, ENTITY_FILTERS) -- by another mod, or mined by a car
 script.on_event(defines.events.on_object_destroyed, on_object_destroyed)
 script.on_event(defines.events.on_player_selected_area, on_area_selected)
 script.on_event(defines.events.on_player_alt_selected_area, on_area_selected)
@@ -492,7 +499,7 @@ script.on_event(defines.events.on_gui_closed, gui.on_closed)
 script.on_event(defines.events.on_script_path_request_finished, movement.on_path_finished)
 commands.add_command("car-trace", {"autonomous-car-messages.command-car-trace"},
 	function(command)
-		game_trace.toggle(game.get_player(command.player_index), tonumber(command.parameter))
+		game_trace.toggle(command.player_index and game.get_player(command.player_index), tonumber(command.parameter))
 	end)
 -- Research changes the values read for its force (_utils.get_upgrade).
 local function on_research_changed(event)
@@ -501,4 +508,8 @@ end
 
 script.on_event(defines.events.on_research_finished, on_research_changed)
 script.on_event(defines.events.on_research_reversed, on_research_changed)
+-- An update of a mod or of the game may change technologies and upgrade values without a research event.
+script.on_configuration_changed(function()
+	storage.research = {}
+end)
 script.on_event(defines.events.on_tick, init_storage)

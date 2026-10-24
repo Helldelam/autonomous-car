@@ -824,7 +824,7 @@ function ghost_control.assign_cluster(car, cluster)
 	local car_data = storage.car_data[car.unit_number]
 	car_data.construction = {
 		ghosts = {}, items_needed = {}, clusters = {}, site = nil, missing_since = nil,
-		alerted_items = {}, failed_attempts = {}, mode = get_mode(cluster.ghosts),
+		alerted_items = {}, failed_attempts = {}, failure_printed = false, mode = get_mode(cluster.ghosts),
 	}
 	add_cluster(car.unit_number, car_data.construction, cluster)
 	car_data.flee.count = 0
@@ -888,9 +888,11 @@ local function alert_missing_items(car, construction)
 	end
 end
 
-local function alert_build_failed(car, ghost)
-	_utils.alert(car.force, ghost,
-		{"autonomous-car-messages.alert-build-failed", config.max_revive_attempts}, config.names.car)
+-- A map alert on each target given up, a line in the chat once per batch.
+local function alert_build_failed(car, ghost, construction)
+	_utils.alert(car.force, ghost, {"autonomous-car-messages.alert-build-failed", config.max_revive_attempts},
+		config.names.car, construction.failure_printed)
+	construction.failure_printed = true
 end
 
 -- The clusters whose items are not all on board go back, if another is complete (items given in
@@ -1383,7 +1385,7 @@ function ghost_control.attempt_one_ghost(car)
 	local attempt = construction.failed_attempts[id]
 	local count = (attempt and attempt.count or 0) + 1
 	if count >= config.max_revive_attempts then
-		alert_build_failed(car, ghost)
+		alert_build_failed(car, ghost, construction)
 		construction.ghosts[id] = nil
 		construction.failed_attempts[id] = nil
 		ghost_control.requeue_ghost(ghost)

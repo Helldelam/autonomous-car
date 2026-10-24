@@ -22,8 +22,8 @@ data:extend{
 			cursor_box_type = "entity",
 			mode = {"entity-ghost", "tile-ghost", "any-entity"},
 		},
-		alt_select = {
-			border_color = {r = 1, g = 0.2, b = 0.2},
+		alt_select = { -- the same as select, so the same colour
+			border_color = {r = 0, g = 0.6, b = 1},
 			cursor_box_type = "entity",
 			mode = {"entity-ghost", "tile-ghost", "any-entity"},
 		},

@@ -1,0 +1,8 @@
+---------------------------------------------------------------------------------------------------
+Version: 0.1.0
+  Major Features:
+    - First release: cars that build ghosts, fill in water, deconstruct and upgrade where robots do not reach, with the items of supply chests.
+    - Chargers, garages that park and repair the cars, supply, delivery and return chests, circuit signals of garages and chargers.
+    - Researches for cargo, garage places, cars per charger, charge speed and build speed. Cars defend themselves once Military is researched.
+  Info:
+    - Not tested yet with Space Age, nor in multiplayer.

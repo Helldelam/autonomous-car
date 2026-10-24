@@ -1,0 +1,10 @@
+# Left out of the published zip (git archive): development files only.
+tests/ export-ignore
+.claude/ export-ignore
+.gitattributes export-ignore
+.gitignore export-ignore
+.luarc.json export-ignore
+CLAUDE.md export-ignore
+README.md export-ignore
+# The game reads the changelog line by line: no carriage return, whatever core.autocrlf.
+changelog.txt text eol=lf

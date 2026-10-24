@@ -1,9 +1,9 @@
 {
   "name": "autonomous-car",
-  "version": "0.1.3",
+  "version": "0.1.0",
   "title": "Autonomous Car",
   "author": "Helldelam",
   "factorio_version": "2.1",
   "dependencies": ["base >= 2.1"],
-  "description": "Cars that build where your robots do not reach. Drag the autonomous car selector (Alt+G) over ghosts and marked entities: the cars fetch the items from supply chests, build, deconstruct, upgrade or landfill, then recharge and park on their own."
+  "description": "Cars that build where your robots do not reach. Drag the autonomous car selector (Alt+G) over ghosts and marked entities: the cars fetch the items from supply chests, build, deconstruct, upgrade or landfill, then recharge and park on their own. Not tested with Space Age yet. Developed with extensive use of AI."
 }

@@ -11,11 +11,12 @@ Mod Factorio 2.1 (Lua 5.2) « Autonomous Car » : des voitures qui travaillent h
 - Git : `main` est la référence choisie par le propriétaire, pas une version validée. Travail sur une branche à part ; commit, push et fusion seulement sur demande.
 - API : la doc locale (`doc-html`, 2.1.23) fait foi. Nouvelle version du jeu : comparer `runtime-api.json` et `prototype-api.json` (l'ancienne sur `lua-api.factorio.com/<version>/`) et `data/changelog.txt`, puis proposer de revoir les contournements. Portage 2.0.77 → 2.1.23 : `fuel_categories`, `braking_force` = `friction_force` = puissance / 60, `circuit_connector` en liste, `robot_door`, `helpers.create_profiler`, plus de `crash_trigger()`. Nouveautés 2.1 revues : prises, `buffer` d'`apply_upgrade`, `add_custom_alert`, `set_tooltip_field`, pré-sélection, texte au curseur. Écartées : garage orientable (porte dessinée invisible), panneau du garage en `inventory` (voitures garées = fiches), `transfer_from_inventory` (prendrait batteries et slots verrouillés), `immune_to_all_impacts` (plus de contacts). Impossibles : tirer par script, animer un coffre pour une voiture, ignorer la voiture dans `can_place_entity`.
 - Problèmes connus : ce que le joueur voit ou subit ; corrigé, il passe dans « Corrigés, à valider » jusqu'à validation du propriétaire.
-- Code et commentaires en anglais, ce fichier en français. Aucun texte joueur en dur : chaîne localisée `{"autonomous-car-messages.<clé>", ...}` (`locale/<langue>/messages.cfg` ; noms, descriptions, fenêtres : `autonomous-car.cfg`), toujours en anglais et en français.
+- Code et commentaires en anglais, ce fichier en français. Aucun texte joueur en dur : chaîne localisée `{"autonomous-car-messages.<clé>", ...}` (`locale/<langue>/messages.cfg` ; noms, descriptions, fenêtres : `autonomous-car.cfg`), toujours en anglais et en français ; pluriels par `__plural_for_parameter__1__{1=…|rest=…}__`.
+- Présentations (`README.md`, aussi description du portail ; `info.json` et `mod-description` dans le jeu) : mêmes faits, mises à jour avec chaque changement visible ; « non testé avec Space Age » (et en multijoueur pour le README) tant que ce n'est pas fait ; chacune finit par la mention de l'usage important de l'IA ; crédit du système de conduite à Pavement Drive Assist (Arcitos). Deux `.md` seulement : ce fichier et le README.
 
 ## Commandes
 
-- Pas de build ni d'interpréteur Lua ; le dossier du mod garde le nom `<name>_<version>` d'`info.json`.
+- Pas de build ni d'interpréteur Lua. Dossier du mod : `autonomous-car`, sans version (accepté par le jeu, aucun renommage à chaque version) ; encore `autonomous-car_0.1.3` jusqu'à ce que le propriétaire le renomme (jeu et sessions fermés ; déplacer aussi la mémoire de Claude, `~/.claude/projects/<chemin du dossier>`) : d'ici là, ce nom ne correspond plus à la version d'`info.json` (0.1.0), ce que la doc (`mod-structure`) interdit ; les scénarios ne sont pas touchés (copie nommée `autonomous-car`).
 - Changement runtime : recharger la sauvegarde ; de prototype (`data.lua`, `prototypes/`, valeur de `config.lua` lue par un prototype) : redémarrer Factorio. Erreurs : `%APPDATA%\Factorio\factorio-current.log`.
 - Vérification statique (quelques secondes ; `sumneko.lua`, `.luarc.json`, global manquant dans `diagnostics.globals` ; `--checklevel=Hint` signale aussi les variables masquées) :
 
@@ -25,7 +26,7 @@ Mod Factorio 2.1 (Lua 5.2) « Autonomous Car » : des voitures qui travaillent h
 
 ### Scénarios de test
 
-`tests/`, à retirer avant publication (le mod n'en charge rien).
+`tests/` : exclu du zip publié (`.gitattributes`) ; le mod n'en charge rien.
 
 ```powershell
 tests\run.ps1                                  # tout, une partie de Factorio par catégorie
@@ -74,12 +75,12 @@ Catégories (70 scénarios et `crowd`) :
 | `armed.lua` | `armed` | tourelle cachée de la voiture armée |
 | `_utils.lua` | `_utils` | carburant, entité la plus proche, attente, deque, alertes, clés d'objets, libération d'entités |
 | `gui.lua` | `gui` | objets manquants, panneaux du garage et de la voiture, infobulles, aperçu de sélection |
-| `game_trace.lua` | `game_trace` | `/car-trace [unité]` (bascule, arrêtée par défaut) : `script-output/autonomous-car-trace.txt` |
+| `game_trace.lua` | `game_trace` | `/car-trace [unité]` (bascule, arrêtée par défaut) : `script-output/autonomous-car-trace.txt` chez qui la lance (le serveur depuis sa console) |
 
 ### État et tick
 
-- `storage.cars[id]` l'entité, `storage.car_data[id]` son état (`create_car_data`) ; de même chargeurs et garages. `init_storage` au premier tick, qui est joué ; ni `on_init` ni migration.
-- Suivi dès la construction (`on_built`, `script_raised_revive`) ; entité invalide : `_utils.release_entity(kind, id)` ; ghosts : `on_object_destroyed`.
+- `storage.cars[id]` l'entité, `storage.car_data[id]` son état (`create_car_data`) ; de même chargeurs et garages. `init_storage` au premier tick, qui est joué ; pas d'`on_init` ; `on_configuration_changed` vide le cache des recherches.
+- Suivi dès la construction (`on_built`, `script_raised_revive`) et jusqu'au retrait (`on_removed`, aussi `script_raised_destroy` : autre mod, ou voiture qui démonte une entité du mod), événements filtrés sur les entités du mod ; entité invalide : `_utils.release_entity(kind, id)` ; ghosts : `on_object_destroyed`.
 - `update_car`, première branche vraie : 1. batterie vide, carburant critique, danger ; 2. `moving` (`update_mode`, `maneuver_tick` ou `drive_tick`, `is_leg_too_long`) ; 3. `charging` ; 4. `parking` ; 5. `building` (un ghost par `build_interval`) ; 6. `stuck` ; 7. `waiting` (`end_wait`) ; 8. filet de sécurité : retour en `waiting`, `storage.idle_fallbacks`, `NOSTATE` (bug ailleurs).
 
 ### Charge par tick
@@ -195,6 +196,7 @@ Sous-mode de `moving`, lent (`friction.maneuver`), avant ou arrière. Recours : 
 - `fill_batch` : clusters en attente les plus proches tant que leurs slots (par cluster, jamais partagés) tiennent ; `construction.clusters`.
 - `ghost_control.proceed`, rappelé après chaque étape : `collect`, `go_to_site` ou attente avec alerte (`missing_since`, fenêtre des objets manquants) ; après `long_delay`, les clusters dont les objets manquent retournent en attente si un autre est complet. `requeue_construction` : retour cluster par cluster.
 - Chantier : le ghost prêt le plus proche fixe le cluster (`construction.site`) ; recharge possible entre deux clusters ; rien de prêt : cluster suivant ou `step_back`.
+- Cible ratée `max_revive_attempts` fois : abandonnée, de retour en file après `very_long_delay` ; alerte sur la carte pour chacune, ligne de chat une fois par lot (`failure_printed`).
 - Fin : ghost disparu, `drop_ghost_items` ; `finish` dépose (groupe de coffres, puis le suivant qui a de la place ; sinon alerte `supply_full` et réessai : coffre non vide = ni batch ni garage), puis cluster en attente ou `waiting`.
 
 ### Carburant
@@ -210,7 +212,7 @@ Sous-mode de `moving`, lent (`friction.maneuver`), avant ou arrière. Recours : 
 - `moving.destination` peut être `{position, valid}` (`step_back`) : n'en lire que ces champs.
 - `stuck` : état de repli, pas une pause.
 - `slow_lookahead.start` (1,6) au-dessus du minimum de `lookahead.start` (`assert`) : `can_place_entity` voit la voiture elle-même, d'où obstacle imaginaire et cercles.
-- Pas de migration (mod non publié) : un nouveau champ d'état impose une nouvelle sauvegarde.
+- Mod publié : les joueurs gardent leurs sauvegardes d'une version à l'autre. Un nouveau champ d'état est lu avec une valeur par défaut (`x or défaut`) ou rempli par une migration (`on_configuration_changed`, ou un fichier de `migrations/`) ; une nouvelle table de `storage` va dans `init_storage` ; un nom de prototype renommé demande une migration JSON.
 - Le script ne règle que `riding_state`, jamais l'orientation ; marche arrière : `REVERSE_STEERING_INVERTED = true`, via `get_arc_rotation`.
 - Ce que prototypes et scripts partagent est défini une fois dans `config.lua` (`config.names`, `car_size`, tailles d'inventaire, `car_color`). Les noms sont dans les sauvegardes et servent de clés de `locale/` : pas de changement sans accord.
 - Prototype copié (`table.deepcopy`) : il garde tous les champs (`icons` passe avant `icon`, `hidden`) ; les vérifier.
@@ -250,9 +252,24 @@ Problème → solution gardée (effet) ; écartés, à ne pas refaire. « Contac
 - Arrivée parallèle au mur d'une porte → points repoussés jusqu'à `gate_waypoints.clear` 7 : contacts -26 %.
 - Fuite au départ d'un chemin (waypoint suivant dans le dos) → demi-tour sur tout waypoint, `u_turn_angle` 0,35 : 4 fuites de `plain-base` corrigées. Écartés : seuil 0,25 (reculs dans les arbres), un seul demi-tour par chemin, pas de limite en zone dense (+25 % de contacts), refus du mode rapide cible dans le dos.
 
+## Publication
+
+Portail mods.factorio.com, compte factorio.com (le jeu doit être possédé). Première version : 0.1.0, pas encore publiée.
+- Première fois : « My Mods », « Submit mod », zip, description (le README), images ; catégorie « content », étiquettes logistics, transportation, logistic-network, circuit-network ; licence MIT (choix du propriétaire, comme Pavement Drive Assist Continued ; `LICENSE`, inclus dans le zip). Les images tirées du jeu restent à Wube, qui les autorise dans les mods.
+- Chaque version : `version` d'`info.json`, section de `changelog.txt` (format strict du jeu : ligne de 99 tirets, `Version:`, catégories à 2 espaces, entrées à 4 espaces et un tiret, ni tabulation ni espace en fin de ligne, `doc-html/auxiliary/changelog-format.html`), présentations à jour, commit, puis zip envoyé depuis la page du mod (ou l'API d'envoi, clé « ModPortal: Upload Mods » du profil factorio.com).
+- Zip, depuis le commit publié (`.gitattributes` exclut `tests/`, `CLAUDE.md`, `README.md` et les fichiers de configuration ; le dossier du zip peut porter n'importe quel nom, le zip doit s'appeler `<name>_<version>`) :
+
+```powershell
+git archive --prefix=autonomous-car/ -o "$env:TEMP\autonomous-car_0.1.0.zip" HEAD
+```
+
+- `thumbnail.png` (144 × 144) : la voiture du jeu, masque teint à `config.car_color`, avec son ombre, sur une variante 4 × 4 de `dirt-1` (direction 12 sur 64 ; script non gardé).
+- Testeurs : onglet Discussion de la page du mod, forum officiel (catégorie « Mods »), Discord officiel, Reddit r/factorio.
+
 ## À faire
 
-Rien pour l'instant.
+- Test en multijoueur avant publication : une sauvegarde lancée par `factorio.exe --start-server <sauvegarde>`, le jeu s'y connecte, quelques voitures travaillent une dizaine de minutes (désynchronisations).
+- Test d'une longue partie réelle : menu de débogage (F4), `show-time-usage`, temps du mod par tick.
 
 ## Problèmes connus
 
@@ -262,7 +279,9 @@ Aucun.
 
 ### Corrigés, à valider
 
-Aucun. Validation reportée : qualité des objets (ghosts, mises à niveau, collecte, dépôt, objets manquants, garage), écrite d'après la doc, non testable sans l'extension Qualité ; la qualité normale ne régresse pas.
+- Retouches avant publication (2026-10-24) : messages au pluriel du jeu et harmonisés (plus de majuscules « ABANDONNÉ ») ; une cible abandonnée ne donne qu'une ligne de chat par lot (l'alerte sur la carte reste par cible) ; tracé du sélecteur avec Maj en bleu comme le tracé normal (il fait la même chose) ; garage détruit par un autre mod ou démonté par une voiture : ses voitures garées tombent au sol au lieu de disparaître ; `/car-trace` écrit chez qui la lance, et marche depuis la console d'un serveur.
+
+Validation reportée : qualité des objets (ghosts, mises à niveau, collecte, dépôt, objets manquants, garage), écrite d'après la doc, non testable sans l'extension Qualité ; la qualité normale ne régresse pas.
 
 ### Limites assumées
 

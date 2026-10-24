@@ -1,8 +1,9 @@
 local config = require("config")
 local util = require("util")
 
--- /car-trace, off by default: script-output/autonomous-car-trace.txt gets a sample of each moving car
--- every SAMPLE_INTERVAL ticks and an EVENT line when a flag changes. Read only.
+-- /car-trace, off by default: script-output/autonomous-car-trace.txt, on the machine of whoever ran it
+-- (the server for its console), gets a sample of each moving car every SAMPLE_INTERVAL ticks and an
+-- EVENT line when a flag changes. Read only.
 local game_trace = {}
 
 local FILE = "autonomous-car-trace.txt"
@@ -24,19 +25,25 @@ local WATCHED = { -- name = function(car_data) returning a printable value
 }
 
 local function write(line)
-	helpers.write_file(FILE, line .. "\n", true)
+	helpers.write_file(FILE, line .. "\n", true, storage.game_trace.player_index)
 end
 
--- `car_id`: one car only.
+-- `car_id`: one car only; `player`: nil from the server console.
 function game_trace.toggle(player, car_id)
+	local message
 	if storage.game_trace and not car_id then
 		storage.game_trace = nil
-		player.print({"autonomous-car-messages.trace-off", FILE})
-		return
+		message = {"autonomous-car-messages.trace-off", FILE}
+	else
+		storage.game_trace = {car_id = car_id, last = {}, player_index = player and player.index or 0} -- 0: the server
+		write("TRACE start tick " .. game.tick .. (car_id and (" car " .. car_id) or " all cars"))
+		message = {"autonomous-car-messages.trace-on", FILE}
 	end
-	storage.game_trace = {car_id = car_id, last = {}}
-	write("TRACE start tick " .. game.tick .. (car_id and (" car " .. car_id) or " all cars"))
-	player.print({"autonomous-car-messages.trace-on", FILE})
+	if player then
+		player.print(message)
+	else
+		log(message)
+	end
 end
 
 local function describe_target(car, car_data)

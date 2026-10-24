@@ -397,10 +397,12 @@ end
 -- ============================================================
 -- Alerts
 -- ============================================================
--- Printed to the force and pinned on `target`, marked by the icon of `item`.
+-- Pinned on `target`, marked by the icon of `item`, and printed to the force unless `quiet`.
 
-function _utils.alert(force, target, message, item)
-	force.print(message)
+function _utils.alert(force, target, message, item, quiet)
+	if not quiet then
+		force.print(message)
+	end
 	force.add_custom_alert(target, {type = "item", name = item}, message, true)
 end
 
