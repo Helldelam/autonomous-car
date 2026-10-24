@@ -657,15 +657,6 @@ function movement.drive_tick(car, tick)
 	local left_density = density_weight * measure_density_ahead(car, x, y, lx, ly, target_distance)
 	straight, right, left = straight + straight_density, right + right_density, left + left_density
 
-	-- The costs of this tick, for the debug drawing (see scripts/debug/debug_view.lua).
-	local steering = car_data.steering
-	if not steering then
-		steering = {}
-		car_data.steering = steering
-	end
-	steering.straight, steering.right, steering.left = straight, right, left
-	steering.straight_density, steering.right_density, steering.left_density = straight_density, right_density, left_density
-
 	-- Steer to the cheapest heading; a tie between right and left goes left.
 	local direction = riding.direction.straight
 	if right < straight and right < left then

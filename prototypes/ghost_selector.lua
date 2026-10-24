@@ -1,7 +1,7 @@
 -- Ghost selector ("Autonomous car selector" in game): the tool a player drags over
 -- ghosts and marked entities to hand them to the cars (see on_area_selected in
 -- control.lua), with its shortcut and its key binding.
--- TODO: custom icon; it borrows the blueprint's for now.
+-- Icons: graphics/shortcut/make_shortcuts.py.
 
 local names = require("config").names
 
@@ -9,7 +9,7 @@ data:extend{
 	{
 		type = "selection-tool",
 		name = names.ghost_selector,
-		icon = "__base__/graphics/icons/blueprint.png",
+		icon = "__autonomous-car__/graphics/shortcut/selector-icon.png",
 		icon_size = 64,
 		-- Same flags as the deconstruction planner: the item only ever exists in
 		-- the cursor, and is never crafted or stored.
@@ -33,6 +33,7 @@ data:extend{
 			mode = {"entity-ghost", "tile-ghost", "any-entity"},
 		},
 		always_include_tiles = true,
+		send_pre_selection_events = true, -- the count next to the cursor while dragging (scripts/gui/selection_preview.lua)
 	},
 	{
 		type = "shortcut",
@@ -40,10 +41,11 @@ data:extend{
 		order = "z[autonomous-car]",
 		action = "spawn-item",
 		item_to_spawn = names.ghost_selector,
-		icon = "__base__/graphics/icons/blueprint.png",
-		icon_size = 64,
+		icon = "__autonomous-car__/graphics/shortcut/selector-x56.png",
+		icon_size = 56,
 		associated_control_input = names.ghost_selector_input,
-		small_icon = "__base__/graphics/icons/blueprint.png",
+		small_icon = "__autonomous-car__/graphics/shortcut/selector-x24.png",
+		small_icon_size = 24,
 	},
 	{
 		type = "custom-input",

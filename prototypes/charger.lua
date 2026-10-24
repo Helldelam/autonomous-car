@@ -1,5 +1,5 @@
--- Charger: an electric energy interface whose buffer the cars draw from.
--- TODO: use graphics/charger/remnants as the corpse.
+-- Charger: an electric energy interface whose buffer the cars draw from. Its sprite is the accumulator of
+-- the game in steel blue, without its posts (graphics/charger/make_charger.py); scripts/charger_visual.lua draws them.
 local config = require("config")
 local names = config.names
 local icon = "__autonomous-car__/graphics/charger/icon.png"
@@ -13,6 +13,8 @@ charger.hidden = false
 charger.icons = nil
 charger.icon = icon
 charger.gui_mode = "none"
+-- The remnants of the accumulator, in the same steel blue.
+require("prototypes.corpse")(charger, "accumulator-remnants", "__autonomous-car__/graphics/charger/remnants/charger-remnants.png")
 charger.subgroup = names.subgroup
 charger.energy_production = "0W"
 charger.energy_source.buffer_capacity = config.charger_buffer_capacity
@@ -66,4 +68,50 @@ local charger_recipe = {
 	results = {{type = "item", name = names.charger, amount = 1}}
 }
 
-data:extend{charger, charger_item, charger_recipe}
+-- Drawn by scripts/charger_visual.lua around the charger: a post for each place, and the arcs at its tip while a car charges.
+data:extend{charger, charger_item, charger_recipe,
+	{
+		type = "sprite",
+		name = names.charger_post,
+		filename = "__autonomous-car__/graphics/charger/post.png",
+		priority = "high",
+		width = 48,
+		height = 90,
+		scale = 0.5 * 41 / 90 -- 40 pixels at the scale of the body (0.5)
+	},
+	{
+		type = "sprite",
+		name = names.charger_post_shadow,
+		filename = "__autonomous-car__/graphics/charger/post-shadow.png",
+		priority = "high",
+		width = 90,
+		height = 11,
+		draw_as_shadow = true,
+		scale = 0.25
+	},
+	{
+		type = "animation",
+		name = names.charger_arc,
+		filename = "__autonomous-car__/graphics/charger/arc.png",
+		priority = "high",
+		width = 64,
+		height = 64,
+		frame_count = 12,
+		line_length = 6,
+		animation_speed = 0.5,
+		scale = 0.5,
+		draw_as_glow = true
+	}}
+
+-- The support under a post, drawn for the top left corner and mirrored for the others ("tl", "tr", "bl", "br").
+for _, corner in pairs{"tl", "tr", "bl", "br"} do
+	data:extend{{
+		type = "sprite",
+		name = names.charger_support .. "_" .. corner,
+		filename = "__autonomous-car__/graphics/charger/support-" .. corner .. ".png",
+		priority = "high",
+		width = 31,
+		height = 23,
+		scale = 0.5
+	}}
+end

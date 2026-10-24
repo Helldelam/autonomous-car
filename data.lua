@@ -18,10 +18,10 @@ data:extend{
 		type = "item",
 		name = names.fuel,
 		hidden = true,
-		fuel_category = names.fuel,
+		fuel_categories = {names.fuel},
 		fuel_value = "6MJ",
 		stack_size = 50,
-		icon = "__autonomous-car__/graphics/fuel/icon.png",
+		icon = "__autonomous-car__/graphics/fuel/icon.png", -- transparent: the item is hidden and never shown
 		subgroup = names.subgroup,
 		order = "zz[fuel]",
 	},
@@ -63,6 +63,5 @@ require("prototypes/link.lua")
 require("prototypes/signals.lua")
 require("prototypes/ghost_selector.lua")
 require("prototypes/missing_items.lua")
-require("prototypes/debug_view.lua")
 require("prototypes/turret.lua")
 require("prototypes/technology.lua")

@@ -7,13 +7,17 @@ local movement = require("scripts.movement")
 local travel = require("scripts.travel")
 local charger_control = require("scripts.charger")
 local garage_control = require("scripts.garage")
+local garage_door = require("scripts.garage_door")
+local chest_door = require("scripts.chest_door")
+local charger_visual = require("scripts.charger_visual")
 local ghost_control = require("scripts.construction")
 local gui = require("scripts.gui.missing_items")
 local garage_gui = require("scripts.gui.garage")
 local car_gui = require("scripts.gui.car")
+local tooltips = require("scripts.gui.tooltips")
+local selection_preview = require("scripts.gui.selection_preview")
 local circuit_control = require("scripts.circuit")
 local logistic_control = require("scripts.logistic")
-local debug_view = require("scripts.debug.debug_view")
 local game_trace = require("scripts.debug.game_trace")
 local armed = require("scripts.armed")
 
@@ -37,17 +41,20 @@ _utils.register_release_handler("car", function(id)
 end)
 _utils.register_release_handler("charger", function(id)
 	circuit_control.destroy_link(storage.charger_data[id])
+	charger_visual.release(storage.charger_data[id])
 	storage.chargers[id] = nil
 	_utils.remove_from_regions("chargers", id)
 	storage.charger_data[id] = nil
 end)
 _utils.register_release_handler("garage", function(id)
 	circuit_control.destroy_link(storage.garage_data[id])
+	garage_door.release(id)
 	storage.garages[id] = nil
 	_utils.remove_from_regions("garages", id)
 	storage.garage_data[id] = nil
 end)
 _utils.register_release_handler("chest", function(id)
+	chest_door.release(id)
 	storage.supply_chests[id] = nil
 	_utils.remove_from_regions("supply_chests", id)
 end)
@@ -133,7 +140,9 @@ local function on_built(event)
 		storage.chargers[id] = entity
 		_utils.add_to_regions("chargers", entity)
 		charger_control.update_buffer(entity)
-		storage.charger_data[id] = {users = 0, transferred = 0} -- users: cars charging here or on their way; transferred: energy given to cars since the last circuit.lua refresh
+		-- users: cars charging here or on their way; transferred: energy given to cars since the last circuit.lua refresh; posts: see charger_visual.lua
+		storage.charger_data[id] = {users = 0, transferred = 0, posts = {}}
+		charger_visual.update_posts(entity)
 	elseif entity.name == names.garage then
 		storage.garages[id] = entity
 		_utils.add_to_regions("garages", entity)
@@ -176,6 +185,7 @@ local function on_area_selected(event)
 	if event.item ~= names.ghost_selector then
 		return
 	end
+	selection_preview.hide(event)
 
 	local player = game.get_player(event.player_index)
 	if storage.selection_job then
@@ -374,6 +384,7 @@ local function update_car(car, car_data, tick)
 end
 
 local function on_tick(event)
+	ghost_control.update_chest_visits(event.tick) -- before the cars: a visit ends on the tick its car stops waiting
 	for id, car in pairs(storage.cars) do
 		if car.valid then
 			-- No event tells that the player changed the filter of the battery slot.
@@ -396,10 +407,13 @@ local function on_tick(event)
 		car_gui.refresh_all()
 	end
 	if event.tick % config.slow_check_interval == 0 then
-		debug_view.refresh()
+		tooltips.refresh()
 	end
 	-- The periodic work of the buildings is spread: each garage, charger or chest does its own
 	-- (offset by its id, see _utils.is_slow_check_due) on its tick of the period.
+	garage_door.update(event.tick)
+	chest_door.update()
+	charger_visual.refresh(event.tick)
 	circuit_control.refresh(event.tick)
 	logistic_control.update_requests(event.tick)
 	garage_control.update_inventories(event.tick)
@@ -429,6 +443,10 @@ local function init_storage(event)
 	storage.charger_data = storage.charger_data or {}
 	storage.garages = storage.garages or {}
 	storage.garage_data = storage.garage_data or {}
+	storage.garage_doors = storage.garage_doors or {} -- [garage unit_number] = door being moved, see garage_door.lua
+	storage.chest_doors = storage.chest_doors or {} -- [chest unit_number] = hatch open or moving, see chest_door.lua
+	storage.chest_visits = storage.chest_visits or {} -- [car unit_number] = a car waiting for the hatch of a chest to open, see ghost_control.start_chest_visit
+	storage.charger_arcs = storage.charger_arcs or {} -- [car unit_number] = arc drawn at a charger post while the car charges, see charger_visual.lua
 	storage.supply_chests = storage.supply_chests or {}
 	-- Chargers, garages and supply chests by region, see _utils.find_closest: .cells[surface index]["x,y"] = {[id] = true}, .where[id] = {surface index, "x,y"}
 	storage.regions = storage.regions or {}
@@ -444,9 +462,7 @@ local function init_storage(event)
 	storage.path_requests = storage.path_requests or {} -- [request id] = unit_number of the car waiting for that path
 	storage.idle_fallbacks = storage.idle_fallbacks or {} -- cars found in no state, see update_car
 	storage.research = storage.research or {} -- [force index] = values read from the research, see _utils.get_upgrade
-	storage.debug_view = storage.debug_view or {} -- [player index] = false or true when the player toggled the debug drawing, see scripts/debug/debug_view.lua
-
-	debug_view.sync_shortcuts()
+	storage.selection_previews = storage.selection_previews or {} -- [player index] = text drawn next to the cursor while the player drags the selector, see scripts/gui/selection_preview.lua
 
 	script.on_event(defines.events.on_tick, on_tick)
 	on_tick(event)
@@ -498,12 +514,8 @@ local function on_next_task(event)
 	elseif task.type == "building" then
 		car_data.building.active = true
 		car_data.building.next_attempt_tick = event.tick
-	elseif task.type == "collect" then
-		ghost_control.collect_items(car, destination)
-	elseif task.type == "deposit" then
-		ghost_control.deposit_items(car, destination)
-	elseif task.type == "restock" then
-		ghost_control.restock(car, destination)
+	elseif task.type == "collect" or task.type == "deposit" or task.type == "restock" then
+		ghost_control.start_chest_visit(car, destination, task.type)
 	elseif task.type == "flee" then
 		-- Safe for now: waits for the danger to pass, then the waiting loop resumes the batch.
 		car_data.flee.active = false
@@ -522,16 +534,14 @@ script.on_event(defines.events.on_robot_mined_entity, on_removed)
 script.on_event(defines.events.on_object_destroyed, on_object_destroyed)
 script.on_event(defines.events.on_player_selected_area, on_area_selected)
 script.on_event(defines.events.on_player_alt_selected_area, on_area_selected)
+script.on_event(defines.events.on_player_start_selected_area, selection_preview.show)
+script.on_event(defines.events.on_player_change_selected_area, selection_preview.show)
+script.on_event(defines.events.on_player_cancel_selected_area, selection_preview.hide)
 script.on_event(prototypes.custom_event[names.next_task_event], on_next_task)
 script.on_event(defines.events.on_lua_shortcut, function(event)
 	if event.prototype_name == names.missing_items_shortcut then
 		gui.toggle(game.get_player(event.player_index))
-	elseif event.prototype_name == names.debug_view_shortcut then
-		debug_view.toggle(game.get_player(event.player_index))
 	end
-end)
-script.on_event(defines.events.on_player_created, function(event)
-	debug_view.sync_shortcut(game.get_player(event.player_index))
 end)
 script.on_event(defines.events.on_gui_click, function(event)
 	gui.on_click(event)

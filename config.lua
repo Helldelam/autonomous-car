@@ -19,6 +19,13 @@ config.names = {
 	car = "autonomous_car",
 	charger = "autonomous_car_charger",
 	garage = "autonomous_car_garage",
+	charger_post = "autonomous_car_charger_post", -- sprite of a charging post and animation of the arcs at its tip, drawn around a charger (see charger_visual.lua)
+	charger_arc = "autonomous_car_charger_arc",
+	charger_post_shadow = "autonomous_car_charger_post_shadow",
+	charger_support = "autonomous_car_charger_support", -- followed by _tl, _tr, _bl or _br: the corner of the post
+	garage_door = "autonomous_car_garage_door", -- sprites drawn over a garage while its door moves (see garage_door.lua)
+	garage_interior = "autonomous_car_garage_interior",
+	chest_interior = "autonomous_car_chest_interior", -- sprite drawn over a supply chest while its hatch opens (see chest_door.lua); the hatch itself is the sprite "<chest name>_door"
 	chest = "autonomous_car_chest", -- supply chest
 	delivery_chest = "autonomous_car_delivery_chest", -- supply chest that requests from the logistic network what the cars lack (see logistic.lua)
 	return_chest = "autonomous_car_return_chest", -- supply chest the robots empty: the cars deposit their leftovers in it first
@@ -39,7 +46,6 @@ config.names = {
 	ghost_selector_shortcut = "autonomous_car_ghost_selector_shortcut",
 	ghost_selector_input = "autonomous_car_ghost_selector_input", -- key binding
 	missing_items_shortcut = "autonomous_car_missing_items_shortcut", -- shows or hides the window of missing items
-	debug_view_shortcut = "autonomous_car_debug_view_shortcut", -- shows or hides the debug drawing of the selected car
 	next_task_event = "autonomous_car_next_task", -- custom event, see _utils.raise_next_task
 	turret = "autonomous_car_turret", -- hidden turret that follows each armed car and shoots for it, see armed.lua
 	technology = "autonomous_car", -- research that unlocks the mod's items; also the prefix of the others (see config.upgrades)
@@ -292,6 +298,7 @@ config.long_delay = 600 -- (10s)
 	-- travel.stuck_tick: wait before a stuck car tries its leg again
 	-- travel.is_leg_too_long: margin added to the expected duration of a leg
 	-- control.lua (on_next_task): a car that fled waits this long at its refuge before resuming
+	-- selection_preview.show: lifetime of the count next to the cursor, should the game not report the end of the selection
 config.very_long_delay = 3600 -- (60s)
 	-- ghost_control.requeue_ghost: a ghost given up after max_revive_attempts waits this long in the pending pool before any
 	--   car may take it again, so that the cars do not all gather on a ghost that cannot be built
@@ -304,7 +311,7 @@ config.very_long_delay = 3600 -- (60s)
 -- driving mode reacts up to this late), critical fuel level. Raise it if the mod slows the game
 -- down: every player gets the same behaviour.
 config.slow_check_interval = 6 -- (0.1s)
-	-- debug_view.refresh: period of the debug drawing
+	-- tooltips.refresh: period of the tooltip lines of the entity under each player's cursor
 
 -- Regions of the closest-entity search (_utils.find_closest): the chargers, garages and supply chests are
 -- listed per square of `size` tiles, and the search looks at the squares around the position first; the
@@ -313,12 +320,6 @@ config.regions = {
 	size = 64, -- tiles
 	rings = 2, -- squares around the position's own that are looked at before falling back to every entity
 }
-
--- Debug drawing of the car under the cursor or opened (see scripts/debug/debug_view.lua): its
--- destination, path, state and steering costs. Each player toggles it with a
--- shortcut; this is the state of a player who has not touched it.
--- TODO: off by default before release (see "À faire" in CLAUDE.md).
-config.debug_view_default = true
 
 -- ============================================================
 -- Construction (see construction.lua)
@@ -349,6 +350,33 @@ config.fuel_estimate = {
 	near_distance = 100,
 	far_per_tile = 450, -- per tile beyond (measured 165 to 315 on long trips, at most 490)
 }
+-- Charging posts and arcs drawn around a charger by scripts/charger_visual.lua: one post per place
+-- (config.upgrades.chargers), an arc at the tip of the post a car charges on. Offsets in tiles from the charger.
+config.charger_visual = {
+	-- Corners of the body, in the order the posts appear with the research: 2 places = top left and bottom
+	-- right, 4 = the other diagonal too. With 4 places or fewer the post stands on the corner, alone; with
+	-- 8 it splits in two and a support lies at each corner: a quadrilateral with one vertex at the corner
+	-- and a post on each of the two neighbouring vertices.
+	-- (measured on charger.png: 50 pixels either side of the centre, 135 and 70 pixels above the bottom
+	-- of the sprite, 189 pixels high; 64 pixels per tile)
+	posts = {{x = -0.78, y = -0.98}, {x = 0.78, y = 0.04}, {x = 0.78, y = -0.98}, {x = -0.78, y = 0.04}},
+	-- 8 places: slots i (sideways vertex) and i + 4 (vertical vertex) come from post i; filled below
+	split_posts = {},
+	-- distances of the neighbouring vertices of the support (graphics/charger/source/support.png) from its
+	-- corner vertex, towards the left and the top for the top left corner; the other corners mirror it
+	sideways = {x = 0.34, y = 0.02},
+	vertical = {x = 0.05, y = 0.25},
+	support = {x = 0.15, y = 0.12}, -- centre of the support from its corner vertex, away from the body
+	post_height = 0.64, -- height of the post sprite (graphics/charger/post.png: 90 pixels drawn at scale 0.5 * 41 / 90, 32 pixels per tile)
+	tip = 0.62, -- height of its tip above its foot
+	shadow = {x = 0.35, y = -0.04}, -- centre of the shadow of a post from its foot (graphics/charger/post-shadow.png: it starts at the foot and falls to the right)
+}
+for i, corner in ipairs(config.charger_visual.posts) do
+	local side_x, side_y = corner.x < 0 and -1 or 1, corner.y < -0.5 and -1 or 1 -- which corner it is
+	local visual = config.charger_visual
+	visual.split_posts[i] = {x = corner.x + side_x * visual.sideways.x, y = corner.y + side_y * visual.sideways.y}
+	visual.split_posts[i + #visual.posts] = {x = corner.x - side_x * visual.vertical.x, y = corner.y + side_y * visual.vertical.y}
+end
 config.max_charge_detours = 5 -- consecutive charging detours before the destination is reported unreachable
 config.critical_fuel_ratio = 0.1 -- below this fraction of a full tank a car drops everything to recharge.
 	-- Also the charge of a new car.
@@ -371,6 +399,39 @@ config.stuck = {
 -- ============================================================
 -- Garage (see scripts/garage.lua)
 -- ============================================================
+
+-- Door animation of scripts/garage_door.lua. The geometry follows the door box that
+-- graphics/garage/make_garage.py prints, in tiles from the position of the garage: the sprite is
+-- drawn at scale 0.5 (32 pixels per tile) with a shift of (-0.25, -19.5) pixels.
+config.garage_door = {
+	x = -0.023, -- centre of the door
+	top = -0.125, -- top edge of the door, which stays in place while it lifts
+	rows = 129, -- height of the door image in pixels (a tile is 64 pixels at scale 0.5)
+	open_scale = 0.12, -- share of the door still seen under its top edge once lifted (its hazard strip), the rest slid out of sight
+	move_ticks = config.short_delay, -- time to open or to close, one sprite per tick (prototypes/garage.lua)
+	hold = 2 * config.short_delay, -- time it stays open
+	enter_delay = config.short_delay + 10, -- a car that parks stays in view this long after the door starts to open
+}
+config.garage_door.height = config.garage_door.rows / 64 -- height of the closed door, in tiles
+
+-- Rows of the door image slid above its top edge (cut off) after `step` of move_ticks ticks of opening.
+function config.garage_door.hidden_rows(step)
+	local door = config.garage_door
+	return math.floor(step / door.move_ticks * door.rows * (1 - door.open_scale) + 0.5)
+end
+
+-- Hatch animation of scripts/chest_door.lua. The geometry follows graphics/chest/make_chests.py: the chest
+-- sprite is drawn at scale 0.5 (64 pixels per tile) with a shift of (0, -2) pixels, and the hatch is its pixels
+-- 13 to 53 by 36 to 58 (hinges on the left), in tiles from the position of the chest.
+config.chest_door = {
+	left = -0.3125, -- left edge of the hatch, which stays in place (its hinges) while it opens
+	top = -0.0781, -- top edge
+	width = 0.6406, -- width of the closed hatch
+	height = 0.3594,
+	open_scale = 0.12, -- width of the open hatch, relative to the closed one
+	move_ticks = 7, -- time to open or to close, like the logistic chests of the game (robot_door.opened_duration)
+	transfer_delay = 10, -- time from the arrival of a car to the transfer, the hatch being open by then
+}
 
 config.garage_exit = { -- free spot where a garage releases a car
 	radius = 8, -- how far around the garage to look
@@ -411,5 +472,8 @@ assert(config.slow_lookahead.start >= car_reach,
 
 assert(config.critical_fuel_ratio < config.critical_check_fuel_ratio and config.critical_check_fuel_ratio < config.pre_park_fuel_ratio,
 	"config.critical_check_fuel_ratio must lie between config.critical_fuel_ratio and config.pre_park_fuel_ratio")
+assert(#config.charger_visual.split_posts >= config.upgrades.chargers[#config.upgrades.chargers]
+	and #config.charger_visual.posts < #config.charger_visual.split_posts,
+	"config.charger_visual.split_posts needs a post for every place of the charger at the last level of research")
 
 return config

@@ -450,11 +450,8 @@ end
 -- Prints `message` (a localised string, see locale/*/messages.cfg) to a force and pins it on
 -- `target` as a map alert.
 function _utils.alert(force, target, message, item)
-	local icon = {type = "item", name = item}
 	force.print(message)
-	for _, player in pairs(force.players) do
-		player.add_custom_alert(target, icon, message, true)
-	end
+	force.add_custom_alert(target, {type = "item", name = item}, message, true)
 end
 
 -- Same, but only once: `flags[key]` remembers that the alert was raised, until
