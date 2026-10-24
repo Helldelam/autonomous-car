@@ -1,5 +1,5 @@
--- Charger: an electric energy interface whose buffer the cars draw from. Its sprite is the accumulator of
--- the game in steel blue, without its posts (graphics/charger/make_charger.py); scripts/charger_visual.lua draws them.
+-- Charger: an electric energy interface the cars draw from, with the look of the accumulator in steel
+-- blue, without its posts (drawn by scripts/charger.lua).
 local config = require("config")
 local names = config.names
 local icon = "__autonomous-car__/graphics/charger/icon.png"
@@ -7,13 +7,11 @@ local icon = "__autonomous-car__/graphics/charger/icon.png"
 local charger = table.deepcopy(data.raw["electric-energy-interface"]["electric-energy-interface"])
 charger.name = names.charger
 charger.minable.result = names.charger
--- The copied entity and item are hidden and come with `icons` (a tinted
--- accumulator), which the game reads instead of `icon`.
+-- The copy is hidden and has `icons`, which win over `icon`.
 charger.hidden = false
 charger.icons = nil
 charger.icon = icon
 charger.gui_mode = "none"
--- The remnants of the accumulator, in the same steel blue.
 require("prototypes.corpse")(charger, "accumulator-remnants", "__autonomous-car__/graphics/charger/remnants/charger-remnants.png")
 charger.subgroup = names.subgroup
 charger.energy_production = "0W"
@@ -68,7 +66,7 @@ local charger_recipe = {
 	results = {{type = "item", name = names.charger, amount = 1}}
 }
 
--- Drawn by scripts/charger_visual.lua around the charger: a post for each place, and the arcs at its tip while a car charges.
+-- Drawn around the charger: a post per place, an arc at its tip while a car charges.
 data:extend{charger, charger_item, charger_recipe,
 	{
 		type = "sprite",
@@ -103,7 +101,7 @@ data:extend{charger, charger_item, charger_recipe,
 		draw_as_glow = true
 	}}
 
--- The support under a post, drawn for the top left corner and mirrored for the others ("tl", "tr", "bl", "br").
+-- Support under the posts of a corner (8 places).
 for _, corner in pairs{"tl", "tr", "bl", "br"} do
 	data:extend{{
 		type = "sprite",

@@ -1,460 +1,378 @@
--- Constants shared by the data stage (prototypes) and the control stage: first
--- what the two stages must agree on, then the tuning values.
--- Units: durations in ticks (60 per second), distances in tiles, speeds in
--- tiles per tick, angles as a fraction of a full turn, energy in joules.
+-- Constants of both stages: what prototypes and scripts share, then the tuning.
+-- Units: ticks (60 per second), tiles, tiles per tick, turns, joules.
 local config = {}
 
 -- ============================================================
 -- Prototypes
 -- ============================================================
--- Everything the prototypes and the scripts must agree on is defined here once
--- and read by both. Never write one of these names or sizes as a literal
--- anywhere else: that is what keeps the two stages consistent.
+-- Shared by prototypes and scripts: never written as a literal elsewhere.
 
--- Prototype names. car, charger, garage and chest each name an entity, its
--- item and its recipe. They are stored in saved games: renaming one removes
--- it from every existing save. The names shown in game are in locale/, one
--- file per language: a new or renamed prototype needs its line in each.
+-- Stored in saves (renaming one drops it from them) and keys of locale/ (a line per language).
+-- car, charger, garage and chest each name an entity, its item and its recipe.
 config.names = {
 	car = "autonomous_car",
 	charger = "autonomous_car_charger",
 	garage = "autonomous_car_garage",
-	charger_post = "autonomous_car_charger_post", -- sprite of a charging post and animation of the arcs at its tip, drawn around a charger (see charger_visual.lua)
+	charger_post = "autonomous_car_charger_post", -- drawn around a charger (charger.lua)
 	charger_arc = "autonomous_car_charger_arc",
 	charger_post_shadow = "autonomous_car_charger_post_shadow",
-	charger_support = "autonomous_car_charger_support", -- followed by _tl, _tr, _bl or _br: the corner of the post
-	garage_door = "autonomous_car_garage_door", -- sprites drawn over a garage while its door moves (see garage_door.lua)
+	charger_support = "autonomous_car_charger_support", -- + _tl, _tr, _bl or _br
+	garage_door = "autonomous_car_garage_door", -- drawn while a garage door moves (garage.lua)
 	garage_interior = "autonomous_car_garage_interior",
-	chest_interior = "autonomous_car_chest_interior", -- sprite drawn over a supply chest while its hatch opens (see chest_door.lua); the hatch itself is the sprite "<chest name>_door"
+	chest_interior = "autonomous_car_chest_interior", -- drawn while a hatch moves (chest.lua); the hatch is "<chest name>_door"
 	chest = "autonomous_car_chest", -- supply chest
-	delivery_chest = "autonomous_car_delivery_chest", -- supply chest that requests from the logistic network what the cars lack (see logistic.lua)
-	return_chest = "autonomous_car_return_chest", -- supply chest the robots empty: the cars deposit their leftovers in it first
-	link = "autonomous_car_link", -- invisible-collision constant combinator beside a garage or a charger that puts their state on the circuit network (see circuit.lua)
-	signal_subgroup = "autonomous_car_signals", -- row of the signals menu
-	signals = { -- virtual signals of the links (see circuit.lua)
+	delivery_chest = "autonomous_car_delivery_chest", -- requester (chest.lua)
+	return_chest = "autonomous_car_return_chest", -- active provider: cars deposit there first
+	link = "autonomous_car_link", -- puts a garage or charger on the circuit network (circuit.lua)
+	signal_subgroup = "autonomous_car_signals",
+	signals = { -- of the links
 		free_places = "autonomous_car_signal_free_places", -- garage
 		health = "autonomous_car_signal_health", -- garage
-		charge = "autonomous_car_signal_charge", -- garage: average charge of the parked cars
-		buffer = "autonomous_car_signal_buffer", -- charger: charge of its buffer
+		charge = "autonomous_car_signal_charge", -- garage
+		buffer = "autonomous_car_signal_buffer", -- charger
 		power = "autonomous_car_signal_power", -- charger
 		users = "autonomous_car_signal_users", -- charger
 	},
-	locked_slot ="autonomous_car_locked_slot", -- hidden item that no inventory takes: the filter of a locked slot (see _utils.set_filters)
-	fuel = "autonomous_car_fuel", -- hidden fuel item of the car, and its fuel category
-	subgroup = "autonomous_car", -- row of the crafting menu
-	ghost_selector = "autonomous_car_ghost_selector", -- selection tool
+	locked_slot = "autonomous_car_locked_slot", -- hidden item no inventory takes: filter of a locked slot
+	fuel = "autonomous_car_fuel", -- hidden fuel item and its category
+	subgroup = "autonomous_car",
+	ghost_selector = "autonomous_car_ghost_selector",
 	ghost_selector_shortcut = "autonomous_car_ghost_selector_shortcut",
-	ghost_selector_input = "autonomous_car_ghost_selector_input", -- key binding
-	missing_items_shortcut = "autonomous_car_missing_items_shortcut", -- shows or hides the window of missing items
-	next_task_event = "autonomous_car_next_task", -- custom event, see _utils.raise_next_task
-	turret = "autonomous_car_turret", -- hidden turret that follows each armed car and shoots for it, see armed.lua
-	technology = "autonomous_car", -- research that unlocks the mod's items; also the prefix of the others (see config.upgrades)
-	repair_technology = "autonomous_car_repair", -- research that makes the garages repair the parked cars, with repair packs
+	ghost_selector_input = "autonomous_car_ghost_selector_input",
+	missing_items_shortcut = "autonomous_car_missing_items_shortcut",
+	next_task_event = "autonomous_car_next_task", -- _utils.raise_next_task
+	turret = "autonomous_car_turret", -- hidden turret of an armed car (armed.lua)
+	technology = "autonomous_car", -- also the prefix of the upgrades
+	repair_technology = "autonomous_car_repair",
 }
 
-config.car_size = {width = 0.7, length = 1} -- collision box of the car; the maneuver probes are derived from it
--- Values the researches raise (see _utils.get_upgrade): a list per key, the first value without
--- research, then one more per research (technology <names.technology>_<key>_<level>, level 1 first).
--- A cluster of ghosts never needs more cargo slots than the current value.
+config.car_size = {width = 0.7, length = 1} -- collision box; the maneuver probes derive from it
+config.car_color = {r = 0.28, g = 0.40, b = 0.58, a = 0.5} -- given to each car built (a prototype has none); icon and remnants share it
+-- Raised by research (_utils.get_upgrade): value without, then per level (<names.technology>_<key>_<level>).
 config.upgrades = {
-	cargo = {20, 30, 40}, -- trunk slots of a car for its cargo (the battery slot comes after them)
-	garage = {30, 40, 50}, -- cars a garage holds
-	chargers = {2, 4, 8}, -- cars that can use the same charger at once; its buffer follows (charger_control.update_buffer)
-	charge_speed = {0.5, 1, 2}, -- charge transfer per tick, relative to the full charge duration
-	build_speed = {0.5, 1, 2}, -- build attempts per config.build_interval
+	cargo = {20, 30, 40}, -- trunk slots for cargo (the battery slot follows)
+	garage = {30, 40, 50}, -- cars per garage
+	chargers = {2, 4, 8}, -- cars per charger at once
+	charge_speed = {0.5, 1, 2}, -- relative to full_charge_duration
+	build_speed = {0.5, 1, 2}, -- build attempts per build_interval
 }
-config.car_inventory_size = config.upgrades.cargo[#config.upgrades.cargo] + 1 -- trunk slots of the prototype: the most cargo plus the battery slot; a filter locks the slots after the battery slot (see _utils.set_trunk_limits)
-config.armed_technology = "military" -- vanilla research after which the cars carry their gun (see _utils.is_armed)
-config.battery_item = "battery" -- item a car burns when its tank is almost empty; the last trunk slot is reserved for it
-config.ammo_items = {"uranium-rounds-magazine", "piercing-rounds-magazine", "firearm-magazine"} -- ammo a car takes from a supply chest, strongest first: it fills an empty slot with the strongest one the chest holds and swaps a weaker one for a stronger one (see ghost_control.restock)
-config.repair_kit_slots = 2 -- slots of a garage for repair packs, after its car, battery and ammo slots; locked until config.names.repair_technology is researched
+config.car_inventory_size = config.upgrades.cargo[#config.upgrades.cargo] + 1 -- most cargo plus the battery slot; later slots locked (_utils.set_trunk_limits)
+config.armed_technology = "military" -- the cars carry their gun after it (_utils.is_armed)
+config.battery_item = "battery" -- burnt when the tank is almost empty; last trunk slot
+config.ammo_items = {"uranium-rounds-magazine", "piercing-rounds-magazine", "firearm-magazine"} -- strongest first (ghost_control.restock)
+config.repair_kit_slots = 2 -- locked before repair_technology
 config.repair_kit = "repair-pack"
-config.garage_inventory_size = 3 + config.repair_kit_slots -- slots of the prototype: the slot that takes a car to park, the battery slot and the ammo slot (they refill the selected car), then the repair pack slots (see garage_control.update_inventory)
-config.charger_buffer_capacity = "60MJ" -- of the prototype; the script sets the real size from the number of users (charger_control.update_buffer)
+config.garage_inventory_size = 3 + config.repair_kit_slots -- car, battery, ammo, then repair packs (garage_control.update_inventory)
+config.charger_buffer_capacity = "60MJ" -- of the prototype; charger_control.update_buffer sets the real size
 config.charger_input_flow_limit = "1600kW"
 
 -- ============================================================
--- Steering (see movement.drive_tick)
+-- Steering (movement.drive_tick)
 -- ============================================================
--- Each tick a moving car scores three headings - straight, slightly right and
--- slightly left - from sample points one tile apart ahead of it, and steers to
--- the cheapest. A sample point costs the distance left from there to the
--- target, relative to the car's own (so about 1), plus what steering_cost adds.
+-- Three headings (straight, ± lookahead.angle) scored by sample points one tile apart: distance left
+-- to the target relative to the car's own (about 1), plus steering_cost.
 
 config.lookahead = {
-	angle = 1 / 12, -- between the straight heading and each side heading; also the width of the sectors and arcs of the maneuvers and clearings
-	side_offset = config.car_size.width, -- the straight heading is sampled along two lines, this far on each side of the car
-	start = 1.3, -- distance of the first sample point. Its minimum is about 1.11: half the car length plus the
-		-- furthest a corner of the car reaches from its centre (hypot(length / 2, width / 2) = 0.61). Closer, the point overlaps
-		-- the car itself, the heading counts as blocked and the car does not steer toward it. Checked at the end of this file.
-	length = 4, -- distance covered by the sample points beyond the first one; also the spacing of the points kept on a path
+	angle = 1 / 12, -- of the side headings; also the sectors and arcs of maneuvers and clearings
+	side_offset = config.car_size.width, -- the straight heading is sampled on two lines this far each side
+	start = 1.3, -- first sample point; minimum about 1.11 (half length + half diagonal), else it overlaps the car (assert)
+	length = 4, -- covered by the next points; also the spacing of the points kept on a path
 	speed_bonus = 2, -- extra length above speed.fast
 }
-config.slow_lookahead = { -- replaces start and length of lookahead in slow mode: a finer look-ahead
-	start = 1.6, -- above the minimum of lookahead.start (checked at the end): closer, a sample on a side heading overlaps the car
-		-- itself when the car is turned, and the car stops steering that way (cause of circles and long detours, see CLAUDE.md)
+config.slow_lookahead = { -- finer, in slow mode
+	start = 1.6, -- closer, a side sample overlaps the turned car: circles and long detours (assert)
 	length = 2,
 }
 config.steering_cost = {
-	blocked = 3, -- added for a sample point where the car would not fit, and again in front of a moving car
-	density = 1.5, -- weight of the obstacle density summed further along the heading (and of a maneuver's heading)
-	path_deviation = 1, -- added, per car width, for a sample point further than path.corridor from the segment of the path being followed
-	margin = 0.5, -- added, per side, for a sample point with an obstacle about a car width beside it: keeps the car off the walls
+	blocked = 3, -- point where the car does not fit; again in front of a moving car
+	density = 1.5, -- weight of the density further along the heading (and of a maneuver heading)
+	path_deviation = 1, -- per car width beyond path.corridor from the followed segment
+	margin = 0.5, -- per side, obstacle about a car width beside a point: keeps off the walls
 }
-config.arrival_distance = 6 -- a car this close to its destination has arrived and can act on it
-config.rails = { -- a car that arrives with a rail beside it first drives off the rails (movement.start_retreat): a train would hit it
-	scan = 3, -- side of the square around the arrived car that is searched for rails
-	clearance = 3.5, -- the spot it retreats to has no rail closer than this
-	reach = 2, -- the car has reached that spot this close to it (arrival_distance is too coarse for a few tiles; 1.5 left the car stopping 1.5 to 1.6 short, in a maneuver loop)
-	search_radius = 8, -- how far from its destination that spot is looked for
+config.arrival_distance = 6
+config.rails = { -- an arrived car with a rail beside it drives off first (movement.start_retreat)
+	scan = 3, -- side of the square searched for rails
+	clearance = 3.5, -- no rail closer to the retreat spot
+	reach = 2, -- spot reached this close (1.5: the car stopped short, maneuver loop)
+	search_radius = 8, -- around the destination
 }
-config.emergency_brake_lookahead = 3 -- an obstacle this far straight ahead triggers emergency braking, and keeps a maneuver from ending
+config.emergency_brake_lookahead = 3 -- obstacle this far ahead: emergency braking; also keeps a maneuver from ending
 
 -- ============================================================
--- Obstacle density (see movement.lua)
+-- Obstacle density (movement.lua)
 -- ============================================================
--- Entities per square tile in a disc, counting those the car collides with.
--- A disc centred on the car counts the car itself: about 0.035 with the radius
--- below. movement.update_mode blends that disc (weight 2) with one further
--- ahead (weight 1): on open ground its density is about 0.024, not 0. Keep
--- this in mind when setting a density threshold: fast_density and
--- dense_area_threshold here, maneuver.exit_density further down.
+-- Colliding entities per square tile in a disc. The car counts itself: about 0.035 in a disc on it,
+-- 0.024 in the blended density (disc on the car × 2, disc ahead × 1). Mind it in the thresholds.
 
 config.density = {
-	radius = 3, -- radius of the discs
-	lookahead_steps = 5, -- steering sums the density of discs 0 to N ahead of the car, laid end to end
+	radius = 3,
+	lookahead_steps = 5, -- steering sums discs 0 to N ahead, end to end
 }
-config.fast_density = { -- blended density of fast mode
-	enter = 0.03, -- below it the car cruises fast
-	leave = 0.05, -- above it it stops doing so; two thresholds, so the mode does not flicker
+config.fast_density = { -- blended density of fast mode; two thresholds: no flicker
+	enter = 0.03,
+	leave = 0.05,
 }
-config.dense_area_threshold = 0.12 -- blended density above which the area is very dense: slow mode
-config.built_zone_distance = 6 -- a car within this of anything built by its force (walls, gates, buildings) is in a built zone:
-	-- slow mode, unless the car may stay in normal mode beside it (see normal_beside_built_distance)
-config.normal_beside_built_distance = 6 -- in a built zone the car stays in normal mode while its target (waypoint or
-	-- destination) is ahead, further than this, not a gate, and the straight line to it is free
+config.dense_area_threshold = 0.12 -- above: slow mode
+config.built_zone_distance = 6 -- this close to something built by its force: slow mode (see the next one)
+config.normal_beside_built_distance = 6 -- built zone: normal mode while the target is ahead, further than this, not a gate, line free
 
 -- ============================================================
--- Speed and driving modes (see movement.update_mode)
+-- Speed and driving modes (movement.update_mode)
 -- ============================================================
--- Three modes of speed: fast (low density, far from anything built), slow
--- (built or very dense areas, and a moment after an emergency stop on an
--- obstacle, a maneuver or the end of a path) and normal (otherwise).
+-- fast (low density, far from anything built), slow (built or very dense, and medium_delay after an
+-- emergency stop, a maneuver or a path end), normal otherwise.
 
 config.speed = {
-	stopped = 0.01, -- below this the car counts as stopped: it has arrived, its emergency braking is over, it stalls
-	slow = 0.1, -- a car that leaves fast mode brakes down to the speed it entered it at, but never below this
-	fast = 0.25, -- above this the car looks further ahead (see lookahead.speed_bonus)
+	stopped = 0.01, -- below: stopped (arrived, braking over, stalled)
+	slow = 0.1, -- leaving fast mode, the car brakes to its entry speed, not below this
+	fast = 0.25, -- above: longer look-ahead (lookahead.speed_bonus)
 }
-config.braking_duration = 30 -- (0.5s) ticks of travel at the current speed: a car whose destination is nearer than that brakes,
-	-- and is not in fast mode; also the length of the zone kept free in front of a moving car
+config.braking_duration = 30 -- (0.5s) of travel: a nearer destination brakes the car (no fast mode); also the zone kept free ahead
 
--- car.friction_modifier scales the friction of the car prototype: more friction
--- means a lower cruising speed. It is rebuilt from these factors every tick
--- (see movement.update_mode), so it cannot drift. The game also multiplies it by
--- the friction of the tile under the car: the factors below are divided by that
--- friction, except the emergency one, so a mode has the same speed on any tile.
+-- Factors of car.friction_modifier (higher: slower), rebuilt every tick (no drift) and divided by the
+-- tile friction the game applies too (except emergency): same speed on any tile.
 config.friction = {
-	fast = 0.1, -- fast mode: cruising in an open area
-	normal = 1, -- normal mode: the friction of the car prototype
-	slow = 4, -- slow mode
-	maneuver = 10, -- maneuvers, U-turns and the wait for a path: much slower than slow mode
-	emergency = 100, -- emergency braking, on top of the mode
+	fast = 0.1,
+	normal = 1,
+	slow = 4,
+	maneuver = 10, -- maneuvers, U-turns, wait for a path
+	emergency = 100, -- on top of the mode
 }
 
 -- ============================================================
--- Path (see movement.lua, "Path")
+-- Path (movement.lua, "Path")
 -- ============================================================
--- A path from the game's pathfinder, asked for when the maneuver fails or the
--- leg lasts too long (failure request, the rescue path), or by a driving car in a
--- built or very dense area whose destination is out of the cone ahead of it
--- (guided request).
+-- From the game pathfinder: rescue (maneuver failed, leg too long) or guided (built or dense area,
+-- destination out of the cone ahead).
 
 config.path = {
-	margin = 0.4, -- added around the car's box in a request: the path keeps that much further off the walls,
-		-- and a gap of one tile (narrower than the box) is no passage
-	corridor = 2.5, -- distance to the followed segment within which steering has no deviation cost (steering_cost.path_deviation)
-	pass_radius = 8, -- a waypoint is also passed once the car is past its plane within this distance:
-		-- a car that cannot turn to it in time would drive by and circle back
-	u_turn_angle = 0.35, -- the current waypoint further off the car's heading than this, and nearer than pass_radius,
-		-- makes the car back up in a U-turn (see movement.drive_tick). 0.25 made cars back into the trees of a forest at bends
-	density_factor = 0.3, -- factor of steering_cost.density while the car follows a path, which already avoids what is in the way:
-		-- the density ahead no longer pulls the car off it
-	max_requests = 3, -- failure requests per leg (maneuver failed or leg too long)
-	goal = { -- where a path goes, failure or guided (see movement.choose_path_goal)
-		range = 40, -- a destination further than this is not the goal: a point at this distance in its direction is,
-			-- where the density is lowest. The straight line to a target is checked over at most this (movement.is_way_open)
-		sectors = 3, -- directions tried on each side of the bearing of the destination, `step` apart, for that point
-		step = 1 / 12, -- turns between two of these directions
-		angle_cost = 0.1, -- density equivalent of one such step away from the destination
-		radius = 5, -- how close to the goal the pathfinder must get (LuaSurface.request_path radius): a little under arrival_distance,
-		-- so that the path ends where the car counts as arrived. At 3 a goal hemmed in by buildings (a garage in a crowded room)
-		-- had no free spot within reach: no path, and the car circled the walls until it was stuck
+	margin = 0.4, -- added around the car box: further off the walls, no one-tile gaps
+	corridor = 2.5, -- no deviation cost within this of the followed segment
+	pass_radius = 8, -- a waypoint whose plane is behind within this is passed (else the car circles back)
+	u_turn_angle = 0.35, -- waypoint nearer than pass_radius and further off the heading: U-turn (0.25: backed into trees)
+	density_factor = 0.3, -- factor of steering_cost.density on a path, which already avoids obstacles
+	max_requests = 3, -- rescue requests per leg
+	goal = { -- movement.choose_path_goal
+		range = 40, -- further destination: the goal is the least dense point this far toward it; also the reach of movement.is_way_open
+		sectors = 3, -- directions tried each side, `step` apart
+		step = 1 / 12,
+		angle_cost = 0.1, -- density equivalent of one step off
+		radius = 5, -- pathfinder goal radius, under arrival_distance (3: no path to a garage in a crowded room)
 	},
 }
 config.path_trigger = { -- guided path
-	half_angle = 0.2, -- half the cone ahead of the car: 72 degrees on each side
-	min_distance = config.arrival_distance, -- no guided request once the car has arrived; a larger value leaves a ring
-		-- where the car is neither arrived nor allowed to ask (a destination behind a wall corner: it turned in circles)
-	max_requests = 10, -- guided requests per leg
+	half_angle = 0.2, -- half cone ahead (72°)
+	min_distance = config.arrival_distance, -- larger: a ring where the car may neither arrive nor ask (circles)
+	max_requests = 10, -- per leg
 }
-config.gate_waypoints = { -- how a path is reshaped where it crosses a gate (see movement.add_gate_waypoints)
-	clear = 7, -- the path points that run along the wall are pushed out from it, up to this distance opposite the gate
-		-- (less further along: see ramp), so that the car comes at the gate on a bend, not along the wall
-	ramp = 12, -- tiles along the wall over which that push fades out
-	near = 3, -- the point in front of the gate, on its axis
-	exit = 3, -- the point past the gate
+config.gate_waypoints = { -- movement.add_gate_waypoints
+	clear = 7, -- path points along the wall pushed out up to this, fading over `ramp`: the gate is taken on a bend
+	ramp = 12,
+	near = 3, -- point in front of the gate, on its axis
+	exit = 3, -- point past the gate
 }
 
 -- ============================================================
--- Maneuver (see movement.maneuver_tick)
+-- Maneuver (movement.maneuver_tick)
 -- ============================================================
--- Slow driving, forwards or backwards, to get out of a dense area or away from an
--- obstacle. It does not head for the destination: it picks a heading (the
--- roomiest and least dense direction around the car), then drives one of six
--- arcs (forward or backward, each straight, left or right) at a time to turn
--- toward it. A maneuver lasts at most idle_delay.
+-- Slow driving toward a heading (roomiest, least dense), one of six arcs at a time; at most idle_delay.
 
 config.maneuver = {
-	-- Free room is measured with probes the size of the car, placed along a heading
-	-- half a car length apart (see car_size): they overlap, so even a thin wall
-	-- cannot sit unseen between two of them.
-	probe = {
-		start = 1.5, -- distance of the first probe; must stay above the car length, or the car would detect itself
-		length = 4, -- distance covered by the probes beyond the first one
-		near_radius = 0.6, -- the gap between the car and the first probe is searched apart, in a disc of this radius
+	probe = { -- car-sized, half a car length apart: no thin wall unseen
+		start = 1.5, -- above car length (assert): the car would detect itself
+		length = 4,
+		near_radius = 0.6, -- the gap before the first probe is searched in this disc
 	},
-	exit_density = 0.08, -- a maneuver cannot end while the density around the car is above this:
-		-- with the default radius, that is the car and one other entity at most (see "Obstacle density")
-	min_travel = 2, -- a maneuver ends only once the car has moved this far
+	exit_density = 0.08, -- no end above it (the car and one entity at most)
+	min_travel = 2, -- no end before this distance
 }
 
 -- ============================================================
--- Clearing (see movement.lua, "Clearing")
+-- Clearing (movement.lua, "Clearing")
 -- ============================================================
--- Last resort of a car no maneuver and no path frees: it destroys the trees and
--- rocks in its way, for at most idle_delay.
+-- Last resort: the car destroys the trees and rocks in its way, at most idle_delay.
 
 config.clearing = {
-	lookahead = 8, -- tiles looked at along each heading to count the trees and rocks it would cross;
-		-- also the radius around the car within which one must stand for a clearing to start
-	radius = 0.8, -- radius of the discs searched along a heading for that count
-	clear_radius = 1.3, -- trees and rocks within this of the car, and of the points up to `reach` ahead of it, are destroyed
-	reach = 2.5, -- tiles ahead of the car where trees and rocks are destroyed
-	travel = 15, -- the clearing ends once the car has moved this far
-	obstacle_cost = 0.01, -- cost of a heading per tree or rock on it, in turns of deviation from the destination
-	max_count = 10, -- clearings per leg
+	lookahead = 8, -- trees and rocks counted along each heading; one within this starts a clearing
+	radius = 0.8, -- of the discs of that count
+	clear_radius = 1.3, -- destroyed within this of the car and of the points up to `reach` ahead
+	reach = 2.5,
+	travel = 15, -- ends after this distance
+	obstacle_cost = 0.01, -- per tree or rock on a heading, in turns off the destination
+	max_count = 10, -- per leg
 }
 
 -- ============================================================
--- Fleeing (see control.lua, handle_danger)
+-- Fleeing (control.lua, handle_danger)
 -- ============================================================
--- A moving or building car that meets an enemy (a force other than its own and the
--- neutral one: biters, worms, spawners, enemy turrets) drops its leg and drives to
--- the closest charger or garage lying away from it, else a point straight away from it.
--- It waits there, then resumes its batch.
 
 config.flee = {
-	radius = 40, -- an enemy military target this close makes the car flee
-	max_refuge_distance = 150, -- a charger or garage is a refuge within this distance and the car's reachable fuel; without one the car drives this far straight away from the enemy
-	max_count = 3, -- flights per batch: past it the car abandons its batch (the site is too dangerous), then ignores enemies
-		-- until it has a new one
+	radius = 40, -- enemy military target this close: flight
+	max_refuge_distance = 150, -- charger or garage away from the enemy, within this and the reachable fuel; else this far straight away
+	max_count = 3, -- flights per batch; then the batch is abandoned and enemies ignored until a new one
 }
 
 -- ============================================================
 -- Shared delays
 -- ============================================================
--- Every "wait, then retry or re-evaluate" in the mod uses one of these five
--- delays, grouped by time scale. Reuse the closest one instead of adding a
--- constant, and list the new usage here.
+-- Every wait or retry uses one of these; a new usage goes in its list.
 
 config.short_delay = 30 -- (0.5s)
-	-- movement.update_mode: emergency braking cannot start again this soon after a stop; pace at which a car without a path
-	--   checks the straight line to its destination
-	-- movement.drive_tick: a car that stands still this long after a leg began or a maneuver ended has hit something; a U-turn
-	--   that stalls this long ends
-	-- movement.maneuver_tick: a car that drives but does not move this long backs off; an arc and a back-off last this long, and
-	--   the heading of a maneuver or a clearing is looked for again this often
-	-- movement.on_path_finished: a request the pathfinder could not take yet is sent again after this
-	-- travel.handle_critical_fuel: pause between two charger searches when none is reachable; period of the critical level
-	--   measure while the tank holds much more than it
-	-- control.lua: period at which the open windows (missing items, car and garage panels) are refreshed; an idle car's
-	--   decision is spread over this after idle_delay, by unit number
-	-- circuit_control.refresh: period of the links of the garages and chargers
-	-- charger_visual.refresh: period at which the arcs of the chargers follow the cars that charge
-	-- config.garage_door: move_ticks, hold and enter_delay derive from it
-	-- game_trace: a moving car is sampled every half of this
+	-- movement.update_mode: no emergency braking again this soon after a stop; check of the straight line without a path
+	-- movement.drive_tick: standing still this long after a leg start or a maneuver: hit something; a stalled U-turn ends
+	-- movement.maneuver_tick: driving without moving this long: back-off; length of an arc and of a back-off; heading of a
+	--   maneuver or clearing chosen again
+	-- movement.on_path_finished: retry of a request the pathfinder could not take
+	-- travel.handle_critical_fuel: retry without reachable charger; critical check while the tank holds much more
+	-- control.lua: refresh of the open windows; spread of an idle car's decision (by unit number)
+	-- circuit_control.refresh: period of the links
+	-- charger_control.refresh_arcs: period of the arcs
+	-- config.garage_door: move_ticks, hold, enter_delay
+	-- game_trace: moving cars sampled every half of it
 config.medium_delay = 180 -- (3s)
-	-- ghost_control.attempt_one_ghost: cooldown of a ghost that failed to revive, times the number of failures
-	-- movement.update_mode: slow mode lasts this long after an emergency stop on an obstacle, a maneuver or the end of a path
-	-- movement.start_path_request: wait between two path requests
-	-- garage_control.can_release_car: window in which a garage lets at most garage_exit.exits cars out
-	-- logistic_control.update_requests: period of the passes over the delivery chests
+	-- ghost_control.attempt_one_ghost: cooldown of a failed ghost, times its failures
+	-- movement.update_mode: slow mode after an emergency stop, a maneuver or a path end
+	-- movement.start_path_request: between two requests
+	-- garage_control.can_release_car: window of garage_exit.exits
+	-- chest_control.update_requests: period of the delivery passes
 config.idle_delay = 300 -- (5s)
-	-- control.lua: wait before an idle car looks for a new task or a garage (ghost_control.go_idle, travel.handle_empty and a
-	--   new car set it as already elapsed, so that the car decides on the next tick)
-	-- movement.maneuver_tick: longest a maneuver may last, its single try; past it the car asks for a path, then clears its
-	--   way, then is stuck
-	-- movement: longest a clearing or a U-turn may last
+	-- control.lua: an idle car looks for a task or a garage (set as elapsed by ghost_control.go_idle, travel.handle_empty
+	--   and a new car: decision next tick)
+	-- movement.maneuver_tick: longest maneuver, a single try; then path, clearing, stuck
+	-- movement: longest clearing or U-turn
 config.long_delay = 600 -- (10s)
-	-- ghost_control.proceed: a batch waits this long for missing items before the clusters lacking them go back to the pending
-	--   pool; ghost_control.wait_for_phase: a batch held back by an earlier phase gives way after this
-	-- movement.wait_for_path: longest wait for the answer of the pathfinder
-	-- control.lua: period of the fallback scan of pending clusters and of the repair of parked cars
-	-- charger_control.update_buffers: period at which a charger's buffer and posts follow the research
-	-- travel.stuck_tick: wait before a stuck car tries its leg again
-	-- travel.is_leg_too_long: margin added to the expected duration of a leg
-	-- control.lua (on_next_task): a car that fled waits this long at its refuge before resuming
-	-- selection_preview.show: lifetime of the count next to the cursor, should the game not report the end of the selection
+	-- ghost_control.proceed: wait for missing items before their clusters go back; ghost_control.wait_for_phase: a batch
+	--   held by an earlier phase gives way
+	-- movement.wait_for_path: longest wait for the pathfinder
+	-- control.lua: fallback scan of pending clusters, repair of parked cars; wait of a car at its refuge
+	-- charger_control.update_buffers: buffer and posts follow the research
+	-- travel.stuck_tick: wait before a stuck car retries
+	-- travel.is_leg_too_long: margin over the expected duration
+	-- gui.show_selection_preview: lifetime of the count by the cursor if the end of the selection is not reported
 config.very_long_delay = 3600 -- (60s)
-	-- ghost_control.requeue_ghost: a ghost given up after max_revive_attempts waits this long in the pending pool before any
-	--   car may take it again, so that the cars do not all gather on a ghost that cannot be built
-	-- travel.mark_unreachable: a car that has found no way to recharge for this long abandons its task: its batch goes back
-	--   to the pending pool
+	-- ghost_control.requeue_ghost: a ghost given up after max_revive_attempts waits this long before a car may take it
+	-- travel.mark_unreachable: without a way to recharge this long, the car abandons its task
 
--- Measurements that need not happen every tick are repeated this often, offset
--- per car (_utils.is_slow_check_due): gates opened ahead, moving cars nearby,
--- built things nearby, obstacle density and tile friction of a moving car (so its
--- driving mode reacts up to this late), critical fuel level. Raise it if the mod slows the game
--- down: every player gets the same behaviour.
+-- Checks that need not run every tick, offset per car (_utils.is_slow_check_due): gates, nearby cars and
+-- buildings, density and tile friction (the mode reacts up to this late), critical fuel.
 config.slow_check_interval = 6 -- (0.1s)
-	-- tooltips.refresh: period of the tooltip lines of the entity under each player's cursor
-	-- _utils.set_trunk_limits, armed.update (ammo slot, and the hidden turret follows the car), garage_control.update_inventories:
-	--   filters and car slot put back (no event tells that a player changed them)
+	-- gui.refresh_tooltips: period of the tooltip lines
+	-- _utils.set_trunk_limits, armed.update, garage_control.update_inventories: filters and slots put back (no event)
 
--- Regions of the closest-entity search (_utils.find_closest): the chargers, garages and supply chests are
--- listed per square of `size` tiles, and the search looks at the squares around the position first; the
--- answer is always the closest entity, the regions only save looking at the far ones.
+-- Closest-entity search (_utils.find_closest): chargers, garages and supply chests indexed per square,
+-- the nearest squares first; the answer is always the closest.
 config.regions = {
 	size = 64, -- tiles
-	rings = 2, -- squares around the position's own that are looked at before falling back to every entity
+	rings = 2, -- rings of squares looked at before every entity is
 }
 
 -- ============================================================
--- Construction (see construction.lua)
+-- Construction (construction.lua)
 -- ============================================================
 
-config.cluster_radius = 10 -- max distance between two neighbouring ghosts of a cluster
-config.selection_ghosts_per_tick = 200 -- ghosts read, put in a grid or clustered in one tick (ghost_control.step_selection), and the most a cluster holds: a big selection is handled over several ticks
-config.assignments_per_tick = 2 -- cars that get a batch in one tick (ghost_control.retry_pending_clusters): filling a batch reads every ghost, so a big selection is given out over several ticks
-config.logistic_per_tick = 20 -- cars looked at, then delivery chests given their requests, in one tick (logistic_control.update_requests)
-config.build_interval = 6 -- ticks between two build attempts, so a batch visibly goes up one entity at a time
-config.max_revive_attempts = 3 -- failed attempts on a ghost before it goes back to the pending pool
-config.step_back_distance = 30 -- how far a car backs away when every ghost left is on a retry cooldown.
-	-- Must stay above arrival_distance, or the car would count as arrived without moving.
-config.chest_group_radius = 1.5 -- supply chests this close to each other form one group: reaching one gives access to all
+config.cluster_radius = 10 -- max distance between neighbouring ghosts of a cluster
+config.selection_ghosts_per_tick = 200 -- per tick in each selection phase (ghost_control.step_selection); also the most per cluster
+config.assignments_per_tick = 2 -- batches given per tick (ghost_control.retry_pending_clusters)
+config.logistic_per_tick = 20 -- cars, then delivery chests, per tick (chest_control.update_requests)
+config.build_interval = 6 -- between two build attempts
+config.max_revive_attempts = 3 -- failures before a ghost goes back to the pending pool
+config.step_back_distance = 30 -- back-off when every ghost left is on cooldown (assert)
+config.chest_group_radius = 1.5 -- supply chests this close form a group: reaching one reaches all
 
 -- ============================================================
--- Fuel and charging (see scripts/charger.lua, travel.lua)
+-- Fuel and charging (charger.lua, travel.lua)
 -- ============================================================
 
-config.full_charge_duration = 900 -- (15s) time to fill an empty tank; the transfer per tick is derived from it and the tank capacity
--- High estimate of the fuel a trip of d tiles burns, used to decide whether it needs a charging detour and where the
--- critical level lies (see scripts/charger.lua; measured on 364 trips of 5 to 11000 tiles, `range-*` scenarios):
--- fixed + near_per_tile * min(d, near_distance) + far_per_tile * the rest.
--- Covers about 90% of the short trips of the test scenarios (traps included) and all the long ones.
+config.full_charge_duration = 900 -- (15s) empty to full
+-- High estimate for d tiles: fixed + near_per_tile * min(d, near_distance) + far_per_tile * the rest
+-- (364 trips of 5 to 11000 tiles, `range-*`: about 90% of the short trips covered, all the long ones).
 config.fuel_estimate = {
-	fixed = 50000, -- the fixed margin of a trip
-	near_per_tile = 2500, -- per tile over the first near_distance tiles
+	fixed = 50000,
+	near_per_tile = 2500,
 	near_distance = 100,
-	far_per_tile = 450, -- per tile beyond (measured 165 to 315 on long trips, at most 490)
+	far_per_tile = 450, -- measured 165 to 315 on long trips, at most 490
 }
--- Charging posts and arcs drawn around a charger by scripts/charger_visual.lua: one post per place
--- (config.upgrades.chargers), an arc at the tip of the post a car charges on. Offsets in tiles from the charger.
+-- Posts and arcs of a charger (charger.lua), in tiles from it. Corners in the order of the places (2: top
+-- left and bottom right, 4: the other diagonal); at 8 each post splits on the vertices of a support at its
+-- corner (charger.png: 50 px each side of the centre, 135 and 70 px above the bottom, 64 px per tile).
 config.charger_visual = {
-	-- Corners of the body, in the order the posts appear with the research: 2 places = top left and bottom
-	-- right, 4 = the other diagonal too. With 4 places or fewer the post stands on the corner, alone; with
-	-- 8 it splits in two and a support lies at each corner: a quadrilateral with one vertex at the corner
-	-- and a post on each of the two neighbouring vertices.
-	-- (measured on charger.png: 50 pixels either side of the centre, 135 and 70 pixels above the bottom
-	-- of the sprite, 189 pixels high; 64 pixels per tile)
 	posts = {{x = -0.78, y = -0.98}, {x = 0.78, y = 0.04}, {x = 0.78, y = -0.98}, {x = -0.78, y = 0.04}},
-	-- 8 places: slots i (sideways vertex) and i + 4 (vertical vertex) come from post i; filled below
-	split_posts = {},
-	-- distances of the neighbouring vertices of the support (graphics/charger/source/support.png) from its
-	-- corner vertex, towards the left and the top for the top left corner; the other corners mirror it
-	sideways = {x = 0.34, y = 0.02},
+	split_posts = {}, -- slots i (sideways vertex) and i + 4 (vertical vertex) from post i, filled below
+	sideways = {x = 0.34, y = 0.02}, -- vertices of the support from its corner vertex (top left; others mirrored)
 	vertical = {x = 0.05, y = 0.25},
-	support = {x = 0.15, y = 0.12}, -- centre of the support from its corner vertex, away from the body
-	post_height = 0.64, -- height of the post sprite (graphics/charger/post.png: 90 pixels drawn at scale 0.5 * 41 / 90, 32 pixels per tile)
-	tip = 0.62, -- height of its tip above its foot
-	shadow = {x = 0.35, y = -0.04}, -- centre of the shadow of a post from its foot (graphics/charger/post-shadow.png: it starts at the foot and falls to the right)
+	support = {x = 0.15, y = 0.12}, -- centre of the support from its corner vertex
+	post_height = 0.64, -- post.png: 90 px at scale 0.5 * 41 / 90
+	tip = 0.62, -- above the foot
+	shadow = {x = 0.35, y = -0.04}, -- centre of post-shadow.png from the foot
 }
 for i, corner in ipairs(config.charger_visual.posts) do
-	local side_x, side_y = corner.x < 0 and -1 or 1, corner.y < -0.5 and -1 or 1 -- which corner it is
+	local side_x, side_y = corner.x < 0 and -1 or 1, corner.y < -0.5 and -1 or 1
 	local visual = config.charger_visual
 	visual.split_posts[i] = {x = corner.x + side_x * visual.sideways.x, y = corner.y + side_y * visual.sideways.y}
 	visual.split_posts[i + #visual.posts] = {x = corner.x - side_x * visual.vertical.x, y = corner.y + side_y * visual.vertical.y}
 end
-config.max_charge_detours = 5 -- consecutive charging detours before the destination is reported unreachable
-config.critical_fuel_ratio = 0.1 -- below this fraction of a full tank a car drops everything to recharge.
-	-- Also the charge of a new car.
-config.critical_check_fuel_ratio = 0.8 -- above this fraction of a full tank a car does not look for the critical level at all: it is certainly near a charger
-config.battery_fuel_ratio = config.critical_fuel_ratio / 2 -- fraction of a full tank that one battery gives
-config.battery_trigger_ratio = config.critical_fuel_ratio / 4 -- below this fraction of a full tank a car burns a battery; an empty car resumes above it
-config.pre_park_fuel_ratio = 0.9 -- an idle car below this fraction tops up before it parks
+config.max_charge_detours = 5 -- in a row before the destination is unreachable
+config.critical_fuel_ratio = 0.1 -- below: the car drops everything to recharge; charge of a new car
+config.critical_check_fuel_ratio = 0.8 -- above: no critical check (a charger is near)
+config.battery_fuel_ratio = config.critical_fuel_ratio / 2 -- one battery
+config.battery_trigger_ratio = config.critical_fuel_ratio / 4 -- below: a battery burns; an empty car resumes above
+config.pre_park_fuel_ratio = 0.9 -- below: an idle car tops up before parking
 
 -- ============================================================
--- Stuck (see travel.lua, "Stuck")
+-- Stuck (travel.lua, "Stuck")
 -- ============================================================
 
 config.stuck = {
-	min_speed = 0.1, -- lowest average speed expected over a leg; bounds how long the leg may last (travel.is_leg_too_long)
-	max_retries = 3, -- times a car retries a stuck leg before it abandons its task (a leg to a charger is retried without limit)
-	abandon_delay = 1800, -- (30s) a car out of retries waits this long for the player, then abandons its task:
-		-- its ghosts are released and must be selected again (see travel.stuck_tick, ghost_control.abandon)
+	min_speed = 0.1, -- lowest average speed of a leg: bounds its duration (travel.is_leg_too_long)
+	max_retries = 3, -- then the task is abandoned (unlimited to a charger)
+	abandon_delay = 1800, -- (30s) last wait, then the ghosts are released (travel.stuck_tick)
 }
 
 -- ============================================================
--- Garage (see scripts/garage.lua)
+-- Garage and chests (garage.lua, chest.lua)
 -- ============================================================
 
--- Door animation of scripts/garage_door.lua. The geometry follows the door box that
--- graphics/garage/make_garage.py prints, in tiles from the position of the garage: the sprite is
--- drawn at scale 0.5 (32 pixels per tile) with a shift of (-0.25, -19.5) pixels.
+-- Door, in tiles from the garage (sprite at scale 0.5, shift (-0.25, -19.5) px); redo if the sprite changes.
 config.garage_door = {
-	x = -0.023, -- centre of the door
-	top = -0.125, -- top edge of the door, which stays in place while it lifts
-	rows = 129, -- height of the door image in pixels (a tile is 64 pixels at scale 0.5)
-	open_scale = 0.12, -- share of the door still seen under its top edge once lifted (its hazard strip), the rest slid out of sight
-	move_ticks = config.short_delay, -- time to open or to close, one sprite per tick (prototypes/garage.lua)
-	hold = 2 * config.short_delay, -- time it stays open
-	enter_delay = config.short_delay + 10, -- a car that parks stays in view this long after the door starts to open
+	x = -0.023, -- centre
+	top = -0.125, -- top edge, fixed while the door lifts
+	rows = 129, -- height of door.png in pixels (64 per tile)
+	open_scale = 0.12, -- share still seen once lifted (hazard strip)
+	move_ticks = config.short_delay, -- to open or close, one sprite per tick (prototypes/garage.lua)
+	hold = 2 * config.short_delay, -- open
+	enter_delay = config.short_delay + 10, -- a parking car stays in view this long after the door starts to open
 }
-config.garage_door.height = config.garage_door.rows / 64 -- height of the closed door, in tiles
+config.garage_door.height = config.garage_door.rows / 64
 
--- Rows of the door image slid above its top edge (cut off) after `step` of move_ticks ticks of opening.
+-- Rows of door.png cut off after `step` ticks of opening.
 function config.garage_door.hidden_rows(step)
 	local door = config.garage_door
 	return math.floor(step / door.move_ticks * door.rows * (1 - door.open_scale) + 0.5)
 end
 
--- Hatch animation of scripts/chest_door.lua. The geometry follows graphics/chest/make_chests.py: the chest
--- sprite is drawn at scale 0.5 (64 pixels per tile) with a shift of (0, -2) pixels, and the hatch is its pixels
--- 13 to 53 by 36 to 58 (hinges on the left), in tiles from the position of the chest.
+-- Hatch, in tiles from the chest (sprite at scale 0.5, shift (0, -2) px; hatch: pixels 13 to 53 by 36 to 58);
+-- redo if the sprite changes.
 config.chest_door = {
-	left = -0.3125, -- left edge of the hatch, which stays in place (its hinges) while it opens
-	top = -0.0781, -- top edge
-	width = 0.6406, -- width of the closed hatch
+	left = -0.3125, -- hinges
+	top = -0.0781,
+	width = 0.6406, -- closed
 	height = 0.3594,
-	open_scale = 0.12, -- width of the open hatch, relative to the closed one
-	move_ticks = 7, -- time to open or to close, like the logistic chests of the game (robot_door.opened_duration)
-	transfer_delay = 10, -- time from the arrival of a car to the transfer, the hatch being open by then
+	open_scale = 0.12, -- open width / closed width
+	move_ticks = 7, -- like the game's logistic chests (opened_duration)
+	transfer_delay = 10, -- from the arrival of a car to the transfer, the hatch open by then
 }
 
 config.garage_exit = { -- free spot where a garage releases a car
-	radius = 8, -- how far around the garage to look
-	precision = 0.25, -- step of that search
-	exits = 4, -- cars a garage lets out within medium_delay of its first exit: more would collide and start their trip badly
+	radius = 8,
+	precision = 0.25,
+	exits = 4, -- cars per medium_delay: more collide and start badly
 }
-config.garage_repair_rate = 0.01 -- fraction of its health a parked car recovers every long_delay while the garage holds a repair pack, which wears out with it
+config.garage_repair_rate = 0.01 -- health fraction per long_delay with a repair pack, which wears as much
 
 -- ============================================================
 -- Consistency checks
 -- ============================================================
--- Relations between the values above that the code relies on. A value that
--- breaks one stops the mod from loading, with the message, instead of making
--- the cars misbehave in game.
+-- Relations the code relies on: a broken one stops the mod from loading.
 
 assert(config.maneuver.probe.start > config.car_size.length,
 	"config.maneuver.probe.start must be above config.car_size.length: the car would detect itself")
@@ -471,8 +389,7 @@ assert(config.step_back_distance > config.arrival_distance,
 assert(config.rails.clearance >= config.rails.scan / 2 + config.rails.reach and config.rails.search_radius > config.rails.clearance,
 	"config.rails: a car that stops within reach of its spot must not see rails in its scan (clearance >= scan / 2 + reach), and the search radius must cover the clearance")
 
--- The first sample point of a heading must lie beyond the car's own box, or the
--- car would detect itself.
+-- The first sample point lies beyond the car's own box.
 local car_reach = config.car_size.length / 2 + math.sqrt((config.car_size.length / 2) ^ 2 + (config.car_size.width / 2) ^ 2)
 assert(config.lookahead.start >= car_reach,
 	"config.lookahead.start must be above half the car length plus its half diagonal: the first sample point would overlap the car")

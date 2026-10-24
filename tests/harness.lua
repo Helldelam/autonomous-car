@@ -1701,7 +1701,7 @@ scenarios["circuit-links"] = {
 	end,
 }
 
--- Logistic interface (logistic.lua). A supply chest holds 2 wooden chests, a delivery chest and a
+-- Logistic interface (chest.lua). A supply chest holds 2 wooden chests, a delivery chest and a
 -- return chest stand apart. A car takes a batch of 5 wooden chest ghosts: after it took the 2, the
 -- delivery chest requests the 3 left (EVENT t=600); the robots are played at t = 700 by 3 wooden
 -- chests put in the delivery chest, and the car finishes (EVENT ghosts left). A second, idle car
@@ -3524,7 +3524,7 @@ local function install_profiler()
 			"start_selection", "step_selection", "try_assign_pending", "proceed", "register_ghost"}},
 		{"garage_control", garage_control, {"release_car", "update_inventories", "repair_parked_cars"}},
 		{"circuit_control", circuit_control, {"refresh"}},
-		{"logistic_control", logistic_control, {"update_requests"}},
+		{"chest_control", chest_control, {"update_requests"}},
 		{"charger_control", charger_control, {"update_buffers"}},
 	} do
 		for _, name in ipairs(spec[3]) do
@@ -3580,8 +3580,8 @@ local call_counts = {}
 for module_name, module in pairs{
 	movement = movement, travel = travel, charger_control = charger_control,
 	garage_control = garage_control, ghost_control = ghost_control,
-	_utils = _utils, ["_utils.deque"] = _utils.deque, gui = gui, garage_gui = garage_gui, car_gui = car_gui,
-	circuit_control = circuit_control, logistic_control = logistic_control,
+	_utils = _utils, ["_utils.deque"] = _utils.deque, gui = gui,
+	circuit_control = circuit_control, chest_control = chest_control,
 } do
 	for name, fn in pairs(module) do
 		if type(fn) == "function" then

@@ -1,9 +1,5 @@
--- Autonomous car: a small car with the look of the base game car, a trunk and
--- no fuel slot. Its burner only accepts the hidden fuel item (config.names.fuel),
--- which the scripts use as a battery. Its name, size and trunk come from
--- config.lua, which the scripts read too. Its colour is not a prototype
--- property: on_built in control.lua sets it on each car.
--- TODO: modified spidertron (legs, no collision), as a replacement or an upgrade of the car; check it fits the game's technologies. See "À faire" in CLAUDE.md.
+-- Autonomous car (look of the base game car, trunk, no fuel slot: its burner takes only the hidden
+-- fuel item), then the hidden turret of an armed car. The colour is set on each car (control.lua).
 local config = require("config")
 local names = config.names
 local hit_effects = require("__base__/prototypes/entity/hit-effects")
@@ -13,7 +9,6 @@ local item_sounds = require("__base__.prototypes.item_sounds")
 
 local icon = "__autonomous-car__/graphics/car/icon.png"
 
--- The car is as wide as config.car_size.width and as long as its length.
 local half_width, half_length = config.car_size.width / 2, config.car_size.length / 2
 local box = {{-half_width, -half_length}, {half_width, half_length}}
 
@@ -27,7 +22,7 @@ local car = {
 	max_health = 250,
 	is_military_target = true,
 	deliver_category = "vehicle",
-	dying_explosion = "gun-turret-explosion", -- the explosion of the car of the game is sized for a car twice as big; this one (metal particles within half a tile) fits
+	dying_explosion = "gun-turret-explosion", -- the base car's is sized for a car twice as big
 	alert_icon_shift = util.by_pixel(0, -13),
 	energy_per_hit_point = 1,
 	collision_mask = {layers={player=true}},
@@ -52,7 +47,7 @@ local car = {
 	selection_box = box,
 	damaged_trigger_effect = hit_effects.entity(),
 	effectivity = 0.6,
-	braking_force = (50 * 1000) / 60, -- a braking power of 50 kW (energy per tick, as the base game car writes its 200 kW)
+	braking_force = (50 * 1000) / 60, -- 50 kW, per tick (as the base car writes its 200 kW)
 	energy_source =
 	{
 		type = "burner",
@@ -297,8 +292,8 @@ local car = {
 	rotation_snap_angle = 0.015,
 	weight = 100,
 	inventory_size = config.car_inventory_size,
-	guns = {"vehicle-machine-gun"}, -- gun and ammo slots: the car shoots only once the force has researched Military (see "Armed car" in CLAUDE.md)
-	allow_passengers = false, -- no player interaction: nobody rides it
+	guns = {"vehicle-machine-gun"}, -- shoots after Military, through the turret below (armed.lua)
+	allow_passengers = false,
 	trash_inventory_size = 0, -- no logistics tab
 	track_particle_triggers = movement_triggers.car,
 	water_reflection = car_reflection(1),
@@ -314,7 +309,7 @@ local item = {
 	pick_sound = item_sounds.robotic_inventory_pickup,
 	drop_sound = item_sounds.robotic_inventory_move,
 	place_result = names.car,
-	stack_size = 1 -- the item carries the state of a car out of a garage (tags, health)
+	stack_size = 1 -- carries the state of a car out of a garage (tags, health)
 }
 
 local recipe = {
@@ -331,8 +326,7 @@ local recipe = {
 	results = {{type = "item", name = names.car, amount = 1}}
 }
 
--- The remnants of the car of the game, in the colour of the car (graphics/car/make_car.py bakes its mask layer) and at
--- the scale of the car (0.25: the game draws its own at 0.5).
+-- Remnants of the base car, mask baked in the car colour, at the car's scale (0.25, not 0.5).
 require("prototypes.corpse")(car, "car-remnants", "__autonomous-car__/graphics/car/remnants/car-remnants.png",
 	function(corpse, animations)
 		for _, animation in pairs(animations) do
@@ -346,3 +340,45 @@ require("prototypes.corpse")(car, "car-remnants", "__autonomous-car__/graphics/c
 	end)
 
 data:extend{car, item, recipe}
+
+-- Hidden turret on an armed car that fires its ammo (a script cannot make a car shoot): a gun turret
+-- nothing collides with, unseen, unselectable, untargetable, without item.
+local empty = {filename = "__core__/graphics/empty.png", width = 1, height = 1, frame_count = 1, direction_count = 1}
+
+local turret = table.deepcopy(data.raw["ammo-turret"]["gun-turret"])
+turret.name = names.turret
+turret.flags = {"placeable-off-grid", "not-on-map", "not-blueprintable", "not-deconstructable", "not-repairable", "hide-alt-info", "not-in-kill-statistics"}
+turret.hidden = true
+turret.hidden_in_factoriopedia = true
+turret.minable = nil
+turret.placeable_by = nil
+turret.fast_replaceable_group = nil
+turret.corpse = nil
+turret.dying_explosion = nil
+turret.create_ghost_on_death = false
+turret.is_military_target = false
+turret.selectable_in_game = false
+turret.alert_when_attacking = false
+turret.alert_when_damaged = false
+turret.collision_mask = {layers = {}}
+turret.collision_box = {{0, 0}, {0, 0}}
+turret.selection_box = {{0, 0}, {0, 0}}
+turret.circuit_connector = nil
+turret.circuit_wire_max_distance = nil
+turret.icon_draw_specification = nil
+turret.icons_positioning = nil
+turret.graphics_set = {}
+turret.base_picture = nil
+turret.folded_animation = empty
+turret.preparing_animation = empty
+turret.prepared_animation = empty
+turret.attacking_animation = empty
+turret.folding_animation = empty
+turret.preparing_sound = nil
+turret.folding_sound = nil
+turret.open_sound = nil
+turret.close_sound = nil
+turret.damaged_trigger_effect = nil
+turret.attack_parameters.range = 20 -- that of the base car's machine gun
+
+data:extend{turret}

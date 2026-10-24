@@ -1,11 +1,8 @@
 local config = require("config")
 local _utils = require("scripts._utils")
 
--- Armed cars. A car cannot be told to shoot by script (its shooting_state is for
--- characters only) and has nobody aboard, so a hidden turret (config.names.turret)
--- follows each car once the force has researched Military and fires for it.
--- The ammo slot of the car is the source of truth: the turret holds a copy, and
--- what it fires is taken from the slot.
+-- Armed cars: a script cannot make a car shoot, so after Military a hidden turret follows each car
+-- and fires a copy of its ammo slot, which is the reference (what the turret fires leaves it).
 local armed = {}
 
 local function destroy_turret(car_data)
@@ -16,13 +13,10 @@ local function destroy_turret(car_data)
 	car_data.turret_ammo = nil
 end
 
--- Makes the turret of a car match its state: created when the force has researched
--- Military, moved onto the car, its ammo set to the content of the ammo slot
--- (less what it fired since the last call). A car that is not armed or has no ammo
--- has no turret (an empty turret shows a red warning icon).
+-- Every slow_check_interval: turret on the car with the ammo of the slot; none without Military or
+-- ammo (an empty turret shows a warning icon).
 function armed.update(car, car_data)
-	-- The gun and ammo slots belong to the prototype and cannot be hidden: until Military
-	-- the ammo slot is locked like the other slots that are not available yet.
+	-- the ammo slot cannot be hidden: locked before Military
 	_utils.set_filters(car, car.get_inventory(defines.inventory.car_ammo), function()
 		return not _utils.is_armed(car) and config.names.locked_slot or nil
 	end)
@@ -47,7 +41,7 @@ function armed.update(car, car_data)
 	local inventory = turret.get_inventory(defines.inventory.turret_ammo)
 	local ammo = _utils.get_ammo(car)
 
-	-- What the turret fired since the last call leaves the slot of the car.
+	-- what it fired since the last call leaves the slot
 	local last = car_data.turret_ammo
 	if last and ammo and last.name == ammo.name then
 		local fired = last.count - inventory.get_item_count{name = last.name, quality = last.quality}
@@ -59,7 +53,7 @@ function armed.update(car, car_data)
 	end
 
 	if not ammo then
-		destroy_turret(car_data) -- the turret fired its last magazine
+		destroy_turret(car_data) -- last magazine fired
 	elseif inventory.get_item_count{name = ammo.name, quality = ammo.quality} ~= ammo.count then
 		inventory.clear()
 		inventory.insert{name = ammo.name, quality = ammo.quality, count = ammo.count}
@@ -69,7 +63,7 @@ function armed.update(car, car_data)
 	end
 end
 
--- Removes the turret of a car that is gone or parked.
+-- Car gone or parked.
 function armed.release(car_data)
 	destroy_turret(car_data)
 end

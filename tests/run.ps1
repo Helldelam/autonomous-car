@@ -96,28 +96,24 @@ $categories = @($info.Values | ForEach-Object { $_.Category } | Select-Object -U
 function Get-ChangedCategories {
 	$files = @(git -C $modFolder diff --name-only HEAD) + @(git -C $modFolder ls-files --others --exclude-standard)
 	$regression = @($categories | Where-Object { $_ -ne "scalability" })
-	# Drawing only: a change can cause a script error, not another trace. Construction opens chests
-	# and garages, robustness and energy remove some while they are open.
-	$drawing = @("construction", "robustness", "energy")
+	# Hatches and delivery chests: construction visits chests, robustness and energy remove some while
+	# they are open (a drawing can cause a script error, not another trace).
+	$chests = @("construction", "robustness", "energy")
 	# Loading is all there is to check: the tests have no player, and harness.lua hands the selections
 	# to on_area_selected itself.
 	$loading = @("energy")
 	$narrow = @{
 		"scripts/armed.lua" = @("robustness") # only acts after Military
-		"scripts/logistic.lua" = @("construction") # delivery chests
-		"scripts/chest_door.lua" = $drawing
-		"scripts/garage_door.lua" = $drawing
-		"scripts/charger_visual.lua" = @("energy")
-		"prototypes/signals.lua" = $loading
-		"prototypes/missing_items.lua" = $loading
-		"prototypes/ghost_selector.lua" = $loading
+		"scripts/chest.lua" = $chests
+		"scripts/gui.lua" = $loading
+		"scripts/game_trace.lua" = $loading
+		"prototypes/shortcuts.lua" = $loading
 		"prototypes/corpse.lua" = $loading
 		"info.json" = $loading
 	}
 	$picked = @()
 	foreach ($file in $files) {
 		if ($narrow.ContainsKey($file)) { $picked += $narrow[$file] }
-		elseif ($file -like "scripts/gui/*" -or $file -like "scripts/debug/*") { $picked += $loading }
 		elseif ($file -like "scripts/*.lua" -or $file -like "prototypes/*.lua" -or $file -in @("control.lua", "config.lua", "data.lua", "tests/harness.lua")) { $picked += $regression }
 	}
 	return @($categories | Where-Object { $picked -contains $_ })
@@ -166,7 +162,7 @@ function Install-Mod([string]$variant, [string]$source) {
 	}
 	$modsFolder = Join-Path $Output "mods-$variant"
 	$target = Join-Path $modsFolder $modName
-	robocopy $source $target /MIR /XD tests .backup .github .git /NFL /NDL /NJH /NJS /NP | Out-Null
+	robocopy $source $target /MIR /XD tests .github .git /NFL /NDL /NJH /NJS /NP | Out-Null
 	if ($LASTEXITCODE -ge 8) {
 		throw "Could not copy '$source' to '$target' (robocopy exit code $LASTEXITCODE)."
 	}

@@ -1,27 +1,22 @@
 local util = require("util")
 local config = require("config")
 
--- Shared helpers: car fuel, closest-entity search, slow checks, the waiting
--- state, deque, item keys (name and quality), alerts, entity cleanup and the
--- next-task event.
+-- Shared helpers: fuel, closest entity, slow checks, waiting, deque, item keys, research, trunk,
+-- ammo, alerts, entity release, next-task event.
 local _utils = {}
 
 -- ============================================================
 -- Fuel
 -- ============================================================
--- The car is electric in spirit. Its burner has no fuel slot and always burns
--- one hidden fuel item: burner.remaining_burning_fuel is the charge, and the
--- fuel value of that item is the tank capacity. The charge is read and written
--- through these helpers only.
+-- No fuel slot: the burner always burns one hidden item, whose fuel value is the tank and
+-- remaining_burning_fuel the charge. A burner that runs dry loses the item and ignores any write:
+-- read and write the charge here only.
 
--- Puts the fuel item in the car's burner. Without it the burner ignores any
--- write to remaining_burning_fuel.
 function _utils.set_fuel_item(car)
 	car.burner.currently_burning = config.names.fuel
 end
 
--- Tank capacity. A burner that ran dry loses its fuel item, so this also puts
--- it back.
+-- Also puts the item back.
 function _utils.get_fuel_capacity(car)
 	local burner = car.burner
 	if not burner.currently_burning then
@@ -30,31 +25,26 @@ function _utils.get_fuel_capacity(car)
 	return burner.currently_burning.name.fuel_value
 end
 
--- Charge left in the tank.
 function _utils.get_fuel(car)
 	return car.burner.remaining_burning_fuel
 end
 
--- Charge left, as a fraction of the tank capacity.
 function _utils.get_fuel_ratio(car)
-	local capacity = _utils.get_fuel_capacity(car) -- read first: it puts the fuel item back
+	local capacity = _utils.get_fuel_capacity(car) -- first: puts the item back
 	return _utils.get_fuel(car) / capacity
 end
 
--- Sets the charge of the tank.
 function _utils.set_fuel(car, fuel)
-	_utils.get_fuel_capacity(car) -- puts the fuel item back if needed: without it the write is ignored
+	_utils.get_fuel_capacity(car) -- puts the item back, else the write is ignored
 	car.burner.remaining_burning_fuel = fuel
 end
 
 -- ============================================================
 -- Closest entity
 -- ============================================================
+-- storage.regions[group].cells[surface index]["x,y"] = {[id] = true}, x and y the position divided
+-- by config.regions.size; the entities never move: listed when built, unlisted when released.
 
--- The entities of a group (storage.chargers, storage.garages, storage.supply_chests) are also
--- listed by region: storage.regions[group].cells[surface index]["x,y"] = {[id] = true}, x and y being
--- the position divided by config.regions.size. They never move, so they are listed when built
--- (add_to_regions) and unlisted when released (remove_from_regions, by the release handlers).
 local function get_region_key(position)
 	local size = config.regions.size
 	return math.floor(position.x / size), math.floor(position.y / size)
@@ -90,14 +80,9 @@ function _utils.remove_from_regions(group, id)
 	end
 end
 
--- Closest valid entity of `group` (name of a table of storage, [id] = entity) on `surface` to
--- `position`, or nil. `accept(entity, id)`, if given, tells whether an entity may be chosen. A stale
--- entity is released as `kind` (see "Entity cleanup") when a kind is given, and just skipped
--- otherwise. Of two entities at the same distance, either may win.
--- The regions around the position are looked at first, own region then ring by ring; ring r is at
--- least (r - 1) regions away, so the search stops once the best entity is closer than the next ring
--- can be. Without a proven answer after config.regions.rings rings, every entity of the group is
--- looked at (the answer is then the same as without regions, just slower).
+-- Closest valid entity of storage[group] on `surface` that `accept(entity, id)` takes, or nil; a
+-- stale one is released as `kind` if given. Rings of regions first (ring r is at least r - 1 regions
+-- away: stop once the best is closer), then, without a proven answer, every entity.
 function _utils.find_closest(group, position, accept, kind, surface)
 	local entities = storage[group]
 	local best, best_distance
@@ -150,25 +135,15 @@ function _utils.find_closest(group, position, accept, kind, surface)
 end
 
 -- ============================================================
--- Slow checks
+-- Slow checks and waiting
 -- ============================================================
 
--- True on the ticks when an entity (car, garage, charger) does its periodic work (slow
--- measurements of a car, circuit signals...): every config.slow_check_interval ticks (or every
--- `interval`, for a job that can wait longer), offset by the id of the entity so that they
--- do not all work on the same tick.
+-- Every slow_check_interval (or `interval`) ticks, offset by unit number.
 function _utils.is_slow_check_due(entity, tick, interval)
 	return (tick + entity.unit_number) % (interval or config.slow_check_interval) == 0
 end
 
--- ============================================================
--- Waiting state
--- ============================================================
-
--- Hands a car to the waiting loop of control.lua (see end_wait), which decides
--- what it does next once config.idle_delay has passed since `since` (the
--- current tick by default). A wait that should end on the next tick starts
--- config.idle_delay ago.
+-- control.lua end_wait decides idle_delay after `since` (default now; idle_delay ago: next tick).
 function _utils.start_waiting(car_data, since)
 	car_data.waiting.active = true
 	car_data.waiting.since = since or game.tick
@@ -177,7 +152,7 @@ end
 -- ============================================================
 -- Deque
 -- ============================================================
--- Double-ended queue: its values sit at indices head to tail - 1 of `items`.
+-- Values at indices head to tail - 1 of `items`.
 
 _utils.deque = {}
 
@@ -199,7 +174,7 @@ function _utils.deque.push_back(deque, value)
 	deque.tail = deque.tail + 1
 end
 
--- The deque must not be empty.
+-- Not on an empty deque.
 function _utils.deque.pop_front(deque)
 	local value = deque.items[deque.head]
 	deque.items[deque.head] = nil
@@ -214,10 +189,8 @@ end
 -- ============================================================
 -- Item keys
 -- ============================================================
--- An item is identified by its name and its quality. The key used in tables
--- ([key] = count) is the plain name for the normal quality, so most keys read
--- as before, and "name|quality" for any other. Quality is a name (string), a
--- LuaQualityPrototype, or nil for normal.
+-- Key of an item in [key] = count tables: the name for normal quality, "name|quality" otherwise.
+-- Quality: a name, a LuaQualityPrototype, or nil (normal).
 
 function _utils.make_item_key(name, quality)
 	local quality_name = type(quality) == "string" and quality or (quality and quality.name)
@@ -227,7 +200,7 @@ function _utils.make_item_key(name, quality)
 	return name .. "|" .. quality_name
 end
 
--- Name and quality name (nil for normal) of an item key.
+-- Name and quality (nil for normal).
 function _utils.split_item_key(key)
 	local name, quality = key:match("^(.-)|(.+)$")
 	if name then
@@ -236,19 +209,18 @@ function _utils.split_item_key(key)
 	return key, nil
 end
 
--- A stack definition for insert / remove / can_insert.
+-- For insert, remove, can_insert.
 function _utils.make_stack(key, count)
 	local name, quality = _utils.split_item_key(key)
 	return {name = name, quality = quality or "normal", count = count}
 end
 
--- Items of a key in an inventory (only that quality).
 function _utils.get_item_count(inventory, key)
 	local name, quality = _utils.split_item_key(key)
 	return inventory.get_item_count{name = name, quality = quality or "normal"}
 end
 
--- The records of LuaInventory.get_contents() as a table of [key] = count.
+-- [key] = count.
 function _utils.get_contents(inventory)
 	local contents = {}
 	for _, item in pairs(inventory.get_contents()) do
@@ -259,21 +231,15 @@ function _utils.get_contents(inventory)
 end
 
 -- ============================================================
--- Batteries
+-- Research and trunk
 -- ============================================================
--- The battery slot only takes batteries (set_trunk_limits): the player puts them there
--- to recharge an empty car (travel.handle_empty). They are not cargo: the helpers below
--- tell the cargo of a car from them.
--- The prototype has the slots of the largest trunk (config.upgrades.cargo). The slots
--- above the cargo size the force has researched are locked by a filter that nothing
--- matches (config.names.locked_slot), and the battery slot comes right after the cargo slots,
--- so a research enlarges every car, existing ones included, without replacing it. The
--- trunk of a car has no bar (set_bar fails: "does not have a bar").
+-- The prototype has the largest trunk: the battery slot follows the researched cargo slots, the
+-- next ones are locked by a filter nothing matches (names.locked_slot); a research enlarges every
+-- car without replacing it (a car trunk has no bar). Batteries are not cargo.
 
 local BATTERY = {name = config.battery_item, quality = "normal"}
 
--- Research cache of a force: the values below are read from the technologies once and
--- kept in storage.research until a research changes (clear_research_cache).
+-- storage.research[force index], until a research changes.
 local function get_research_cache(force)
 	local cache = storage.research[force.index]
 	if not cache then
@@ -283,8 +249,7 @@ local function get_research_cache(force)
 	return cache
 end
 
--- Value of `key` of config.upgrades for the cars, chargers and garages of `force`:
--- the one of the last level whose research is done.
+-- config.upgrades[key] at the last researched level.
 function _utils.get_upgrade(force, key)
 	local cache = get_research_cache(force)
 	local value = cache[key]
@@ -301,7 +266,6 @@ function _utils.get_upgrade(force, key)
 	return value
 end
 
--- True once the force has researched `name`, a technology that only the script reads.
 function _utils.is_researched(force, name)
 	local cache = get_research_cache(force)
 	if cache[name] == nil then
@@ -310,15 +274,13 @@ function _utils.is_researched(force, name)
 	return cache[name]
 end
 
--- Forgets what the script read from the research of a force whose research changed.
 function _utils.clear_research_cache(force)
 	if storage.research then
 		storage.research[force.index] = nil
 	end
 end
 
--- Puts a filter on an inventory slot (nil clears it). What the slot held and does not match
--- goes to the other slots, or to the ground.
+-- nil clears it; what the slot held and does not match goes to other slots, or to the ground.
 local function set_slot_filter(entity, inventory, slot, name)
 	local stack = inventory[slot]
 	local other
@@ -335,13 +297,12 @@ local function set_slot_filter(entity, inventory, slot, name)
 	end
 end
 
--- True if the filter of `slot` is `name` (nil: no filter).
 local function has_filter(inventory, slot, name)
 	local filter = inventory.get_filter(slot)
 	return (filter and filter.name) == name
 end
 
--- Sets the filter of every slot of an inventory to `wanted(slot)`, only where it differs.
+-- Filter of each slot = wanted(slot), set only where it differs.
 function _utils.set_filters(entity, inventory, wanted)
 	for slot = 1, #inventory do
 		local name = wanted(slot)
@@ -351,9 +312,7 @@ function _utils.set_filters(entity, inventory, wanted)
 	end
 end
 
--- Sets the filters of the trunk of a car: batteries only in the battery slot, nothing in the
--- slots after it. Safe to call again: the player may have changed a filter, and no event
--- tells, so on_tick calls it every config.slow_check_interval. Every slot is compared.
+-- Battery slot, then locked slots; every slow_check_interval (no event for a changed filter).
 function _utils.set_trunk_limits(car)
 	local trunk = car.get_inventory(defines.inventory.car_trunk)
 	local battery_slot = _utils.get_upgrade(car.force, "cargo") + 1
@@ -365,17 +324,16 @@ function _utils.set_trunk_limits(car)
 	end)
 end
 
--- Batteries a car can burn at most, as fuel: the battery slot adds to the charge.
+-- Charge plus the batteries.
 function _utils.get_reachable_fuel(car)
 	return _utils.get_fuel(car) + _utils.get_battery_count(car) * config.battery_fuel_ratio * _utils.get_fuel_capacity(car)
 end
 
--- Batteries in the trunk of a car.
 function _utils.get_battery_count(car)
 	return car.get_inventory(defines.inventory.car_trunk).get_item_count(BATTERY)
 end
 
--- Removes up to `count` batteries from the trunk; returns how many.
+-- Returns how many were removed.
 function _utils.remove_batteries(car, count)
 	if count <= 0 then
 		return 0
@@ -383,7 +341,6 @@ function _utils.remove_batteries(car, count)
 	return car.get_inventory(defines.inventory.car_trunk).remove{name = BATTERY.name, quality = BATTERY.quality, count = count}
 end
 
--- Puts `count` batteries in the trunk (the battery slot takes them).
 function _utils.insert_batteries(car, count)
 	if count <= 0 then
 		return 0
@@ -391,13 +348,12 @@ function _utils.insert_batteries(car, count)
 	return car.get_inventory(defines.inventory.car_trunk).insert{name = BATTERY.name, quality = BATTERY.quality, count = count}
 end
 
--- True if the trunk holds nothing but batteries.
 function _utils.is_cargo_empty(car)
 	local trunk = car.get_inventory(defines.inventory.car_trunk)
 	return trunk.get_item_count() - trunk.get_item_count(BATTERY) <= 0
 end
 
--- The cargo of a trunk as `get_contents` ([key] = count), without the batteries.
+-- [key] = count, batteries excluded.
 function _utils.get_cargo_contents(trunk)
 	local contents = _utils.get_contents(trunk)
 	contents[BATTERY.name] = nil
@@ -407,16 +363,13 @@ end
 -- ============================================================
 -- Ammo
 -- ============================================================
--- An armed car has one ammo slot (the car_ammo inventory of its gun, which only
--- takes bullet ammo). armed.lua gives it a hidden turret that fires that ammo.
+-- One slot (car_ammo), fired by the hidden turret of armed.lua.
 
--- True once the force of the car has researched config.armed_technology (cached, see
--- get_research_cache).
 function _utils.is_armed(car)
 	return _utils.is_researched(car.force, config.armed_technology)
 end
 
--- Stack in the ammo slot of a car ({name, quality, count}), or nil.
+-- {name, quality, count} or nil.
 function _utils.get_ammo(car)
 	local stack = car.get_inventory(defines.inventory.car_ammo)[1]
 	if stack.valid_for_read then
@@ -425,7 +378,6 @@ function _utils.get_ammo(car)
 	return nil
 end
 
--- Takes the ammo out of the slot; returns the stack (see get_ammo) or nil.
 function _utils.remove_ammo(car)
 	local ammo = _utils.get_ammo(car)
 	if ammo then
@@ -434,7 +386,7 @@ function _utils.remove_ammo(car)
 	return ammo
 end
 
--- Puts `count` of the ammo `ammo` ({name, quality}) in the slot; returns how many went in.
+-- Returns how many went in.
 function _utils.insert_ammo(car, ammo, count)
 	if count <= 0 then
 		return 0
@@ -445,17 +397,14 @@ end
 -- ============================================================
 -- Alerts
 -- ============================================================
--- `item` is the name of the item whose icon marks the alert on the map.
+-- Printed to the force and pinned on `target`, marked by the icon of `item`.
 
--- Prints `message` (a localised string, see locale/*/messages.cfg) to a force and pins it on
--- `target` as a map alert.
 function _utils.alert(force, target, message, item)
 	force.print(message)
 	force.add_custom_alert(target, {type = "item", name = item}, message, true)
 end
 
--- Same, but only once: `flags[key]` remembers that the alert was raised, until
--- alert_reset clears it. Keeps a retry loop from repeating the same alert.
+-- Once until alert_reset: a retry loop does not repeat it.
 function _utils.alert_once(flags, key, force, target, message, item)
 	if flags[key] then
 		return
@@ -469,11 +418,10 @@ function _utils.alert_reset(flags, key)
 end
 
 -- ============================================================
--- Entity cleanup
+-- Entity release and next task
 -- ============================================================
--- control.lua registers one handler per kind of tracked entity ("car",
--- "charger", "garage", "chest"). Any module that finds a stale entity releases
--- it through here, without depending on the modules its cleanup needs.
+-- Handlers registered by control.lua per kind ("car", "charger", "garage", "chest"): any module
+-- releases a stale entity without depending on the modules its cleanup needs.
 
 local release_handlers = {}
 
@@ -485,13 +433,7 @@ function _utils.release_entity(kind, id)
 	release_handlers[kind](id)
 end
 
--- ============================================================
--- Next-task event
--- ============================================================
-
--- Tells control.lua that a car finished its current step (it arrived, or it is
--- fully charged) and should start its next task. This is an event rather than
--- a call because control.lua sits above every other module.
+-- A car arrived or is charged; an event, since control.lua sits above every module.
 function _utils.raise_next_task(car)
 	script.raise_event(prototypes.custom_event[config.names.next_task_event], {entity = car})
 end

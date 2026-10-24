@@ -1,7 +1,5 @@
--- Ghost selector ("Autonomous car selector" in game): the tool a player drags over
--- ghosts and marked entities to hand them to the cars (see on_area_selected in
--- control.lua), with its shortcut and its key binding.
--- Icons: graphics/shortcut/make_shortcuts.py.
+-- Ghost selector (the tool dragged over ghosts and marked entities, control.lua on_area_selected),
+-- its shortcut and key, and the shortcut of the missing items window.
 
 local names = require("config").names
 
@@ -11,17 +9,14 @@ data:extend{
 		name = names.ghost_selector,
 		icon = "__autonomous-car__/graphics/shortcut/selector-icon.png",
 		icon_size = 64,
-		-- Same flags as the deconstruction planner: the item only ever exists in
-		-- the cursor, and is never crafted or stored.
-		flags = {"only-in-cursor", "not-stackable", "spawnable"},
+		flags = {"only-in-cursor", "not-stackable", "spawnable"}, -- like the deconstruction planner
 		hidden = true,
 		subgroup = "tool",
 		order = "z[autonomous-car]-a[ghost-selector]",
 		stack_size = 1,
 		skip_fog_of_war = true,
-		-- Ghosts, and every entity: the flags "deconstruct", "upgrade" and their "cancel-" variants do not
-		-- select what is already marked (they act as filters, and with "cancel-" nothing was selected at
-		-- all), so on_area_selected keeps the marked ones itself (ghost_control.is_target).
+		-- Every entity: the "deconstruct" and "upgrade" modes skip what is already marked, so the script
+		-- keeps the marked ones itself (ghost_control.is_target).
 		select = {
 			border_color = {r = 0, g = 0.6, b = 1},
 			cursor_box_type = "entity",
@@ -33,7 +28,7 @@ data:extend{
 			mode = {"entity-ghost", "tile-ghost", "any-entity"},
 		},
 		always_include_tiles = true,
-		send_pre_selection_events = true, -- the count next to the cursor while dragging (scripts/gui/selection_preview.lua)
+		send_pre_selection_events = true, -- count by the cursor (gui.show_selection_preview)
 	},
 	{
 		type = "shortcut",
@@ -53,5 +48,19 @@ data:extend{
 		key_sequence = "ALT + G",
 		action = "spawn-item",
 		item_to_spawn = names.ghost_selector,
+	}
+}
+
+data:extend{
+	{
+		type = "shortcut",
+		name = names.missing_items_shortcut,
+		order = "z[autonomous-car]-b[missing-items]",
+		action = "lua",
+		toggleable = true,
+		icon = "__autonomous-car__/graphics/shortcut/missing-x56.png",
+		icon_size = 56,
+		small_icon = "__autonomous-car__/graphics/shortcut/missing-x24.png",
+		small_icon_size = 24,
 	}
 }

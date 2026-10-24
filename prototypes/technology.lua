@@ -1,17 +1,8 @@
--- Research of the mod: one technology unlocks the recipes, one makes the garages repair the
--- parked cars, and the others raise a value the script reads (config.upgrades, through
--- _utils.get_upgrade): cargo size, garage capacity, cars per charger, charge speed and
--- build speed. The Military research arms the cars (_utils.is_armed), so it has no
--- technology here.
--- TODO: placeholder costs; adjust them when the mod is balanced.
--- TODO: optional researches: repair speed of the garages, driving speed of the cars (without upsetting
--- their legs), repair pack capacity. See "À faire" in CLAUDE.md.
+-- Researches: recipes, repair of the parked cars, and two levels of each config.upgrades value
+-- (_utils.get_upgrade). Military arms the cars (_utils.is_armed).
 local config = require("config")
 local names = config.names
 
--- Icons (graphics/technology/<name>.png, 256 pixels): the item the research is about, with
--- the small mark of the researches of the base game when it improves a value. Made from the
--- icons of the items and the marks of the base game (graphics/technology/make_icons.py).
 local function icon_of(name)
 	return "__autonomous-car__/graphics/technology/" .. name .. ".png"
 end
@@ -47,14 +38,13 @@ local technologies = {
 		{type = "unlock-recipe", recipe = names.return_chest},
 		{type = "unlock-recipe", recipe = names.garage}
 	}, "e-a-a", "main"),
-	-- The garages repair the parked cars with repair packs (garage_control.update_inventory).
+	-- garage_control.update_inventory, repair_parked_cars
 	create_technology(names.repair_technology, {names.technology, "automation-3"}, production, 150, {
 		{type = "nothing", effect_description = {"effect-description." .. names.repair_technology}}
 	}, "e-a-b", "repair")
 }
 
--- Like "Worker robot cargo size": the effect has no meaning for the game, its description gives
--- the new value. Level 1 needs the main research, level 2 the first level and the production science.
+-- Effect "nothing" whose description gives the value (like "Worker robot cargo size").
 local costs = {
 	cargo = {200, 300},
 	garage = {150, 250},
@@ -68,7 +58,7 @@ for _, key in ipairs{"cargo", "garage", "chargers", "charge_speed", "build_speed
 		local name = names.technology .. "_" .. key .. "_" .. level
 		local prerequisites = level == 1 and {names.technology, "chemical-science-pack"}
 			or {names.technology .. "_" .. key .. "_1", "production-science-pack"}
-		-- Speeds are shown as the factor over the force without the research (x2 then x4); the others as the new value.
+		-- speeds as a factor over no research (x2, x4), the rest as the value
 		local shown = tostring(string.find(key, "speed") and config.upgrades[key][level + 1] / config.upgrades[key][1] or config.upgrades[key][level + 1])
 		local technology = create_technology(name, prerequisites, level == 1 and chemical or production, costs[key][level], {{
 			type = "nothing",

@@ -1,22 +1,20 @@
 local config = require("config")
 local util = require("util")
 
--- Trace of the cars written from a real game, to analyse a behaviour seen there
--- (console command /car-trace). Lines go to script-output/autonomous-car-trace.txt in the
--- Factorio user folder: a sample of each moving car every SAMPLE_INTERVAL ticks, and an
--- EVENT line whenever one of its flags changes. It only reads the state in storage.
+-- /car-trace, off by default: script-output/autonomous-car-trace.txt gets a sample of each moving car
+-- every SAMPLE_INTERVAL ticks and an EVENT line when a flag changes. Read only.
 local game_trace = {}
 
 local FILE = "autonomous-car-trace.txt"
 local SAMPLE_INTERVAL = config.short_delay / 2
-local WATCHED = { -- flags whose change is an event: name = function(car_data) returning a printable value
+local WATCHED = { -- name = function(car_data) returning a printable value
 	moving = function(data) return data.moving.active end,
 	mode = function(data) return data.mode end,
 	maneuver = function(data) return data.maneuver.active end,
 	clearing = function(data) return data.maneuver.clearing end,
 	path = function(data) return data.path.active end,
 	pending = function(data) return data.path.pending end,
-	result = function(data) return data.path.result end, -- answer of the pathfinder: found or none
+	result = function(data) return data.path.result end, -- found or none
 	goal = function(data) return data.path.goal and string.format("%.1f,%.1f", data.path.goal.x, data.path.goal.y) end,
 	u_turn = function(data) return data.path.u_turn ~= nil end,
 	brake = function(data) return data.emergency_brake.active end,
@@ -29,7 +27,7 @@ local function write(line)
 	helpers.write_file(FILE, line .. "\n", true)
 end
 
--- Starts or stops the trace; `car_id` (a unit number) restricts it to one car.
+-- `car_id`: one car only.
 function game_trace.toggle(player, car_id)
 	if storage.game_trace and not car_id then
 		storage.game_trace = nil
@@ -51,7 +49,7 @@ local function describe_target(car, car_data)
 		util.distance(car.position, waypoint), waypoint.axis_x and "G" or "")
 end
 
--- Called every tick for each car, after it has been updated.
+-- Every tick per car, after its update.
 function game_trace.record(car, car_data, tick)
 	local trace = storage.game_trace
 	if not trace or (trace.car_id and trace.car_id ~= car.unit_number) then
@@ -59,7 +57,7 @@ function game_trace.record(car, car_data, tick)
 	end
 	local id = car.unit_number
 	local last = trace.last[id]
-	local first = not last -- the first look at a car only records its flags
+	local first = not last -- only records the flags
 	if first then
 		last = {}
 		trace.last[id] = last

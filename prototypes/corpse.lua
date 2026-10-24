@@ -1,7 +1,5 @@
--- Remnants of an entity of the mod: a copy of the corpse of the entity of the game it looks like, with
--- the remnants image of the mod (graphics/<entity>/remnants, made by the make_*.py scripts) in place of
--- the original. `edit` may change the copy (size and position of the image). The entity must have its
--- icon set already.
+-- Remnants of an entity: a copy of the corpse `source` with the image `filename`; `edit` may change the
+-- copy. The entity's icon must be set already.
 return function(entity, source, filename, edit)
 	local corpse = table.deepcopy(data.raw.corpse[source])
 	corpse.name = entity.name .. "_remnants"

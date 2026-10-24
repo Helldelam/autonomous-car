@@ -1,7 +1,6 @@
--- Supply chest: where cars collect the items of a construction batch and
--- drop off their leftovers. A plain container has no opening animation: it stays closed (the
--- frame 0 of the sheet drawn by graphics/chest/make_chests.py, like the other chests of the mod); the
--- hatch of the three chests opens when a car uses them, drawn by scripts/chest_door.lua.
+-- Supply chest (yellow), then the delivery (requester, blue) and return (active provider, purple)
+-- chests, both supply chests for the cars. A container has no opening animation: frame 0 of the
+-- sheet, the hatch drawn for cars by scripts/chest.lua (for robots and players, the 7 frames).
 
 local names = require("config").names
 local graphics = "__autonomous-car__/graphics/chest/"
@@ -12,7 +11,6 @@ supply_chest.name = names.chest
 supply_chest.minable.result = names.chest
 supply_chest.subgroup = names.subgroup
 supply_chest.icon = icon
--- The remnants of the storage chest (yellow), in the colours of the chest.
 require("prototypes.corpse")(supply_chest, "storage-chest-remnants", graphics .. "remnants/yellow-remnants.png")
 supply_chest.picture = {
 	layers = {
@@ -21,7 +19,7 @@ supply_chest.picture = {
 			priority = "extra-high",
 			width = 66,
 			height = 74,
-			x = 0, -- the first frame, closed
+			x = 0, -- closed
 			shift = util.by_pixel(0, -2),
 			scale = 0.5
 		},
@@ -56,8 +54,7 @@ local supply_chest_recipe = {
 	results = {{type = "item", name = names.chest, amount = 1}}
 }
 
--- Drawn by scripts/chest_door.lua over the closed hatch while a car uses the chest (41 x 23 pixels): the dark
--- inside, shared by the three chests, and the hatch of each, named after its chest.
+-- Drawn over the closed hatch (41 x 23 pixels): the inside, shared, and the hatch of each chest.
 local function hatch_sprite(name, file)
 	return {
 		type = "sprite",
@@ -73,3 +70,38 @@ end
 data:extend{supply_chest, supply_chest_item, supply_chest_recipe,
 	hatch_sprite(names.chest_interior, "interior.png"), hatch_sprite(names.chest .. "_door", "yellow-door.png"),
 	hatch_sprite(names.delivery_chest .. "_door", "blue-door.png"), hatch_sprite(names.return_chest .. "_door", "purple-door.png")}
+
+-- Made from a supply chest and the vanilla chest, which gates it behind the logistic research.
+local function create_chest(name, source, color)
+	local chest = table.deepcopy(data.raw["logistic-container"][source])
+	chest.name = name
+	chest.minable.result = name
+	chest.fast_replaceable_group = nil
+	chest.subgroup = names.subgroup
+	chest.icon = graphics .. color .. "-icon.png"
+	chest.robot_door.animation.layers[1].filename = graphics .. color .. "-sheet.png"
+	require("prototypes.corpse")(chest, source .. "-remnants", graphics .. "remnants/" .. color .. "-remnants.png")
+
+	local item = table.deepcopy(data.raw.item[source])
+	item.name = name
+	item.place_result = name
+	item.subgroup = names.subgroup
+	item.icon = graphics .. color .. "-icon.png"
+	item.stack_size = 10
+
+	local recipe = {
+		type = "recipe",
+		name = name,
+		enabled = false, -- unlocked by names.technology
+		energy_required = 5,
+		ingredients = {
+			{type = "item", name = names.chest, amount = 1},
+			{type = "item", name = source, amount = 1}
+		},
+		results = {{type = "item", name = name, amount = 1}}
+	}
+	data:extend{chest, item, recipe}
+end
+
+create_chest(names.delivery_chest, "requester-chest", "blue")
+create_chest(names.return_chest, "active-provider-chest", "purple")

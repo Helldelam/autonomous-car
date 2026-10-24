@@ -1,20 +1,16 @@
 local config = require("config")
 local _utils = require("scripts._utils")
-local garage_door = require("scripts.garage_door")
 
--- Garages: a parked car is a record in a first-in first-out list of the garage
--- (storage.garage_data[id].cars: quality, health ratio, fuel ratio, batteries, ammo), not an
--- item. The inventory of the garage only has a slot where the player (or an inserter) puts a
--- car to park it, and the repair pack slots; scripts/gui/garage.lua shows the list.
+-- Garages: a parked car is a record (quality, health, fuel, batteries, ammo) in the FIFO list
+-- storage.garage_data[id].cars, not an item; the door drawn while a car goes in or out.
 local garage_control = {}
 
-local CAR_SLOT = 1 -- the slot that takes a car to park
-local BATTERY_SLOT = 2 -- batteries for the selected parked car (garage_control.load_car)
-local AMMO_SLOT = 3 -- ammo for the selected parked car
-local FIRST_KIT_SLOT = 4 -- the repair pack slots follow
-local STATE_TAG = "state" -- tag of a car item that carries the fuel, batteries and ammo of the car
+local CAR_SLOT = 1 -- a car put here parks
+local BATTERY_SLOT = 2 -- refill the selected parked car (load_car)
+local AMMO_SLOT = 3
+local FIRST_KIT_SLOT = 4 -- repair packs
+local STATE_TAG = "state" -- tag of a car item: its fuel
 
--- Drops the parking task and hands the car to the waiting loop, which looks for another garage.
 local function stop_parking(car_data)
 	car_data.parking.active = false
 	car_data.parking.garage = nil
@@ -22,22 +18,19 @@ local function stop_parking(car_data)
 	_utils.start_waiting(car_data)
 end
 
--- Cars the garage holds at most (garage research).
 function garage_control.get_capacity(garage)
 	return _utils.get_upgrade(garage.force, "garage")
 end
 
--- Writes the car of `entry` into an item stack: quality and health in the item, the fuel
--- ratio in its tag (kept only if the item goes back into a garage; a car placed in the world
--- starts like a new one). The batteries and the ammo travel as separate items.
+-- Quality and health in the item, fuel in its tag (read back by a garage only: placed in the world
+-- the car starts new). Batteries and ammo are separate items.
 local function write_car_stack(stack, entry)
 	stack.set_stack{name = config.names.car, count = 1, quality = entry.quality}
 	stack.health = entry.health
 	stack.set_tag(STATE_TAG, {fuel = entry.fuel})
 end
 
--- The record of a car item: the tag is missing on a car that was never in a garage (a new car,
--- like one just built, starts with config.critical_fuel_ratio of a full tank).
+-- No tag: a new car, at config.critical_fuel_ratio like one just built.
 local function read_car_stack(stack)
 	local state = stack.get_tag(STATE_TAG) or {}
 	return {
@@ -47,13 +40,12 @@ local function read_car_stack(stack)
 	}
 end
 
--- Called every tick while the car is at its garage: stores the car in the list of the
--- garage and removes it from the map. The trunk must be empty first.
+-- Every tick at the garage: once the trunk is empty and the door open, the car becomes a record.
 function garage_control.parking_tick(car, garage)
 	local car_data = storage.car_data[car.unit_number]
 
 	if not (garage and garage.valid) then
-		stop_parking(car_data) -- the garage is gone
+		stop_parking(car_data)
 		return
 	end
 
@@ -72,11 +64,10 @@ function garage_control.parking_tick(car, garage)
 	end
 	_utils.alert_reset(car_data.alerts, "not_empty")
 
-	-- The door opens first; the car goes in once it is open.
 	local parking = car_data.parking
 	if not parking.door_tick then
 		parking.door_tick = game.tick
-		garage_door.open(garage)
+		garage_control.open_door(garage)
 	end
 	if game.tick - parking.door_tick < config.garage_door.enter_delay then
 		return
@@ -87,7 +78,6 @@ function garage_control.parking_tick(car, garage)
 		quality = car.quality.name,
 		health = car.get_health_ratio(),
 		fuel = _utils.get_fuel_ratio(car),
-		-- The batteries and the ammo stay with the car.
 		batteries = _utils.remove_batteries(car, _utils.get_battery_count(car)),
 		ammo = _utils.remove_ammo(car),
 	}
@@ -96,28 +86,25 @@ function garage_control.parking_tick(car, garage)
 	end
 	table.insert(garage_data.cars, entry)
 
-	-- Once destroyed the car entity is invalid: on_tick releases its state on the next tick.
-	car.destroy()
+	car.destroy() -- its state is released by on_tick, next tick
 end
 
--- True if the garage holds at least one car.
 function garage_control.has_parked_car(garage)
 	return #storage.garage_data[garage.unit_number].cars > 0
 end
 
--- True if the garage's window of exits is full: garage_exit.exits cars left within medium_delay of the first one.
+-- garage_exit.exits cars left within medium_delay of the first one.
 local function is_exit_window_full(garage_data)
 	return garage_data.exit_tick ~= nil and game.tick - garage_data.exit_tick < config.medium_delay
 		and garage_data.exit_count >= config.garage_exit.exits
 end
 
--- True if the garage holds a car that may leave now.
 function garage_control.can_release_car(garage)
 	local garage_data = storage.garage_data[garage.unit_number]
 	return #garage_data.cars > 0 and not is_exit_window_full(garage_data)
 end
 
--- The tick at which the first garage whose window of exits is full lets cars out again, or nil if none waits.
+-- First tick a waiting garage lets a car out (exit window or door), or nil.
 function garage_control.get_next_release_tick()
 	local next_tick
 	for id, garage in pairs(storage.garages) do
@@ -127,7 +114,7 @@ function garage_control.get_next_release_tick()
 			if is_exit_window_full(garage_data) then
 				tick = garage_data.exit_tick + config.medium_delay
 			elseif garage_data.release_tick and game.tick < garage_data.release_tick then
-				tick = garage_data.release_tick -- the door is still opening
+				tick = garage_data.release_tick -- door opening
 			end
 			if tick then
 				next_tick = math.min(next_tick or tick, tick)
@@ -137,9 +124,8 @@ function garage_control.get_next_release_tick()
 	return next_tick
 end
 
--- Puts a new car on the map from the record `entry`; returns it, or nil if nothing could be created.
 local function create_car(garage, entry, position)
-	-- raise_built makes control.lua track the new car before create_entity returns.
+	-- raise_built: tracked by control.lua before create_entity returns
 	local car = garage.surface.create_entity{name = config.names.car, quality = entry.quality, position = position,
 		raise_built = true, force = garage.force}
 	if not (car and car.valid) then
@@ -158,10 +144,8 @@ local function create_car(garage, entry, position)
 	return car
 end
 
--- Takes the first parked car out of the garage (the one that has waited longest) and puts it
--- back on the map with its fuel, batteries, ammo and health. Returns the new car, or nil if
--- the garage holds no car, has let out its share of cars lately (can_release_car) or has no
--- free spot around it.
+-- Puts the first parked car back on the map; nil if none, exit window full, no free spot, or
+-- door still opening.
 function garage_control.release_car(garage)
 	if not (garage and garage.valid) then
 		return nil
@@ -180,22 +164,21 @@ function garage_control.release_car(garage)
 	end
 	_utils.alert_reset(garage_data.alerts, "no_room")
 
-	-- The door opens first; the car comes out once it is open (the cluster waits, see get_next_release_tick).
-	-- The door stays open config.garage_door.hold ticks after the last exit: a release_tick older than that is stale.
+	-- The door opens first (the cluster waits, get_next_release_tick); a release_tick older than
+	-- the door's hold is stale.
 	local door = config.garage_door
 	if not garage_data.release_tick or game.tick > garage_data.release_tick + door.hold then
 		garage_data.release_tick = game.tick + door.enter_delay
-		garage_door.open(garage)
+		garage_control.open_door(garage)
 	end
 	if game.tick < garage_data.release_tick then
 		return nil
 	end
-	garage_door.open(garage)
+	garage_control.open_door(garage)
 
 	local car = create_car(garage, garage_data.cars[1], position)
 	if car then
 		table.remove(garage_data.cars, 1)
-		-- The first exit of a window stamps it; the window is over medium_delay later.
 		if garage_data.exit_tick == nil or game.tick - garage_data.exit_tick >= config.medium_delay then
 			garage_data.exit_tick, garage_data.exit_count = game.tick, 0
 		end
@@ -204,10 +187,8 @@ function garage_control.release_car(garage)
 	return car
 end
 
--- Puts the car of `entry` in an inventory as items: the car (health, fuel tag), its batteries
--- and its ammo, each as an item of its own. All or nothing: false, and nothing changed, if
--- the inventory lacks room. An inventory that grows when something is inserted (a mining
--- buffer) has no empty stack before: the new stack is the car stack that carries no tag yet.
+-- The car, its batteries and its ammo as items; all or nothing. A mining buffer grows on insert
+-- (no empty stack before): the new stack is the car without tag.
 local function store_car(inventory, entry)
 	local stack = inventory.find_empty_stack(config.names.car)
 	if not stack then
@@ -244,8 +225,7 @@ local function store_car(inventory, entry)
 	return true
 end
 
--- Gives the car number `index` of the list to a player, as items (see store_car). Returns
--- false, and keeps the car, if the inventory of the player has no room for all of them.
+-- Car number `index` to the player's inventory (store_car); false if no room.
 function garage_control.hand_out_car(garage, player, index)
 	local cars = storage.garage_data[garage.unit_number].cars
 	local entry = cars[index]
@@ -257,7 +237,6 @@ function garage_control.hand_out_car(garage, player, index)
 	return true
 end
 
--- Drops the car of `entry` on the ground, as items (last resort).
 local function spill_car(surface, position, entry)
 	surface.spill_item_stack{position = position, stack = {name = config.names.car, count = 1, quality = entry.quality}}
 	if entry.batteries then
@@ -268,9 +247,7 @@ local function spill_car(surface, position, entry)
 	end
 end
 
--- A garage that is mined or destroyed gives its cars as items, each with its batteries and ammo
--- apart: in the mined buffer, else in the inventory of the player, else on the ground (as for a
--- destroyed garage, which has neither).
+-- Mined or destroyed garage: its cars as items, to the mining buffer, else the player, else the ground.
 function garage_control.return_cars(garage, buffer, player)
 	local player_inventory = player and player.get_main_inventory()
 	for _, entry in ipairs(storage.garage_data[garage.unit_number].cars) do
@@ -280,8 +257,7 @@ function garage_control.return_cars(garage, buffer, player)
 	end
 end
 
--- Moves the car that was put in the car slot (by hand or by an inserter) into the list, if
--- there is room.
+-- A car put in the car slot (player or inserter) joins the list, if there is room.
 local function take_car_slot(garage)
 	local stack = garage.get_inventory(defines.inventory.chest)[CAR_SLOT]
 	if stack.valid_for_read and stack.name == config.names.car and garage_control.has_room(garage) then
@@ -290,7 +266,6 @@ local function take_car_slot(garage)
 	end
 end
 
--- True if `name` is one of the ammo items a car uses (config.ammo_items).
 local function is_car_ammo(name)
 	for _, item in ipairs(config.ammo_items) do
 		if item == name then
@@ -300,9 +275,8 @@ local function is_car_ammo(name)
 	return false
 end
 
--- Refills the parked car number `index` from the battery and ammo slots of the garage: batteries
--- up to a stack, ammo of its type (or any type of config.ammo_items if it has none) up to a stack.
--- Another type of ammo is left in the slot. Returns true if something moved.
+-- Refills parked car `index` from the battery and ammo slots, up to a stack each (ammo of its
+-- type, any car ammo if it has none). True if something moved.
 function garage_control.load_car(garage, index)
 	local entry = storage.garage_data[garage.unit_number].cars[index]
 	if not entry then
@@ -335,10 +309,8 @@ function garage_control.load_car(garage, index)
 	return moved
 end
 
--- Layout of the inventory of a garage: the slot that takes a car, filtered to the car, the
--- battery slot, the ammo slot (locked until Military, like the ammo slot of a car), then
--- config.repair_kit_slots slots for repair packs (locked until the repair research). Safe to
--- call again, like _utils.set_trunk_limits.
+-- Slot filters: car, batteries, ammo (locked before Military), repair packs (locked before the
+-- repair research).
 function garage_control.update_inventory(garage)
 	local inventory = garage.get_inventory(defines.inventory.chest)
 	local kit = _utils.is_researched(garage.force, config.names.repair_technology) and config.repair_kit or config.names.locked_slot
@@ -355,8 +327,7 @@ function garage_control.update_inventory(garage)
 	end)
 end
 
--- Called every tick: like the trunk of a car, each garage is checked every
--- config.slow_check_interval ticks (no event tells that the player changed a filter or put a car in).
+-- Every slow check: no event tells of a changed filter or a car put in.
 function garage_control.update_inventories(tick)
 	for id, garage in pairs(storage.garages) do
 		if garage.valid then
@@ -370,12 +341,10 @@ function garage_control.update_inventories(tick)
 	end
 end
 
--- True if one more car fits in the garage.
 function garage_control.has_room(garage)
 	return #storage.garage_data[garage.unit_number].cars < garage_control.get_capacity(garage)
 end
 
--- The first repair pack of a garage, or nil.
 local function find_repair_kit(inventory)
 	for slot = FIRST_KIT_SLOT, #inventory do
 		if inventory[slot].valid_for_read then
@@ -385,10 +354,7 @@ local function find_repair_kit(inventory)
 	return nil
 end
 
--- Repairs the parked cars of a garage a little, as long as it holds a repair pack: each
--- car recovers config.garage_repair_rate of its health, and the pack loses the durability
--- that this health costs (the speed of a pack is the health it repairs per durability).
--- The health of the record carries over to the car when it is released.
+-- Each car gains config.garage_repair_rate of its health; the pack loses that health / its speed.
 local function repair_cars(garage)
 	local inventory = garage.get_inventory(defines.inventory.chest)
 	local max_health = prototypes.entity[config.names.car].get_max_health()
@@ -406,7 +372,6 @@ local function repair_cars(garage)
 	end
 end
 
--- Called every tick: each garage repairs every config.long_delay ticks.
 function garage_control.repair_parked_cars(tick)
 	for id, garage in pairs(storage.garages) do
 		if not garage.valid then
@@ -418,7 +383,7 @@ function garage_control.repair_parked_cars(tick)
 	end
 end
 
--- Closest garage with room left, or nil.
+-- Closest garage with room, or nil.
 function garage_control.find_garage(car)
 	return _utils.find_closest("garages", car.position, function(garage)
 		return garage_control.has_room(garage)
@@ -428,6 +393,75 @@ end
 function garage_control.alert_no_garage(car)
 	_utils.alert_once(storage.car_data[car.unit_number].alerts, "no_garage", car.force, car,
 		{"autonomous-car-messages.alert-no-garage"}, config.names.garage)
+end
+
+-- ============================================================
+-- Door
+-- ============================================================
+-- A container has no animation: while a car goes in or out, an interior and the door are drawn
+-- over the closed sprite, the door sliding up one cut sprite per tick (prototypes/garage.lua).
+-- storage.garage_doors[id] = {garage, step (0 closed, move_ticks open), hold_until, interior, door};
+-- moving doors only.
+
+local door_settings = config.garage_door
+
+local function place_door(door)
+	local position = door.garage.position
+	door.door.sprite = config.names.garage_door .. "_" .. door.step
+	door.door.target = {
+		x = position.x + door_settings.x,
+		y = position.y + door_settings.top + (door_settings.rows - door_settings.hidden_rows(door.step)) / 64 / 2,
+	}
+end
+
+local function destroy_door(id)
+	local door = storage.garage_doors[id]
+	if door then
+		door.interior.destroy()
+		door.door.destroy()
+		storage.garage_doors[id] = nil
+	end
+end
+
+-- Opens the door, holds it open, then closes it.
+function garage_control.open_door(garage)
+	local door = storage.garage_doors[garage.unit_number]
+	if not door then
+		local position = garage.position
+		local target = {x = position.x + door_settings.x, y = position.y + door_settings.top + door_settings.height / 2}
+		door = {
+			garage = garage,
+			step = 0,
+			interior = rendering.draw_sprite{sprite = config.names.garage_interior, target = target, surface = garage.surface,
+				render_layer = "object"},
+			door = rendering.draw_sprite{sprite = config.names.garage_door .. "_0", target = target, surface = garage.surface,
+				render_layer = "cargo-hatch"}, -- above the interior and a car beside the garage
+		}
+		storage.garage_doors[garage.unit_number] = door
+	end
+	door.hold_until = game.tick + door_settings.move_ticks + door_settings.hold
+end
+
+-- Every tick: each moving door by one step.
+function garage_control.update_doors(tick)
+	for id, door in pairs(storage.garage_doors) do
+		if not door.garage.valid then
+			destroy_door(id)
+		else
+			local open = tick < door.hold_until
+			local step = open and math.min(door_settings.move_ticks, door.step + 1) or math.max(0, door.step - 1)
+			if step ~= door.step then
+				door.step = step
+				place_door(door)
+			elseif step == 0 and not open then
+				destroy_door(id)
+			end
+		end
+	end
+end
+
+function garage_control.release_door(id)
+	destroy_door(id)
 end
 
 return garage_control

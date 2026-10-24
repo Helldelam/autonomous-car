@@ -2,24 +2,17 @@ local config = require("config")
 local garage_control = require("scripts.garage")
 local _utils = require("scripts._utils")
 
--- Circuit network output of the garages and the chargers. A garage or a charger cannot show its
--- state on a wire by itself (the cars of a garage are a list of the script, a charger is an energy
--- interface without connector), so each gets a link: a constant combinator beside it, without
--- collision, that the script fills (see prototypes/link.lua). The slots of a garage and its
--- supply chests are read from their own connector.
--- Garage: the item "car" = parked cars, then the signals of config.names.signals: free_places,
--- health (average, %), charge (average, %). Charger: buffer (charge of its buffer, %), power (drawn from
--- the electric network by the charger, kW), users (cars using it).
+-- Circuit output of garages and chargers through a link beside each (prototypes/circuit.lua): the
+-- parked cars are records, a charger has no connector. Garage: item car (parked), free_places, health
+-- and charge (averages, %). Charger: buffer (%), power (kW drawn), users.
 local circuit_control = {}
 local signals = config.names.signals
 
--- Where the link stands, relative to the building (the garage connector is at its south-west corner).
 local OFFSETS = {
 	garage = {x = 2.4, y = 1.4}, -- beside the garage, not in front of its door
 	charger = {x = 0, y = 1.4},
 }
 
--- Creates the link of a garage or a charger (`kind`), and returns it.
 local function create_link(entity, kind)
 	local offset = OFFSETS[kind]
 	return entity.surface.create_entity{
@@ -29,7 +22,6 @@ local function create_link(entity, kind)
 	}
 end
 
--- Makes sure the data of a building (`data.link`) holds a valid link.
 local function ensure_link(entity, data, kind)
 	if not (data.link and data.link.valid) then
 		data.link = create_link(entity, kind)
@@ -43,8 +35,7 @@ function circuit_control.destroy_link(data)
 	end
 end
 
--- Writes `values` ({{type, name, count}, ...}) in the link; nothing is written when they did
--- not change since the last call (`data.link_signals` keeps the last ones as a string).
+-- `values` = {{type, name, count}, ...}; written only when changed (data.link_signals).
 local function set_signals(link, data, values)
 	local parts = {}
 	for _, signal in ipairs(values) do
@@ -86,7 +77,7 @@ local function refresh_garage(garage, data)
 end
 
 local function refresh_charger(charger, data, tick)
-	-- Power drawn from the network since the last call: the change of the buffer plus what the cars took.
+	-- since the last call: change of the buffer plus what the cars took
 	local energy = charger.energy
 	local power = data.power or 0
 	if data.last_tick and tick > data.last_tick then
@@ -101,7 +92,7 @@ local function refresh_charger(charger, data, tick)
 	})
 end
 
--- Called every tick: each garage and charger is refreshed every config.short_delay ticks.
+-- Each building every short_delay.
 function circuit_control.refresh(tick)
 	for id, garage in pairs(storage.garages) do
 		if garage.valid and _utils.is_slow_check_due(garage, tick, config.short_delay) then

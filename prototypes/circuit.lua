@@ -1,12 +1,24 @@
--- Virtual signals of the links (circuit.lua): the state of a garage or a charger on a wire.
+-- Link (constant combinator beside each garage and charger, filled by scripts/circuit.lua: no
+-- collision, not minable or blueprintable, gone with its building) and its virtual signals.
 local names = require("config").names
+
+local link = table.deepcopy(data.raw["constant-combinator"]["constant-combinator"])
+link.name = names.link
+link.minable = nil
+link.hidden = true
+link.collision_mask = {layers = {}}
+link.flags = {"placeable-neutral", "player-creation", "not-rotatable", "not-blueprintable", "not-deconstructable", "not-flammable"}
+link.max_health = 500
+link.allow_copy_paste = false
+
+data:extend{link}
 
 local signal_icons = "__base__/graphics/icons/signal/"
 local car_icon = "__autonomous-car__/graphics/car/icon.png"
 local garage_icon = "__autonomous-car__/graphics/garage/icon.png"
 local charger_icon = "__autonomous-car__/graphics/charger/icon.png"
 
--- A small icon in the bottom right corner of a larger one.
+-- A small icon in the bottom right corner.
 local function badge(icon)
 	return {icon = icon, icon_size = 64, scale = 0.5, shift = {10, 10}}
 end
