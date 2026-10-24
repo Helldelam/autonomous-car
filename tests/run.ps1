@@ -15,8 +15,9 @@ construction, energy). The scenarios of one category that are asked for run
 together, in one game, each on its own surface: one Factorio launch per
 category, not per scenario. A script error stops the whole category.
 -Scenario takes scenario names, category names, or "all" (the default).
--Changed picks the categories to run from the files changed since the last
-commit (git), so that a change does not run what it cannot affect.
+-Changed lists the categories that the files changed since the last commit
+(git) can affect, with the command that runs each in its own folder, and runs
+nothing: several categories go in parallel, one run.ps1 each.
 -Set "name=value" changes a config value for the run (only values the scripts
 read while playing). -Output gives the run its own folder: runs with different
 folders can go at once.
@@ -41,7 +42,7 @@ Runs the scenarios of the movement category.
 
 .EXAMPLE
 tests\run.ps1 -Changed
-Runs the categories that the files changed since the last commit can affect.
+Lists the categories that the files changed since the last commit can affect, and the command for each (nothing runs).
 
 .EXAMPLE
 tests\run.ps1 maze, garage-exit -Ticks 8000
@@ -86,38 +87,56 @@ foreach ($match in [regex]::Matches($harnessText, '(?m)^scenarios\["([^"]+)"\] =
 }
 $categories = @($info.Values | ForEach-Object { $_.Category } | Select-Object -Unique)
 
-# Which categories a changed file can affect: every category for the scripts (every one drives cars,
-# visits chests, charges and looks for a garage: see the coverage-<category>.txt files), except the
-# narrow cases below; the other files (locale, graphics, documentation) affect none.
+# Which categories a changed file can affect. The Lua of the mod affects every category but
+# scalability (crowd, a measurement, not a regression check): every category drives cars, visits
+# chests, charges and looks for a garage (see the coverage-<category>.txt files), a script that
+# creates entities shifts the unit numbers the cars are spread by, and the prototypes set how the
+# cars drive and what they hold (data.lua: the charge of a full tank). Narrower for the files below;
+# the other files (locale, graphics, documentation, the test scripts) affect none.
 function Get-ChangedCategories {
 	$files = @(git -C $modFolder diff --name-only HEAD) + @(git -C $modFolder ls-files --others --exclude-standard)
+	$regression = @($categories | Where-Object { $_ -ne "scalability" })
+	# Drawing only: a change can cause a script error, not another trace. Construction opens chests
+	# and garages, robustness and energy remove some while they are open.
+	$drawing = @("construction", "robustness", "energy")
+	# Loading is all there is to check: the tests have no player, and harness.lua hands the selections
+	# to on_area_selected itself.
+	$loading = @("energy")
 	$narrow = @{
 		"scripts/armed.lua" = @("robustness") # only acts after Military
-		"scripts/circuit.lua" = @("energy") # signals, read by no car
 		"scripts/logistic.lua" = @("construction") # delivery chests
-		"scripts/chest_door.lua" = @("construction") # drawing only: a change can cause a script error, not another
-		"scripts/garage_door.lua" = @("construction") #   trace, and construction opens chests and garages
+		"scripts/chest_door.lua" = $drawing
+		"scripts/garage_door.lua" = $drawing
 		"scripts/charger_visual.lua" = @("energy")
-		"data.lua" = @("energy")
+		"prototypes/signals.lua" = $loading
+		"prototypes/missing_items.lua" = $loading
+		"prototypes/ghost_selector.lua" = $loading
+		"prototypes/corpse.lua" = $loading
+		"info.json" = $loading
 	}
 	$picked = @()
 	foreach ($file in $files) {
 		if ($narrow.ContainsKey($file)) { $picked += $narrow[$file] }
-		elseif ($file -like "prototypes/*" -or $file -like "scripts/gui/*" -or $file -like "scripts/debug/*") { $picked += "energy" } # loading them is all there is to check (no player in the tests)
-		elseif ($file -like "scripts/*.lua" -or $file -in @("control.lua", "config.lua", "tests/harness.lua")) { $picked += $categories }
+		elseif ($file -like "scripts/gui/*" -or $file -like "scripts/debug/*") { $picked += $loading }
+		elseif ($file -like "scripts/*.lua" -or $file -like "prototypes/*.lua" -or $file -in @("control.lua", "config.lua", "data.lua", "tests/harness.lua")) { $picked += $regression }
 	}
 	return @($categories | Where-Object { $picked -contains $_ })
 }
 
 $requested = @()
 if ($Changed) {
+	# Runs nothing: a run of several categories goes one run.ps1 per category, in parallel, each in its
+	# own folder (see "Tests lourds" in CLAUDE.md); this one would run them one after the other.
 	$changedCategories = Get-ChangedCategories
 	if ($changedCategories.Count -eq 0) {
 		Write-Host "No changed file affects a category: nothing to run."
 		exit 0
 	}
-	Write-Host "Changed files affect: $($changedCategories -join ', ')"
-	$Scenario = $changedCategories
+	Write-Host "Changed files affect: $($changedCategories -join ', '). One command per category (in parallel when there are several):"
+	foreach ($category in $changedCategories) {
+		Write-Host "  tests\run.ps1 $category -Output `$env:TEMP\autonomous-car-changed\$category"
+	}
+	exit 0
 }
 foreach ($item in $Scenario) {
 	if ($item -eq "all") { $requested += @($info.Keys) }

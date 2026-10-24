@@ -31,7 +31,7 @@ Dossier `tests/`, temporaire : à retirer avant publication (le mod n'en charge 
 ```powershell
 tests\run.ps1                                  # tous les scénarios, une partie de Factorio par catégorie
 tests\run.ps1 movement                         # une catégorie
-tests\run.ps1 -Changed                         # les catégories que les fichiers modifiés depuis le dernier commit peuvent affecter
+tests\run.ps1 -Changed                         # liste les catégories que les fichiers modifiés depuis le dernier commit peuvent affecter, avec la commande de chacune ; ne lance rien
 tests\run.ps1 maze, garage-exit -Ticks 8000    # des scénarios précis
 tests\run.ps1 -Reference <dossier ou zip>      # compare les traces avec une autre version du mod
 tests\run.ps1 doors -Set "friction.slow=6","friction.maneuver=8" -Output $env:TEMP\essai1   # valeurs de config lues en jouant ; -Output pour des essais en parallèle
@@ -240,7 +240,7 @@ Section « Clearing » de `movement.lua` : dernier recours avant `stuck`, demand
 - Fonctions, verbe en premier : `get_*` lit une valeur connue, `compute_*` la calcule, `measure_*` interroge le monde, `count_*`, `find_*`, `is_*` / `can_*` / `fits_at` (vrai ou faux), `alert_*` (répétable : `_utils.alert_once` / `alert_reset`), `start_*` entre dans un état, `create_*` construit une table d'état. Exceptions : `on_*` ; `<état>_tick`, appelée à chaque tick dans cet état ou ce mode ; `new` / `length` de `_utils.deque`.
 - Abandon : « unreachable » (aucune recharge possible) ou « stuck » (trajet bloqué) ; `stuck.final` marque la dernière attente. Manœuvre : un « arc » est un des six choix de conduite, un « heading » une direction.
 - Prototypes : `autonomous_car`, puis `autonomous_car_<chose>`, en snake_case, déclarés dans `config.names`.
-- `config.lua` : constantes liées regroupées dans une table (`speed`, `friction`, `lookahead`, `path`, `maneuver.probe`) ; `*_delay` attente avant de réessayer, `*_duration` durée d'une action, `*_interval` période ; « fuel » est la charge de la voiture, « energy » le tampon du chargeur. Un nouveau délai réutilise `short_delay`, `medium_delay`, `idle_delay`, `long_delay` ou `very_long_delay` et s'ajoute à la liste d'usages de son commentaire.
+- `config.lua` : constantes liées regroupées dans une table (`speed`, `friction`, `lookahead`, `path`, `maneuver.probe`) ; `*_delay` attente avant de réessayer, `*_duration` durée d'une action, `*_interval` période ; « fuel » est la charge de la voiture, « energy » le tampon du chargeur. Un nouveau délai réutilise `short_delay`, `medium_delay`, `idle_delay`, `long_delay` ou `very_long_delay` et s'ajoute à la liste d'usages de son commentaire. Ces listes sont tenues à la main et complétées à chaque mise au propre (choix du propriétaire le 2026-10-24, plutôt que de les supprimer ou de les vérifier par un script).
 
 ## Réglage du mouvement
 
