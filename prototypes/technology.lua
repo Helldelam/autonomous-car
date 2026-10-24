@@ -4,6 +4,8 @@
 -- build speed. The Military research arms the cars (_utils.is_armed), so it has no
 -- technology here.
 -- TODO: placeholder costs; adjust them when the mod is balanced.
+-- TODO: optional researches: repair speed of the garages, driving speed of the cars (without upsetting
+-- their legs), repair pack capacity. See "À faire" in CLAUDE.md.
 local config = require("config")
 local names = config.names
 

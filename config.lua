@@ -63,7 +63,7 @@ config.upgrades = {
 	charge_speed = {0.5, 1, 2}, -- charge transfer per tick, relative to the full charge duration
 	build_speed = {0.5, 1, 2}, -- build attempts per config.build_interval
 }
-config.car_inventory_size = config.upgrades.cargo[#config.upgrades.cargo] + 1 -- trunk slots of the prototype: the most cargo plus the battery slot; the bar hides the others (see _utils.set_trunk_limits)
+config.car_inventory_size = config.upgrades.cargo[#config.upgrades.cargo] + 1 -- trunk slots of the prototype: the most cargo plus the battery slot; a filter locks the slots after the battery slot (see _utils.set_trunk_limits)
 config.armed_technology = "military" -- vanilla research after which the cars carry their gun (see _utils.is_armed)
 config.battery_item = "battery" -- item a car burns when its tank is almost empty; the last trunk slot is reserved for it
 config.ammo_items = {"uranium-rounds-magazine", "piercing-rounds-magazine", "firearm-magazine"} -- ammo a car takes from a supply chest, strongest first: it fills an empty slot with the strongest one the chest holds and swaps a weaker one for a stronger one (see ghost_control.restock)
@@ -278,12 +278,18 @@ config.short_delay = 30 -- (0.5s)
 	-- movement.on_path_finished: a request the pathfinder could not take yet is sent again after this
 	-- travel.handle_critical_fuel: pause between two charger searches when none is reachable; period of the critical level
 	--   measure while the tank holds much more than it
-	-- control.lua: period at which an open window of missing items is refreshed (gui.refresh_all)
+	-- control.lua: period at which the open windows (missing items, car and garage panels) are refreshed; an idle car
+	--   decides up to this later than idle_delay, by its unit number, so that cars idle since the same tick do not all decide on it
+	-- circuit_control.refresh: period of the links of the garages and chargers
+	-- charger_visual.refresh: period at which the arcs of the chargers follow the cars that charge
+	-- config.garage_door: time the door takes to open or to close; it stays open twice as long
+	-- game_trace: a moving car is sampled every half of this
 config.medium_delay = 180 -- (3s)
 	-- ghost_control.attempt_one_ghost: cooldown of a ghost that failed to revive, times the number of failures
 	-- movement.update_mode: slow mode lasts this long after an emergency stop on an obstacle, a maneuver or the end of a path
 	-- movement.start_path_request: wait between two path requests
 	-- garage_control.can_release_car: window in which a garage lets at most garage_exit.exits cars out
+	-- logistic_control.update_requests: period of the passes over the delivery chests
 config.idle_delay = 300 -- (5s)
 	-- control.lua: wait before an idle car looks for a new task or a garage (ghost_control.go_idle, travel.handle_empty and a
 	--   new car set it as already elapsed, so that the car decides on the next tick)
@@ -295,6 +301,7 @@ config.long_delay = 600 -- (10s)
 	--   pool; ghost_control.wait_for_phase: a batch held back by an earlier phase gives way after this
 	-- movement.wait_for_path: longest wait for the answer of the pathfinder
 	-- control.lua: period of the fallback scan of pending clusters and of the repair of parked cars
+	-- charger_control.update_buffers: period at which a charger's buffer and posts follow the research
 	-- travel.stuck_tick: wait before a stuck car tries its leg again
 	-- travel.is_leg_too_long: margin added to the expected duration of a leg
 	-- control.lua (on_next_task): a car that fled waits this long at its refuge before resuming
@@ -312,6 +319,8 @@ config.very_long_delay = 3600 -- (60s)
 -- down: every player gets the same behaviour.
 config.slow_check_interval = 6 -- (0.1s)
 	-- tooltips.refresh: period of the tooltip lines of the entity under each player's cursor
+	-- control.lua: filters of a car's trunk (_utils.set_trunk_limits) and its hidden turret (armed.update), filters and car
+	--   slot of a garage (garage_control.update_inventories): no event tells that a player changed them
 
 -- Regions of the closest-entity search (_utils.find_closest): the chargers, garages and supply chests are
 -- listed per square of `size` tiles, and the search looks at the squares around the position first; the

@@ -14,7 +14,7 @@ Run: python -X utf8 graphics/chest/make_chests.py
 Writes, for each colour, <colour>-sheet.png (7 frames of 66 x 74: what the game plays when a robot or a
 player opens the chest), <colour>-icon.png (64 pixels and mipmaps: 120 x 64) and <colour>-door.png (the
 hatch alone), and interior.png (the inside): a car opening a chest does not make the game play the
-frames, so scripts/chest_door.lua draws the hatch (door.png squashed) over the interior.
+frames, so scripts/chest_door.lua draws the hatch (<colour>-door.png, squashed) over the interior.
 """
 import colorsys
 import os

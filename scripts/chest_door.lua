@@ -3,7 +3,7 @@ local names = config.names
 
 -- Hatch of a supply chest that opens while a car uses it. The sprite of the chest keeps the closed
 -- hatch; while it moves, the script draws on top of it a dark interior and the hatch itself
--- (graphics/chest/door-<colour>.png), squashed in width towards its hinges, on the left. A chest
+-- (graphics/chest/<colour>-door.png), squashed in width towards its hinges, on the left. A chest
 -- may be used by several cars at once: it opens with the first and closes after the last (`users`).
 -- storage.chest_doors[chest id] = {chest, scale (1 closed), users, interior, door (render objects)};
 -- only the chests that are open or moving are listed.

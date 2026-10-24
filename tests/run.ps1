@@ -92,9 +92,11 @@ function Get-ChangedCategories {
 	$affected = @{
 		"scripts/movement.lua" = @("movement", "robustness", "energy", "doors")
 		"scripts/travel.lua" = $categories
-		"scripts/construction.lua" = @("construction", "robustness")
+		"scripts/construction.lua" = $categories # every category visits supply chests (collect, deposit, restock)
+		"scripts/chest_door.lua" = $categories
 		"scripts/charger.lua" = @("energy", "robustness")
-		"scripts/garage.lua" = @("energy", "robustness", "construction")
+		"scripts/garage.lua" = @("energy", "robustness", "construction", "doors") # doors: garage-room
+		"scripts/garage_door.lua" = @("energy", "robustness", "construction", "doors")
 		"scripts/armed.lua" = @("robustness")
 		"scripts/circuit.lua" = @("energy")
 		"scripts/logistic.lua" = @("construction")
