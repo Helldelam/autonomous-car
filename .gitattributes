@@ -9,3 +9,4 @@ README.md export-ignore
 autonomous-car-demo.gif export-ignore
 # The game reads the changelog line by line: no carriage return, whatever core.autocrlf.
 changelog.txt text eol=lf
+images export-ignore

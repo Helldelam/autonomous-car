@@ -218,18 +218,18 @@ function Invoke-Group($mod, [string]$variant, [string]$label, [string[]]$names, 
 		Traces = @{}
 	}
 	if ($Set | Where-Object { $_ -like "test_capture=*" }) {
-		# -Set "test_capture=<n>" (scenario gif): a frame every n ticks, which needs a game with a window.
+		# -Set "test_capture=<n>" (scenarios gif and showcase, one at a time): images in script-output/<scenario>/, which needs a game with a window.
 		# --benchmark-graphics quits at about tick 750 whatever --benchmark-ticks says: an ordinary game,
-		# closed here once the scenario has written gif-done.txt and the frames have been written.
+		# closed here once the scenario has written <scenario>-done.txt and the frames have been written.
 		# (The Steam build restarts itself through Steam when it has a window, which loses the arguments:
 		# with SteamAppId set it starts as it is.)
 		$env:SteamAppId = "427520"
-		$done = Join-Path $scriptOutput "gif-done.txt"
+		$done = Join-Path $scriptOutput "$($names[0])-done.txt"
 		$process = Start-Process $Factorio -ArgumentList @("--config", "`"$configFile`"", "--mod-directory", "`"$($mod.Mods)`"", "--load-game", "`"$mapFile`"", "--disable-audio") -PassThru -RedirectStandardOutput $result.Stdout
 		while (-not (Test-Path $done) -and -not $process.HasExited) { Start-Sleep 2 }
 		$frames = -1
-		while ($frames -ne @(Get-ChildItem (Join-Path $scriptOutput "gif") -ErrorAction SilentlyContinue).Count) {
-			$frames = @(Get-ChildItem (Join-Path $scriptOutput "gif") -ErrorAction SilentlyContinue).Count
+		while ($frames -ne @(Get-ChildItem (Join-Path $scriptOutput $names[0]) -ErrorAction SilentlyContinue).Count) {
+			$frames = @(Get-ChildItem (Join-Path $scriptOutput $names[0]) -ErrorAction SilentlyContinue).Count
 			Start-Sleep 10
 		}
 		if (-not $process.HasExited) { Stop-Process $process }

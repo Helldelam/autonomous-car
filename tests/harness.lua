@@ -558,10 +558,73 @@ scenarios["gif"] = {
 		if config.test_capture and t == (TICKS or scenarios["gif"].ticks) then
 			-- run.ps1 waits for this file, then closes the game
 			helpers.write_file("gif-done.txt", "done", false)
+			-- (named after the scenario: run.ps1 looks for <scenario>-done.txt)
 		end
 		if config.test_capture and t % config.test_capture == 0 then
 			game.take_screenshot{surface = T.surface, position = {OX + 1, 0.5}, resolution = {1280, 720}, zoom = 1.5,
 				path = string.format("gif/frame-%05d.jpg", t), quality = 95, force_render = true, hide_clouds = true, hide_fog = true}
+		end
+	end,
+}
+
+-- Stills of the mod's elements for the README (not a regression check, it is in no
+-- campaign): tests\run.ps1 showcase -Set "test_capture=1" (a game window opens).
+-- Each element has its own spot on Nauvis, far from the others so that no car goes to
+-- the wrong building. Files: script-output/showcase/<element>-<tick>.png
+local SX = -120
+scenarios["showcase"] = {
+	category = "capture",
+	ticks = 600,
+	setup = function()
+		local s = game.surfaces.nauvis
+		T.surface = s
+		T.surfaces[s.index] = true
+		s.request_to_generate_chunks({SX, 0}, 5)
+		s.force_generate_chunk_requests()
+		for _, entity in pairs(s.find_entities_filtered{area = {{SX - 160, -160}, {SX + 160, 160}}}) do
+			if entity.type ~= "character" then
+				entity.destroy()
+			end
+		end
+		s.destroy_decoratives{area = {{SX - 160, -160}, {SX + 160, 160}}}
+		s.freeze_daytime = true
+		s.daytime = 0
+		local tiles = {}
+		for x = -150, 149 do
+			for y = -150, 149 do
+				tiles[#tiles + 1] = {name = "dirt-1", position = {SX + x, y}}
+			end
+		end
+		s.set_tiles(tiles, false)
+		-- Spots, 100 tiles apart: car, charger with a charging car, garage, chests
+		make_car(s, SX, -100, 0.1, 0.8)
+		T.charger = make(s, names.charger, SX, 0)
+		T.charger.energy = 3e7
+		make_car(s, SX - 4, -3, 0.25, 0.1)
+		T.garage = make(s, names.garage, SX, 100)
+		table.insert(storage.garage_data[T.garage.unit_number].cars, {quality = "normal", health = 1, fuel = 1})
+		make(s, names.chest, SX - 3, 70.5)
+		make(s, names.delivery_chest, SX - 1, 70.5)
+		make(s, names.return_chest, SX + 1, 70.5)
+	end,
+	events = function(t)
+		if not config.test_capture then
+			return
+		end
+		if t == scenarios["showcase"].ticks then
+			helpers.write_file("showcase-done.txt", "done", false)
+		end
+		local function shoot(name, x, y, zoom, width, height)
+			game.take_screenshot{surface = T.surface, position = {SX + x, y}, resolution = {width, height}, zoom = zoom,
+				path = string.format("showcase/%s-%03d.png", name, t), force_render = true, hide_clouds = true, hide_fog = true}
+		end
+		if t == 10 then
+			shoot("car", 0, -100, 4, 480, 360)
+			shoot("garage", 0, 99, 2.5, 640, 480)
+			shoot("chests", -1, 70.5, 3, 640, 300)
+		end
+		if t >= 100 and t % 50 == 0 then
+			shoot("charger", -3, -1, 2.2, 640, 480)
 		end
 	end,
 }
