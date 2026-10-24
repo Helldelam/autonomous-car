@@ -11,8 +11,15 @@ Factorio 2.1. **Not tested with Space Age yet** (other planets, space platforms,
 ## Getting started
 
 1. Research **Autonomous cars** (after Automobilism, Battery and Electric engine).
+
 2. Place a **charger** on your electric network, a **garage** and a **supply chest**, and put the items to build in the chest.
+
+![The charger and its arc](images/charger.png)
+
 3. Build a car and place it: it goes to charge first. Or put it in the first slot of the garage to park it.
+
+![The car](images/car.png)
+
 4. Take the **autonomous car selector** (Alt+G, or its shortcut button) and drag it over ghosts and marked entities. What a robot network covers is left to the robots.
 
 ## What the cars do
@@ -24,13 +31,14 @@ Factorio 2.1. **Not tested with Space Age yet** (other planets, space platforms,
 
 ## Buildings and researches
 
-![The car](images/car.png)
-![The charger and its arc](images/charger.png)
+- **Garage**: parks the cars; its slots refill the selected car with batteries and ammo; repairs the cars with repair packs once researched; a button gives a parked car back to you.
+
 ![The garage](images/garage.png)
+
+- **Supply chest**, plus after **Logistic system** a **delivery chest** (requests what the cars lack from your logistic network) and a **return chest** (cars empty their trunk there first, robots take it away).
+
 ![Supply (yellow), delivery (blue) and return (purple) chests](images/chests.png)
 
-- **Garage**: parks the cars; its slots refill the selected car with batteries and ammo; repairs the cars with repair packs once researched; a button gives a parked car back to you.
-- **Supply chest**, plus after **Logistic system** a **delivery chest** (requests what the cars lack from your logistic network) and a **return chest** (cars empty their trunk there first, robots take it away).
 - **Circuit network**: the small combinator by a garage or charger outputs parked cars, free places, health and charge, or the charger's buffer, power and users.
 - **Researches**: cargo, garage places, cars per charger, charge speed, build speed. After **Military**, cars shoot with the ammo of their ammo slot.
 - **Missing items** shortcut: what the cars are waiting for.
@@ -47,7 +55,7 @@ The driving system is largely inspired by [Pavement Drive Assist](https://mods.f
 
 License: MIT (see `LICENSE`). The graphics derived from those of Factorio remain the property of Wube Software.
 
-**This mod was developed with extensive use of AI** (Claude, by Anthropic).
+**This mod was developed with extensive use of AI**.
 
 ---
 
@@ -63,7 +71,13 @@ Factorio 2.1. **Pas encore testé avec Space Age** (autres planètes, plateforme
 
 1. Recherchez **Voitures autonomes** (après Automobile, Batterie et Moteur électrique).
 2. Posez un **chargeur** sur votre réseau électrique, un **garage** et un **coffre d'approvisionnement**, et mettez dans le coffre les objets à construire.
+
+![Le chargeur et son arc](images/charger.png)
+
 3. Fabriquez une voiture et posez-la : elle va d'abord se charger. Ou mettez-la dans le premier emplacement du garage pour la garer.
+
+![La voiture](images/car.png)
+
 4. Prenez le **sélecteur des voitures autonomes** (Alt+G, ou son bouton de raccourci) et faites-le glisser sur des fantômes et des entités marquées. Ce que couvre un réseau de robots est laissé aux robots.
 
 ## Ce que font les voitures
@@ -75,13 +89,19 @@ Factorio 2.1. **Pas encore testé avec Space Age** (autres planètes, plateforme
 
 ## Bâtiments et recherches
 
-![La voiture](images/car.png)
-![Le chargeur et son arc](images/charger.png)
-![Le garage](images/garage.png)
-![Coffres d'approvisionnement (jaune), de livraison (bleu) et de retour (violet)](images/chests.png)
+
+
+
+
 
 - **Garage** : gare les voitures ; ses emplacements rechargent la voiture sélectionnée en batteries et en munitions ; répare les voitures avec des kits de réparation une fois la recherche faite ; un bouton vous rend une voiture garée.
+
+![Le garage](images/garage.png)
+
 - **Coffre d'approvisionnement**, et après **Système logistique**, un **coffre de livraison** (demande à votre réseau logistique ce qui manque aux voitures) et un **coffre de retour** (les voitures y vident d'abord leur coffre, les robots l'emportent).
+
+![Coffres d'approvisionnement (jaune), de livraison (bleu) et de retour (violet)](images/chests.png)
+
 - **Réseau logique** : le petit combinateur à côté d'un garage ou d'un chargeur donne les voitures garées, les places libres, la santé et la charge, ou le tampon, la puissance et les voitures du chargeur.
 - **Recherches** : capacité, places de garage, voitures par chargeur, vitesse de charge, vitesse de construction. Après **Militaire**, les voitures tirent avec les munitions de leur emplacement de munitions.
 - Raccourci **Objets manquants** : ce que les voitures attendent.
@@ -94,8 +114,8 @@ Factorio 2.1. **Pas encore testé avec Space Age** (autres planètes, plateforme
 
 ## Remerciements
 
-Le système de conduite est largement inspiré de [Pavement Drive Assist](https://mods.factorio.com/mod/PavementDriveAssist) d'Arcitos, l'assistant de conduite qui garde un véhicule sur les routes pavées.
+Le système de conduite est inspiré de [Pavement Drive Assist](https://mods.factorio.com/mod/PavementDriveAssist) d'Arcitos, l'assistant de conduite qui garde un véhicule sur les routes pavées.
 
 Licence : MIT (voir `LICENSE`). Les images tirées de celles de Factorio restent la propriété de Wube Software.
 
-**Ce mod a été développé en utilisant largement l'IA** (Claude, d'Anthropic).
+**Ce mod a été développé en utilisant largement l'IA**.
