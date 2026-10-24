@@ -6,7 +6,7 @@ Cars that build where your robots do not reach. Select ghosts, deconstruction or
 
 Factorio 2.1. **Not tested with Space Age yet** (other planets, space platforms, quality), **nor in multiplayer**.
 
-![A car leaves the garage, takes walls, turrets and a pole from the supply chest, builds an outpost from ghosts and goes back to park](https://raw.githubusercontent.com/Helldelam/autonomous-car/main/autonomous-car-demo.gif)
+![A car leaves the garage, takes walls, turrets and a pole from the supply chest, builds an outpost from ghosts and goes back to park](autonomous-car-demo.gif)
 
 ## Getting started
 
@@ -24,10 +24,10 @@ Factorio 2.1. **Not tested with Space Age yet** (other planets, space platforms,
 
 ## Buildings and researches
 
-![The car](https://raw.githubusercontent.com/Helldelam/autonomous-car/main/images/car.png)
-![The charger and its arc](https://raw.githubusercontent.com/Helldelam/autonomous-car/main/images/charger.png)
-![The garage](https://raw.githubusercontent.com/Helldelam/autonomous-car/main/images/garage.png)
-![Supply (yellow), delivery (blue) and return (purple) chests](https://raw.githubusercontent.com/Helldelam/autonomous-car/main/images/chests.png)
+![The car](images/car.png)
+![The charger and its arc](images/charger.png)
+![The garage](images/garage.png)
+![Supply (yellow), delivery (blue) and return (purple) chests](images/chests.png)
 
 - **Garage**: parks the cars; its slots refill the selected car with batteries and ammo; repairs the cars with repair packs once researched; a button gives a parked car back to you.
 - **Supply chest**, plus after **Logistic system** a **delivery chest** (requests what the cars lack from your logistic network) and a **return chest** (cars empty their trunk there first, robots take it away).
@@ -57,7 +57,7 @@ Des voitures qui construisent là où vos robots n'arrivent pas. Sélectionnez d
 
 Factorio 2.1. **Pas encore testé avec Space Age** (autres planètes, plateformes spatiales, qualité), **ni en multijoueur**.
 
-![Une voiture sort du garage, prend murs, tourelles et poteau dans le coffre d'approvisionnement, construit un avant-poste à partir de fantômes et retourne se garer](https://raw.githubusercontent.com/Helldelam/autonomous-car/main/autonomous-car-demo.gif)
+![Une voiture sort du garage, prend murs, tourelles et poteau dans le coffre d'approvisionnement, construit un avant-poste à partir de fantômes et retourne se garer](autonomous-car-demo.gif)
 
 ## Pour commencer
 
@@ -75,10 +75,10 @@ Factorio 2.1. **Pas encore testé avec Space Age** (autres planètes, plateforme
 
 ## Bâtiments et recherches
 
-![La voiture](https://raw.githubusercontent.com/Helldelam/autonomous-car/main/images/car.png)
-![Le chargeur et son arc](https://raw.githubusercontent.com/Helldelam/autonomous-car/main/images/charger.png)
-![Le garage](https://raw.githubusercontent.com/Helldelam/autonomous-car/main/images/garage.png)
-![Coffres d'approvisionnement (jaune), de livraison (bleu) et de retour (violet)](https://raw.githubusercontent.com/Helldelam/autonomous-car/main/images/chests.png)
+![La voiture](images/car.png)
+![Le chargeur et son arc](images/charger.png)
+![Le garage](images/garage.png)
+![Coffres d'approvisionnement (jaune), de livraison (bleu) et de retour (violet)](images/chests.png)
 
 - **Garage** : gare les voitures ; ses emplacements rechargent la voiture sélectionnée en batteries et en munitions ; répare les voitures avec des kits de réparation une fois la recherche faite ; un bouton vous rend une voiture garée.
 - **Coffre d'approvisionnement**, et après **Système logistique**, un **coffre de livraison** (demande à votre réseau logistique ce qui manque aux voitures) et un **coffre de retour** (les voitures y vident d'abord leur coffre, les robots l'emportent).
