@@ -43,7 +43,7 @@ tests\show.ps1 construction -Car 132           # états d'une voiture (hors doss
 - `-Reference` : jeu déterministe, versions équivalentes = traces identiques ; la référence tourne avec son harnais (nommer les scénarios qu'elle a) ; pas de comparaison avec une version d'avant 2.1.
 - `-Set` : `test_jitter=<n>` (départ ± 0,3 tile, ± 0,01 tour), `test_door_shift=1` (portes décalées d'une tile au plus), `test_research=<0|1|2>` (défaut : cargo et garage au niveau 2, le reste au 1 ; à 0, seul `modules` laisse 2 ghosts). `ONE_TILE_DOORS` (harnais) : portes d'une tile.
 - Provisoire : `crowd` (seul dans `scalability` ; `test_crowd=<n>`, `test_single=1`, `test_same=1`) et profileurs d'`install_profiler`.
-- Base (2.1.23 ; checkup du 2026-10-24 : traces identiques à `cfb9985`) : `doors` 92/96 coffres et 73 contacts, `movement` 131 arrivées et 591 contacts, `energy` et `robustness` sans erreur (`range-*` : tous arrivés). Durées en parallèle : movement 18 min, energy 10, doors 9, robustness 4, construction 1.
+- Base (2.1.23 ; checkup et mise au propre du 2026-10-24 : traces identiques à `cfb9985`) : `doors` 92/96 coffres et 73 contacts, `movement` 131 arrivées et 591 contacts, `energy` et `robustness` sans erreur (`range-*` : tous arrivés). Durées en parallèle : movement 18 min, energy 13, doors 11, robustness 5, construction 1.
 
 Catégories (70 scénarios et `crowd`) :
 - `movement` (14) : salles, murs, forêts (`forests`, 24 parcours), labyrinthes, `wall-corner`.
