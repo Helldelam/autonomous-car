@@ -278,11 +278,11 @@ config.short_delay = 30 -- (0.5s)
 	-- movement.on_path_finished: a request the pathfinder could not take yet is sent again after this
 	-- travel.handle_critical_fuel: pause between two charger searches when none is reachable; period of the critical level
 	--   measure while the tank holds much more than it
-	-- control.lua: period at which the open windows (missing items, car and garage panels) are refreshed; an idle car
-	--   decides up to this later than idle_delay, by its unit number, so that cars idle since the same tick do not all decide on it
+	-- control.lua: period at which the open windows (missing items, car and garage panels) are refreshed; an idle car's
+	--   decision is spread over this after idle_delay, by unit number
 	-- circuit_control.refresh: period of the links of the garages and chargers
 	-- charger_visual.refresh: period at which the arcs of the chargers follow the cars that charge
-	-- config.garage_door: time the door takes to open or to close; it stays open twice as long
+	-- config.garage_door: move_ticks, hold and enter_delay derive from it
 	-- game_trace: a moving car is sampled every half of this
 config.medium_delay = 180 -- (3s)
 	-- ghost_control.attempt_one_ghost: cooldown of a ghost that failed to revive, times the number of failures
@@ -319,8 +319,8 @@ config.very_long_delay = 3600 -- (60s)
 -- down: every player gets the same behaviour.
 config.slow_check_interval = 6 -- (0.1s)
 	-- tooltips.refresh: period of the tooltip lines of the entity under each player's cursor
-	-- control.lua: filters of a car's trunk (_utils.set_trunk_limits) and its hidden turret (armed.update), filters and car
-	--   slot of a garage (garage_control.update_inventories): no event tells that a player changed them
+	-- _utils.set_trunk_limits, armed.update (ammo slot, and the hidden turret follows the car), garage_control.update_inventories:
+	--   filters and car slot put back (no event tells that a player changed them)
 
 -- Regions of the closest-entity search (_utils.find_closest): the chargers, garages and supply chests are
 -- listed per square of `size` tiles, and the search looks at the squares around the position first; the

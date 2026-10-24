@@ -86,30 +86,25 @@ foreach ($match in [regex]::Matches($harnessText, '(?m)^scenarios\["([^"]+)"\] =
 }
 $categories = @($info.Values | ForEach-Object { $_.Category } | Select-Object -Unique)
 
-# Which categories a changed file can affect. Files not listed here affect none.
+# Which categories a changed file can affect: every category for the scripts (every one drives cars,
+# visits chests, charges and looks for a garage: see the coverage-<category>.txt files), except the
+# narrow cases below; the other files (locale, graphics, documentation) affect none.
 function Get-ChangedCategories {
 	$files = @(git -C $modFolder diff --name-only HEAD) + @(git -C $modFolder ls-files --others --exclude-standard)
-	$affected = @{
-		"scripts/movement.lua" = @("movement", "robustness", "energy", "doors")
-		"scripts/travel.lua" = $categories
-		"scripts/construction.lua" = $categories # every category visits supply chests (collect, deposit, restock)
-		"scripts/chest_door.lua" = $categories
-		"scripts/charger.lua" = @("energy", "robustness")
-		"scripts/garage.lua" = @("energy", "robustness", "construction", "doors") # doors: garage-room
-		"scripts/garage_door.lua" = @("energy", "robustness", "construction", "doors")
-		"scripts/armed.lua" = @("robustness")
-		"scripts/circuit.lua" = @("energy")
-		"scripts/logistic.lua" = @("construction")
-		"control.lua" = $categories
-		"scripts/_utils.lua" = $categories
-		"config.lua" = $categories
-		"tests/harness.lua" = $categories
+	$narrow = @{
+		"scripts/armed.lua" = @("robustness") # only acts after Military
+		"scripts/circuit.lua" = @("energy") # signals, read by no car
+		"scripts/logistic.lua" = @("construction") # delivery chests
+		"scripts/chest_door.lua" = @("construction") # drawing only: a change can cause a script error, not another
+		"scripts/garage_door.lua" = @("construction") #   trace, and construction opens chests and garages
+		"scripts/charger_visual.lua" = @("energy")
 		"data.lua" = @("energy")
 	}
 	$picked = @()
 	foreach ($file in $files) {
-		if ($affected.ContainsKey($file)) { $picked += $affected[$file] }
-		elseif ($file -like "prototypes/*" -or $file -like "scripts/*") { $picked += "energy" } # loading them is all there is to check (prototypes, interface, debug)
+		if ($narrow.ContainsKey($file)) { $picked += $narrow[$file] }
+		elseif ($file -like "prototypes/*" -or $file -like "scripts/gui/*" -or $file -like "scripts/debug/*") { $picked += "energy" } # loading them is all there is to check (no player in the tests)
+		elseif ($file -like "scripts/*.lua" -or $file -in @("control.lua", "config.lua", "tests/harness.lua")) { $picked += $categories }
 	}
 	return @($categories | Where-Object { $picked -contains $_ })
 }
