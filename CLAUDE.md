@@ -43,6 +43,7 @@ tests\show.ps1 construction -Car 132           # états d'une voiture (hors doss
 - Sélections du harnais (`select_ghosts`, `select_all`) en file, une à la fois après la fin de `storage.selection_job` : sinon refusées ou fusionnées, et des scénarios échouent sans que le mod y soit pour rien.
 - `-Reference` : jeu déterministe, versions équivalentes = traces identiques ; la référence tourne avec son harnais (nommer les scénarios qu'elle a) ; pas de comparaison avec une version d'avant 2.1.
 - `-Set` : `test_jitter=<n>` (départ ± 0,3 tile, ± 0,01 tour), `test_door_shift=1` (portes décalées d'une tile au plus), `test_research=<0|1|2>` (défaut : cargo et garage au niveau 2, le reste au 1 ; à 0, seul `modules` laisse 2 ghosts). `ONE_TILE_DOORS` (harnais) : portes d'une tile.
+- `gif` (seul dans `capture`, hors campagnes) : `tests\run.ps1 gif -Set "test_capture=4"` ouvre une partie avec fenêtre (demander avant) et enregistre une image tous les 4 ticks dans `<Output>\write\script-output\gif`, puis `run.ps1` ferme le jeu. `--benchmark-graphics` s'arrête vers le tick 750 quelle que soit sa durée : partie ordinaire (`--load-game`), `SteamAppId` fixé (sinon Steam relance le jeu sans ses arguments). `autonomous-car-demo.gif` (racine, hors zip) : images 40 à 1000 assemblées avec PIL (800 × 450, palette de 64 couleurs échantillonnée aussi sur la voiture, sinon son bleu disparaît ; équilibre des blancs corrigé à 40 % (rouge × 0,9, vert × 0,98, bleu × 1,27 : la palette n'y est pour rien, les images brutes sont aussi chaudes) ; 12 images/s, attente du coffre accélérée). La scène est sur Nauvis à 120 tiles du point d'apparition, vidée autour (terre, herbe, étang) ; les teintes chaudes sont celles des tuiles du jeu (`grass-1` est la seule herbe verte), à refaire si le mod change visiblement.
 - Provisoire : `crowd` (seul dans `scalability` ; `test_crowd=<n>`, `test_single=1`, `test_same=1`) et profileurs d'`install_profiler`.
 - Base (2.1.23 ; checkup et mise au propre du 2026-10-24 : traces identiques à `cfb9985`) : `doors` 92/96 coffres et 73 contacts, `movement` 131 arrivées et 591 contacts, `energy` et `robustness` sans erreur (`range-*` : tous arrivés). Durées en parallèle : movement 18 min, energy 13, doors 11, robustness 5, construction 1.
 
@@ -278,8 +279,6 @@ git archive --prefix=autonomous-car/ -o "$env:TEMP\autonomous-car_0.1.0.zip" HEA
 Aucun.
 
 ### Corrigés, à valider
-
-- Retouches avant publication (2026-10-24) : messages au pluriel du jeu et harmonisés (plus de majuscules « ABANDONNÉ ») ; une cible abandonnée ne donne qu'une ligne de chat par lot (l'alerte sur la carte reste par cible) ; tracé du sélecteur avec Maj en bleu comme le tracé normal (il fait la même chose) ; garage détruit par un autre mod ou démonté par une voiture : ses voitures garées tombent au sol au lieu de disparaître ; `/car-trace` écrit chez qui la lance, et marche depuis la console d'un serveur.
 
 Validation reportée : qualité des objets (ghosts, mises à niveau, collecte, dépôt, objets manquants, garage), écrite d'après la doc, non testable sans l'extension Qualité ; la qualité normale ne régresse pas.
 

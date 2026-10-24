@@ -486,6 +486,86 @@ scenarios["garage-exit"] = {
 	end,
 }
 
+-- Frames for the presentation GIF (not a regression check, it is in no campaign):
+-- a car leaves the garage, visits the supply chest, builds a walled outpost from
+-- ghosts on dirt and returns to park. Run with graphics:
+-- tests\run.ps1 gif -Set "test_capture=<ticks between two frames>"
+-- (a game window opens). The frames go to script-output/gif/ of the output folder.
+local OX = 120 -- the scene of "gif" is this far from the spawn, out of the character's sight
+scenarios["gif"] = {
+	category = "capture",
+	ticks = 2400,
+	setup = function()
+		-- On Nauvis, 120 tiles from the spawn, emptied around the scene
+		local s = game.surfaces.nauvis
+		T.surface = s
+		T.surfaces[s.index] = true
+		s.request_to_generate_chunks({OX, 0}, 4)
+		s.force_generate_chunk_requests()
+		for _, entity in pairs(s.find_entities_filtered{area = {{OX - 130, -130}, {OX + 130, 130}}}) do
+			if entity.type ~= "character" then
+				entity.destroy()
+			end
+		end
+		s.destroy_decoratives{area = {{OX - 80, -60}, {OX + 80, 60}}}
+		s.freeze_daytime = true
+		s.daytime = 0
+		-- Dirt, grass around the garage (top left), a pond with a sandy shore (bottom left)
+		local tiles = {}
+		for x = -60, 59 do
+			for y = -40, 39 do
+				local tile = "dirt-1"
+				local grass = math.sqrt((x + 14) ^ 2 + (y + 9) ^ 2) - 12 - 1.5 * math.sin(x * 0.7) - 1.2 * math.cos(y * 0.9)
+				local pond = math.sqrt((x + 13.5) ^ 2 + (y - 7.5) ^ 2) - 0.8 * math.sin(y * 1.1) - 0.6 * math.cos(x * 0.8)
+				if grass < 0 then
+					tile = "grass-1" -- the greenest of the four
+				end
+				if pond < 6.2 then
+					tile = "sand-1"
+				end
+				if pond < 4.6 then
+					tile = "water"
+				end
+				if pond < 2.4 then
+					tile = "deepwater"
+				end
+				tiles[#tiles + 1] = {name = tile, position = {OX + x, y}}
+			end
+		end
+		s.set_tiles(tiles, false)
+		s.create_entity{name = "big-rock", position = {OX + 11, 6.5}}
+		s.create_entity{name = "big-sand-rock", position = {OX + 7, 7}}
+		make(s, names.charger, OX - 6, 6)
+		T.garage = make(s, names.garage, OX - 9, -3)
+		table.insert(storage.garage_data[T.garage.unit_number].cars, {quality = "normal", health = 1, fuel = 1})
+		fill(make(s, names.chest, OX - 2.5, 3.5), {["stone-wall"] = 40, ["gun-turret"] = 4, ["small-electric-pole"] = 4})
+		for x = 4, 12 do
+			for y = -5, 3 do
+				if (x == 4 or x == 12 or y == -5 or y == 3) and not (x == 4 and y >= -1 and y <= 1) then
+					make_ghost(s, "stone-wall", OX + x + 0.5, y + 0.5)
+				end
+			end
+		end
+		make_ghost(s, "gun-turret", OX + 6, -3)
+		make_ghost(s, "gun-turret", OX + 10, 1)
+		make_ghost(s, "small-electric-pole", OX + 8.5, -0.5)
+	end,
+	events = function(t)
+		if t == 60 then
+			select_ghosts(OX + 2, -8, OX + 15, 6)
+		end
+		-- Fixed camera on the whole scene; script-output/gif/frame-<tick>.jpg
+		if config.test_capture and t == (TICKS or scenarios["gif"].ticks) then
+			-- run.ps1 waits for this file, then closes the game
+			helpers.write_file("gif-done.txt", "done", false)
+		end
+		if config.test_capture and t % config.test_capture == 0 then
+			game.take_screenshot{surface = T.surface, position = {OX + 1, 0.5}, resolution = {1280, 720}, zoom = 1.5,
+				path = string.format("gif/frame-%05d.jpg", t), quality = 95, force_render = true, hide_clouds = true, hide_fog = true}
+		end
+	end,
+}
+
 -- A car on its way to a charger is given a batch whose only ghost cannot be
 -- built. It must not be available for a batch on its way (it used to be, and
 -- its queued "charging" task was then run on arrival from its step back, which
