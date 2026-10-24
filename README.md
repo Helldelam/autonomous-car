@@ -89,11 +89,6 @@ Factorio 2.1. **Pas encore testé avec Space Age** (autres planètes, plateforme
 
 ## Bâtiments et recherches
 
-
-
-
-
-
 - **Garage** : gare les voitures ; ses emplacements rechargent la voiture sélectionnée en batteries et en munitions ; répare les voitures avec des kits de réparation une fois la recherche faite ; un bouton vous rend une voiture garée.
 
 ![Le garage](images/garage.png)
