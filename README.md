@@ -6,7 +6,7 @@ Cars that build where your robots do not reach. Select ghosts, deconstruction or
 
 Factorio 2.1. **Not tested with Space Age yet** (other planets, space platforms, quality), **nor in multiplayer**.
 
-![A car leaves the garage, takes walls, turrets and a pole from the supply chest, builds an outpost from ghosts and goes back to park](autonomous-car-demo.gif)
+![A car leaves the garage, takes walls, turrets and a pole from the supply chest, builds an outpost from ghosts and goes back to park](https://raw.githubusercontent.com/Helldelam/autonomous-car/main/autonomous-car-demo.gif)
 
 ## Getting started
 
@@ -14,11 +14,11 @@ Factorio 2.1. **Not tested with Space Age yet** (other planets, space platforms,
 
 2. Place a **charger** on your electric network, a **garage** and a **supply chest**, and put the items to build in the chest.
 
-![The charger and its arc](images/charger.png)
+![The charger and its arc](https://raw.githubusercontent.com/Helldelam/autonomous-car/main/images/charger.png)
 
 3. Build a car and place it: it goes to charge first. Or put it in the first slot of the garage to park it.
 
-![The car](images/car.png)
+![The car](https://raw.githubusercontent.com/Helldelam/autonomous-car/main/images/car.png)
 
 4. Take the **autonomous car selector** (Alt+G, or its shortcut button) and drag it over ghosts and marked entities. What a robot network covers is left to the robots.
 
@@ -33,11 +33,11 @@ Factorio 2.1. **Not tested with Space Age yet** (other planets, space platforms,
 
 - **Garage**: parks the cars; its slots refill the selected car with batteries and ammo; repairs the cars with repair packs once researched; a button gives a parked car back to you.
 
-![The garage](images/garage.png)
+![The garage](https://raw.githubusercontent.com/Helldelam/autonomous-car/main/images/garage.png)
 
 - **Supply chest**, plus after **Logistic system** a **delivery chest** (requests what the cars lack from your logistic network) and a **return chest** (cars empty their trunk there first, robots take it away).
 
-![Supply (yellow), delivery (blue) and return (purple) chests](images/chests.png)
+![Supply (yellow), delivery (blue) and return (purple) chests](https://raw.githubusercontent.com/Helldelam/autonomous-car/main/images/chests.png)
 
 - **Circuit network**: the small combinator by a garage or charger outputs parked cars, free places, health and charge, or the charger's buffer, power and users.
 - **Researches**: cargo, garage places, cars per charger, charge speed, build speed. After **Military**, cars shoot with the ammo of their ammo slot.
@@ -65,18 +65,18 @@ Des voitures qui construisent là où vos robots n'arrivent pas. Sélectionnez d
 
 Factorio 2.1. **Pas encore testé avec Space Age** (autres planètes, plateformes spatiales, qualité), **ni en multijoueur**.
 
-![Une voiture sort du garage, prend murs, tourelles et poteau dans le coffre d'approvisionnement, construit un avant-poste à partir de fantômes et retourne se garer](autonomous-car-demo.gif)
+![Une voiture sort du garage, prend murs, tourelles et poteau dans le coffre d'approvisionnement, construit un avant-poste à partir de fantômes et retourne se garer](https://raw.githubusercontent.com/Helldelam/autonomous-car/main/autonomous-car-demo.gif)
 
 ## Pour commencer
 
 1. Recherchez **Voitures autonomes** (après Automobile, Batterie et Moteur électrique).
 2. Posez un **chargeur** sur votre réseau électrique, un **garage** et un **coffre d'approvisionnement**, et mettez dans le coffre les objets à construire.
 
-![Le chargeur et son arc](images/charger.png)
+![Le chargeur et son arc](https://raw.githubusercontent.com/Helldelam/autonomous-car/main/images/charger.png)
 
 3. Fabriquez une voiture et posez-la : elle va d'abord se charger. Ou mettez-la dans le premier emplacement du garage pour la garer.
 
-![La voiture](images/car.png)
+![La voiture](https://raw.githubusercontent.com/Helldelam/autonomous-car/main/images/car.png)
 
 4. Prenez le **sélecteur des voitures autonomes** (Alt+G, ou son bouton de raccourci) et faites-le glisser sur des fantômes et des entités marquées. Ce que couvre un réseau de robots est laissé aux robots.
 
@@ -91,11 +91,11 @@ Factorio 2.1. **Pas encore testé avec Space Age** (autres planètes, plateforme
 
 - **Garage** : gare les voitures ; ses emplacements rechargent la voiture sélectionnée en batteries et en munitions ; répare les voitures avec des kits de réparation une fois la recherche faite ; un bouton vous rend une voiture garée.
 
-![Le garage](images/garage.png)
+![Le garage](https://raw.githubusercontent.com/Helldelam/autonomous-car/main/images/garage.png)
 
 - **Coffre d'approvisionnement**, et après **Système logistique**, un **coffre de livraison** (demande à votre réseau logistique ce qui manque aux voitures) et un **coffre de retour** (les voitures y vident d'abord leur coffre, les robots l'emportent).
 
-![Coffres d'approvisionnement (jaune), de livraison (bleu) et de retour (violet)](images/chests.png)
+![Coffres d'approvisionnement (jaune), de livraison (bleu) et de retour (violet)](https://raw.githubusercontent.com/Helldelam/autonomous-car/main/images/chests.png)
 
 - **Réseau logique** : le petit combinateur à côté d'un garage ou d'un chargeur donne les voitures garées, les places libres, la santé et la charge, ou le tampon, la puissance et les voitures du chargeur.
 - **Recherches** : capacité, places de garage, voitures par chargeur, vitesse de charge, vitesse de construction. Après **Militaire**, les voitures tirent avec les munitions de leur emplacement de munitions.
